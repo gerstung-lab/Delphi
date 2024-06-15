@@ -1,0 +1,9 @@
+torch==2.3.0
+numpy
+matplotlib
+seaborn
+shap
+pandas
+umap-learn
+tqdm
+statsmodels
