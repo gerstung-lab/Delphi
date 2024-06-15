@@ -1,10 +1,7 @@
-<center width="30%" style="padding:10px">
-    <p>
-        <img src=".github/delphi-logo-white-bg.svg" width="300" style="weight:150px"/>
-    </p>
-</center>
+<p align="center">
+  <img src=".github/delphi-logo-white-bg.svg" width="400"/>
+</p>
 
-# Delphi
 
 ## Learning the natural history of human disease with generative transformers
 
@@ -77,7 +74,7 @@ The `notebooks` folder contains the following notebooks:
 ```bibtex
 @article{Shmatko2024.06.07.24308553,
 	title = {Learning the natural history of human disease with generative transformers},
-    author = {Shmatko, Artem and Jung, Alexander Wolfgang and Gaurav, Kumar and Brunak, S{\o}ren and Mortensen, Laust and Birney, Ewan and Fitzgerald, Tom and Gerstung, Moritz},
+    	author = {Shmatko, Artem and Jung, Alexander Wolfgang and Gaurav, Kumar and Brunak, S{\o}ren and Mortensen, Laust and Birney, Ewan and Fitzgerald, Tom and Gerstung, Moritz},
 	doi = {10.1101/2024.06.07.24308553},
 	journal = {medRxiv},
 	publisher = {Cold Spring Harbor Laboratory Press},
