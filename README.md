@@ -14,7 +14,7 @@ Artem Shmatko*, Alexander Wolfgang Jung*, Kumar Gaurav*, Søren Brunak, Laust Mo
 
 ## Repository Overview
 
-This repository contains code of the modified GPT-2 model used in the paper "Learning the natural history of human disease with generative transformers", along with the training code and analysis notebooks.
+This repository contains the code for Delphi, the modified GPT-2 model used in the paper "Learning the natural history of human disease with generative transformers", along with the training code and analysis notebooks.
 
 The implementation is based on Andrej Karpathy's [nanoGPT](https://github.com/karpathy/nanoGPT).
 
