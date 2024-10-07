@@ -15,7 +15,7 @@ wandb_run_name = 'run' + str(time.time())
 
 dataset = 'ukb_simulated_data'
 batch_size = 128
-block_size = 48 
+block_size = 48
 data_fraction = 1.0
 
 n_layer = 12
@@ -34,3 +34,4 @@ warmup_iters = 500 # not super necessary potentially
 ignore_tokens = [0, 2 ,3, 4, 5, 6, 7, 8, 9, 10, 11, 12] # ignore padding and lifestyle tokens
 t_min = 0.1
 dropout = 0.0
+no_event_token_rate = 5

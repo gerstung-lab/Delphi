@@ -34,3 +34,4 @@ warmup_iters = 1000 # not super necessary potentially
 ignore_tokens = [0, 2 ,3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 t_min = 0.1
 dropout = 0.0
+no_event_token_rate = 5
