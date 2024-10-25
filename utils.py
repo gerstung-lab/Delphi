@@ -28,7 +28,7 @@ def pad_to_length(a, length):
 
 def get_batch(ix, data, p2i, select='center', index='patient', padding='regular',
               block_size=48, device='cpu', lifestyle_augmentations=False, 
-              no_event_token_rate=5):
+              no_event_token_rate=5, cut_batch=False):
     """
     Get a batch of data from the dataset. This function packs sequences in a batch and also
     inserts "no event" tokens randomly with the average rate of one every five years.
@@ -44,6 +44,7 @@ def get_batch(ix, data, p2i, select='center', index='patient', padding='regular'
         device: 'cpu' or 'cuda'
         lifestyle_augmentations: whether to perform aurmentations of lifestyle token times
         no_event_token_rate: average rate of "no event" tokens in years
+        cut_batch: whether to cut the batch to the smallest size possible
 
     Returns:
         x: input tokens
@@ -79,7 +80,7 @@ def get_batch(ix, data, p2i, select='center', index='patient', padding='regular'
         return torch.from_numpy(np.stack([pad_to_length(data[i:i + block_size + 1], block_size+1) for i in start_indices]))
 
     mask = pad_and_stack_data(traj_start_idx, data[:, 0].astype(np.int64), block_size)
-    mask = mask == torch.tensor(data[p2i[ix.numpy()][:, 0], 0][:, None]).to(mask.dtype)
+    mask = mask == torch.tensor(data[p2i[ix.numpy()][:, 0], 0][:, None].astype(np.int64)).to(mask.dtype)
 
     tokens = pad_and_stack_data(traj_start_idx, data[:, 2].astype(np.int64), block_size)
     ages = pad_and_stack_data(traj_start_idx, data[:, 1].astype(np.float32), block_size)
@@ -124,12 +125,23 @@ def get_batch(ix, data, p2i, select='center', index='patient', padding='regular'
     # a technical detail: the token 0 is reserved for padding, so we shift all tokens by one
     tokens = tokens + 1
 
+    # cut the padded tokens if possible
+    if cut_batch:
+        cut_margin = torch.min(torch.sum(tokens == 0, 1))
+        tokens = tokens[:, cut_margin:]
+        ages = ages[:, cut_margin:]
+
+    # cut to maintain the block size
+    if tokens.shape[1] > block_size + 1:
+        cut_margin = tokens.shape[1] - block_size - 1
+        tokens = tokens[:, cut_margin:]
+        ages = ages[:, cut_margin:]
+
     # shift by one to generate targets
-    i = pad.shape[1]
-    x = tokens[:, i:-1]
-    a = ages[:, i:-1]
-    y = tokens[:, i + 1:]
-    b = ages[:, i + 1:]
+    x = tokens[:, :-1]
+    a = ages[:, :-1]
+    y = tokens[:, 1:]
+    b = ages[:, 1:]
 
     # if the first token is a "no event" token, mask it and the corresponding target
     x = x.masked_fill((x == 0) * (y == 1), 0)

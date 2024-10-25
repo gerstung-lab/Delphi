@@ -52,7 +52,7 @@ class CausalSelfAttention(nn.Module):
         # flash attention make GPU go brrrrr but support is only in PyTorch nightly and still a bit scary
         self.flash = False #hasattr(torch.nn.functional, 'scaled_dot_product_attention') and self.dropout == 0.0
         if not self.flash:
-            print("WARNING: using slow attention. Flash Attention atm needs PyTorch nightly and dropout=0.0")
+            # print("WARNING: using slow attention. Flash Attention atm needs PyTorch nightly and dropout=0.0")
             # causal mask to ensure that attention is only applied to the left in the input sequence
             self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
                                         .view(1, 1, config.block_size, config.block_size))
@@ -206,7 +206,7 @@ class Delphi(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, idx, age, targets=None, targets_age=None):
+    def forward(self, idx, age, targets=None, targets_age=None, validation_loss_mode=False):
         device = idx.device
         b, t = idx.size()
         #assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
@@ -237,14 +237,18 @@ class Delphi(nn.Module):
         att = torch.stack(att)
 
         if targets is not None:
-            # if we are given some desired targets also calculate the loss
-            targets = targets.reshape(-1)
-            pass_tokens = targets != -1 
-            for k in self.config.ignore_tokens: # and gender
-                pass_tokens *= targets != k
-
             # next token cross entropy loss, padding masked
             logits = self.lm_head(x)
+
+            # if we are given some desired targets also calculate the loss
+            ignored_tokens = self.config.ignore_tokens.copy()
+            if validation_loss_mode:
+                ignored_tokens += [1]
+                logits[...,ignored_tokens] = -torch.inf
+            targets = targets.reshape(-1)
+            pass_tokens = targets != -1 
+            for k in ignored_tokens: # and gender
+                pass_tokens *= targets != k
             
             #age_min = age.gather(1,(((idx >=4) * (idx <=12)) + 0).argmax(1)[:,None])
             #logits[...,-1][age <= age_min] = -100. #-float('Inf') ## Death can only occur after age_min
@@ -256,7 +260,7 @@ class Delphi(nn.Module):
             lse = - torch.log(torch.exp(-lse) + self.config.t_min)
             dt = torch.clamp(targets_age - age, min=1.0)
             if self.config.mask_ties:
-                dt = torch.gather(dt, -1, (attn_mask * torch.arange(0, idx.size(1), device=device, dtype=torch.float16)
+                dt = torch.gather(dt, -1, (attn_mask * torch.arange(0, idx.size(1), device=device, dtype=torch.float32)
                                            .view(1, 1, 1, -1)).max(-1).indices.squeeze((1, 2)))  # Use time from last untied token
             ldt = - torch.log(dt + self.config.t_min).view(-1)
             
@@ -264,7 +268,8 @@ class Delphi(nn.Module):
             loss_dt = torch.mean(loss_dt[pass_tokens]) 
             
             # Both losses combined
-            loss = loss_ce + loss_dt
+            # loss = loss_ce + loss_dt
+            loss = {'loss_ce': loss_ce, 'loss_dt': loss_dt}
             
             #loss += 5.0 * F.mse_loss(lse.view(-1)*(ldt != 0), ldt) ## Adds MSE for log time difference to next observed event
         else:

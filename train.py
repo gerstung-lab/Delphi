@@ -16,8 +16,9 @@ eval_interval = 2000
 log_interval = 1
 eval_iters = 200
 eval_only = False  # if True, script exits right after the first eval
-always_save_checkpoint = True  # if True, always save a checkpoint after each eval
+always_save_checkpoint = False  # if True, always save a checkpoint after each eval
 init_from = 'scratch'  # 'scratch' or 'resume' or 'gpt2*'
+seed = 42
 
 # wandb logging
 wandb_log = False  # disabled by default
@@ -72,7 +73,7 @@ config = {k: globals()[k] for k in config_keys}  # will be useful for logging
 # -----------------------------------------------------------------------------
 
 os.makedirs(out_dir, exist_ok=True)
-torch.manual_seed(1339)
+torch.manual_seed(seed)
 torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
 torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
 device_type = 'cuda' if 'cuda' in device else 'cpu'  # for later use in torch.autocast
@@ -90,6 +91,10 @@ val_data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint32, mode='r
 
 train_p2i = get_p2i(train_data)
 val_p2i = get_p2i(val_data)
+
+# downsample the data to requested fraction
+if data_fraction < 1.0:
+    train_p2i = train_p2i[:int(data_fraction * len(train_p2i))]
 
 # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
 iter_num = 0
@@ -161,15 +166,19 @@ def estimate_loss():
     out = {}
     model.eval()
     for split in ['train', 'val']:
-        losses = torch.zeros(eval_iters)
+        losses = torch.zeros(eval_iters, 2)
+        data = train_data if split == 'train' else val_data
+        p2i = train_p2i if split == 'train' else val_p2i
         for k in range(eval_iters):
-            ix = torch.randint(len(val_p2i), (batch_size,))
-            X, A, Y, B = get_batch(ix, val_data, val_p2i, block_size=block_size,
-                                   device=device, select='center')
+            ix = torch.randint(len(p2i), (batch_size,))
+            X, A, Y, B = get_batch(ix, data, p2i, block_size=block_size,
+                                   device=device, select='left',
+                                   no_event_token_rate=no_event_token_rate, 
+                                   cut_batch=True)
             with ctx:
-                logits, loss, _ = model(X, A, Y, B)
-            losses[k] = loss.item()
-        out[split] = losses.mean()
+                logits, loss, _ = model(X, A, Y, B, validation_loss_mode=True)
+            losses[k] = torch.stack([loss['loss_ce'], loss['loss_dt']])
+        out[split] = losses.mean(0)
     model.train()
     return out
 
@@ -197,7 +206,7 @@ if wandb_log:
 # training loop
 ix = torch.randint(len(train_p2i), (batch_size,))
 X, A, Y, B = get_batch(ix, train_data, train_p2i, block_size=block_size, device=device,
-                       padding='random', lifestyle_augmentations=True, select='right',
+                       padding='random', lifestyle_augmentations=True, select='left',
                        no_event_token_rate=no_event_token_rate)
 t0 = time.time()
 local_iter_num = 0  # number of iterations in the lifetime of this process
@@ -214,16 +223,20 @@ while True:
     if iter_num % eval_interval == 0 and iter_num > 0:
         losses = estimate_loss()
         if val_loss is None:
-            val_loss = losses['val']
-        val_loss = 0.5 * losses['val'] + 0.5 * val_loss  # ie exponential decay
-        print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f} ({val_loss:.4f})")
+            val_loss_unpooled = losses['val']
+        val_loss_unpooled = 0.1 * losses['val'] + 0.9 * val_loss_unpooled  # ie exponential decay
+        val_loss = val_loss_unpooled.sum().item()
+        print(f"step {iter_num}: train loss {losses['train'].sum().item():.4f}, val loss {losses['val'].sum().item():.4f} ({val_loss:.4f})")
         if wandb_log:
             wandb.log({
                 "iter": iter_num,
-                "train/agg_loss": losses['train'],
-                "val/loss": losses['val'],
+                "train/agg_loss": losses['train'].sum().item(),
+                "val/loss":val_loss,
+                "val/loss_ce": val_loss_unpooled[0].item(),
+                "val/loss_dt": val_loss_unpooled[1].item()
             })
-        if val_loss < best_val_loss or always_save_checkpoint:
+
+        if always_save_checkpoint or val_loss < best_val_loss:
             best_val_loss = val_loss
             if iter_num > 0:
                 checkpoint = {
@@ -231,11 +244,24 @@ while True:
                     'optimizer': optimizer.state_dict(),
                     'model_args': model_args,
                     'iter_num': iter_num,
-                    'best_val_loss': best_val_loss,
+                    'best_val_loss': val_loss,
                     'config': config,
                 }
                 print(f"saving checkpoint to {out_dir}")
                 torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+
+        if iter_num % 10_000 == 0:
+            checkpoint = {
+                'model': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'model_args': model_args,
+                'iter_num': iter_num,
+                'best_val_loss': best_val_loss,
+                'config': config,
+            }
+            print(f"saving checkpoint to {out_dir}")
+            torch.save(checkpoint, os.path.join(out_dir, f'ckpt_{iter_num}.pt'))
+
     if iter_num == 0 and eval_only:
         break
 
@@ -248,10 +274,11 @@ while True:
         ix = torch.randint(len(train_p2i), (batch_size,))
         # print(ix)
         X, A, Y, B = get_batch(ix, train_data, train_p2i, block_size=block_size, device=device,
-                               padding='random', lifestyle_augmentations=True, select='right',
-                               no_event_token_rate=no_event_token_rate)
+                               padding='random', lifestyle_augmentations=True, select='left',
+                               no_event_token_rate=no_event_token_rate, cut_batch=True)
 
         # backward pass, with gradient scaling if training in fp16
+        loss = loss['loss_ce'] + loss['loss_dt']
         scaler.scale(loss).backward()
     # clip the gradient
     if grad_clip != 0.0:
