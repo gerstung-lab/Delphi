@@ -20,12 +20,6 @@ def get_p2i(data):
     return np.array(p2i)
 
 
-def pad_to_length(a, length):
-    if len(a) >= length:
-        return a
-    return np.pad(a, (0, length - len(a)), 'constant', constant_values=-1)
-
-
 def get_batch(ix, data, p2i, select='center', index='patient', padding='regular',
               block_size=48, device='cpu', lifestyle_augmentations=False, 
               no_event_token_rate=5, cut_batch=False):
@@ -73,17 +67,17 @@ def get_batch(ix, data, p2i, select='center', index='patient', padding='regular'
             raise NotImplementedError
     else:
         raise NotImplementedError
-    
+
+    traj_start_idx = torch.clamp(traj_start_idx, 0, data.shape[0] - block_size - 1)
     traj_start_idx = traj_start_idx.numpy()
 
-    def pad_and_stack_data(start_indices, data, block_size):
-        return torch.from_numpy(np.stack([pad_to_length(data[i:i + block_size + 1], block_size+1) for i in start_indices]))
+    batch_idx = np.arange(block_size + 1)[None, :] + traj_start_idx[:, None]
 
-    mask = pad_and_stack_data(traj_start_idx, data[:, 0].astype(np.int64), block_size)
+    mask = torch.from_numpy(data[:, 0][batch_idx].astype(np.int64))
     mask = mask == torch.tensor(data[p2i[ix.numpy()][:, 0], 0][:, None].astype(np.int64)).to(mask.dtype)
 
-    tokens = pad_and_stack_data(traj_start_idx, data[:, 2].astype(np.int64), block_size)
-    ages = pad_and_stack_data(traj_start_idx, data[:, 1].astype(np.float32), block_size)
+    tokens = torch.from_numpy(data[:, 2][batch_idx].astype(np.int64))
+    ages = torch.from_numpy(data[:, 1][batch_idx].astype(np.float32))
 
     # augment lifestyle tokens to avoid immortality bias
     if lifestyle_augmentations:
