@@ -4,8 +4,6 @@
 # Including the Delphi main git branch and all dependencies
 # Login is restricted to a non-root user:delphi_dev
 # GPU / Cuda support is available
-# Author: Tomas William Fitzgerald
-# Date: 04/11/2024
 #####################################################################################################################
 # Example Docker commands:
 # Build: docker build -t delphi-env . 
