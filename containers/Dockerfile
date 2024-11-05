@@ -4,6 +4,8 @@
 # Including the Delphi main git branch and all dependencies
 # Login is restricted to a non-root user:delphi_dev
 # GPU / Cuda support is available
+# Author: Tomas William Fitzgerald
+# Date: 04/11/2024
 #####################################################################################################################
 # Example Docker commands:
 # Build: docker build -t delphi-env . 
@@ -16,7 +18,9 @@
 #####################################################################################################################
 
 # Use NVIDIA CUDA base image
-FROM nvidia/cuda:12.3.1-base-ubuntu22.04
+FROM nvidia/cuda:12.5.1-runtime-ubuntu22.04
+#FROM nvidia/cuda:12.3.1-base-ubuntu22.04
+#FROM nvidia/cuda:11.2.2-runtime-ubi8
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive

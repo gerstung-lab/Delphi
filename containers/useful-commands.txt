@@ -1,0 +1,47 @@
+# standard build
+docker build -t delphi-env .
+
+# for amd build
+docker build -t delphi-env-amd --no-cache --platform=linux/amd64 .
+
+# multi platform build (note: need access to containerd)
+docker buildx build --no-cache --platform linux/amd64,linux/arm64 -t delphi-env .
+
+# no GPU support
+docker run -it delphi-env bash
+
+# with GPU support
+docker run --gpus all -it delphi-env bash
+
+# Check who you are - you will be no-root user "delphi_dev"
+whoami
+
+# Run the small training test
+cd /Delphi
+python train.py config/train_delphi_demo.py --out_dir=/workspace/Delphi-demo-2M --max_iters=100 --eval_interval=25
+
+# with GPU / Cuda
+cd /Delphi
+python train.py config/train_delphi_demo.py --device=cuda --out_dir=/workspace/Delphi-demo-2M --max_iters=100 --eval_interval=25
+
+python train.py config/train_delphi_demo.py --device=cuda --out_dir=/nfs/research/birney/users/tomas/Delphi-demo-2M --max_iters=100 --eval_interval=25
+
+python train.py config/train_delphi_demo.py --device=cuda --out_dir=Delphi-demo-2M --max_iters=100 --eval_interval=25
+
+# with gpu support on codon
+singularity shell --nv delphi_amd_12.5.sif
+cd /Delphi
+python train.py config/train_delphi_demo.py --device=cuda --out_dir=/nfs/research/birney/users/tomas/Delphi-demo-2M 
+
+
+## tagging and ush to dokcer hub
+docker tag delphi-env tomas81/delphi:latest
+docker push tomas81/delphi:latest
+
+docker tag delphi-env tomas81/delphi:multiplatorm
+docker push tomas81/delphi:multiplatorm
+
+
+docker tag delphi-env-amd tomas81/delphi:amd_12.5
+docker push tomas81/delphi:amd_12.5
+
