@@ -23,6 +23,7 @@ n_head = 12
 n_embd = 120
 dropout = 0.1
 weight_decay = 2e-1
+vocab_size = 1271
 
 learning_rate = 2e-3 # with baby networks can afford to go a bit higher
 max_iters = 5000

@@ -37,6 +37,7 @@ n_head = 6
 n_embd = 96
 dropout = 0.2  # for pretraining 0 is good, for finetuning try 0.1+
 bias = False  # do we use bias inside LayerNorm and Linear layers?
+vocab_size = 256
 
 # adamw optimizer
 learning_rate = 6e-4  # max learning rate
@@ -100,16 +101,12 @@ if data_fraction < 1.0:
 iter_num = 0
 best_val_loss = 1e9
 
-# attempt to derive vocab_size from the dataset
-meta_path = os.path.join(data_dir, 'meta.pkl')
-with open(meta_path, 'rb') as f:
-    meta = pickle.load(f)
-meta_vocab_size = meta['vocab_size']
-print(f"found vocab_size = {meta_vocab_size} (inside {meta_path})")
+
+print(f"found vocab_size = {vocab_size}")
 
 # model init
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
-                  bias=bias, vocab_size=meta_vocab_size, dropout=dropout, token_dropout=token_dropout, t_min=t_min,
+                  bias=bias, vocab_size=vocab_size, dropout=dropout, token_dropout=token_dropout, t_min=t_min,
                   mask_ties=mask_ties, ignore_tokens=ignore_tokens)  # start with model_args from command line
 
 if init_from == 'scratch':

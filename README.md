@@ -56,6 +56,14 @@ Training a demo model takes around 10 minutes on a single GPU.
 
 Training the original model took 1 GPU-hour (NVIDIA V100, CentOS 7). Training on M1 Macbook Pro's MPS takes around 10 hours.
 
+## Data preparation
+
+Please refer to the `data/README.md` file for the details on how to prepare the data for training.
+
+## Docker
+
+We provide a Dockerfile to run the training and downstream analyses. Please refer to the `containers/Dockerfile` for the details.
+
 ## Notebooks
 
 After training the model, the obtailed checkpoints can be used to run the analysis notebooks.
