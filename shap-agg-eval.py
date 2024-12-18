@@ -49,8 +49,8 @@ val_p2i = get_p2i(val)
 
 def get_person(idx):
     x, y, _, time = get_batch([idx], val, val_p2i,  
-              select='center', block_size=48, 
-              device=device, padding='regular')
+              select='left', block_size=96, 
+              device=device, padding='random')
     
     x, y = x[y > -1], y[y > -1]
     person = []
@@ -102,7 +102,7 @@ all_times_passed = np.concatenate([i[2] for i in shaply_val], axis=0)
 all_people = np.concatenate([i[3] for i in shaply_val])
 
 
-path = 'shap_agg_synthetic.pickle'
+path = 'shap_agg.pickle'
 
 with open(path, 'wb') as f:
     pickle.dump({'tokens': all_tokens, 'values': all_values, 'times': all_times_passed, 'model': out_dir, 'people': all_people}, f)
