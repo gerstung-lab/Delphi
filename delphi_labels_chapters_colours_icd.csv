@@ -1,6 +1,6 @@
 index,name,count,ICD-10 Chapter,ICD-10 Chapter (short),color
 0,Padding,,Technical,Technical,#2a52be
-1,Healthy,,Technical,Technical,#2a52be
+1,No event,,Technical,Technical,#2a52be
 2,Female,218608.0,Sex,Sex,#bcbd22
 3,Male,183444.0,Sex,Sex,#bcbd22
 4,BMI low,37912.0,"Smoking, Alcohol and BMI","Smoking, Alcohol and BMI",#9467bd

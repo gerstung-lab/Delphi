@@ -49,8 +49,9 @@ val_p2i = get_p2i(val)
 
 def get_person(idx):
     x, y, _, time = get_batch([idx], val, val_p2i,  
-              select='left', block_size=96, 
-              device=device, padding='random')
+              select='left', block_size=64, 
+              device=device, padding='random', 
+              cut_batch=True)
     
     x, y = x[y > -1], y[y > -1]
     person = []
