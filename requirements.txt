@@ -7,3 +7,4 @@ pandas
 umap-learn
 tqdm
 statsmodels
+wandb
