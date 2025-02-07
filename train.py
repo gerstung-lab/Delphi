@@ -65,7 +65,7 @@ mask_ties = True
 ignore_tokens = [0]
 data_fraction = 1.0
 no_event_token_rate = 5
-
+zero_time_inflation = False
 
 # -----------------------------------------------------------------------------
 config_keys = [k for k, v in globals().items() if not k.startswith('_') and isinstance(v, (int, float, bool, str))]
@@ -107,7 +107,7 @@ print(f"found vocab_size = {vocab_size}")
 # model init
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
                   bias=bias, vocab_size=vocab_size, dropout=dropout, token_dropout=token_dropout, t_min=t_min,
-                  mask_ties=mask_ties, ignore_tokens=ignore_tokens)  # start with model_args from command line
+                  mask_ties=mask_ties, ignore_tokens=ignore_tokens, zero_time_inflation=zero_time_inflation)  # start with model_args from command line
 
 if init_from == 'scratch':
     # init a new model from scratch

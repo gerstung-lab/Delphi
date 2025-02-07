@@ -6,7 +6,7 @@ https://github.com/openai/gpt-2/blob/master/src/model.py
 2) huggingface/transformers PyTorch implementation:
 https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/modeling_gpt2.py
 """
-
+from typing import Optional
 import math
 import inspect
 from dataclasses import dataclass, field
@@ -149,10 +149,11 @@ class DelphiConfig:
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     mask_ties: bool = False
     ignore_tokens: list = field(default_factory=lambda: [0])
+    zero_time_inflation: bool = False
 
 class Delphi(nn.Module):
 
-    def __init__(self, config):
+    def __init__(self, config: DelphiConfig):
         super().__init__()
         assert config.vocab_size is not None
         assert config.block_size is not None
@@ -175,6 +176,10 @@ class Delphi(nn.Module):
         # This behavior is deprecated and will be an error in future versions"
         # not 100% sure what this is, so far seems to be harmless. TODO investigate
         self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
+        
+        # zero time inflation
+        if config.zero_time_inflation:
+            self.pi_head = nn.Linear(config.vocab_size, 1, bias=False)
 
         # init all weights
         self.apply(self._init_weights)
@@ -206,7 +211,15 @@ class Delphi(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, idx, age, targets=None, targets_age=None, validation_loss_mode=False):
+    def forward(
+        self, 
+        idx: torch.Tensor, 
+        age: torch.Tensor, 
+        targets: Optional[torch.Tensor] = None, 
+        targets_age: Optional[torch.Tensor] = None, 
+        validation_loss_mode: bool = False
+        ) -> tuple[torch.Tensor, Optional[dict[str, torch.Tensor]], torch.Tensor]:
+        
         device = idx.device
         b, t = idx.size()
         #assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
@@ -258,15 +271,24 @@ class Delphi(nn.Module):
             # time to next event loss, padding masked
             lse = torch.logsumexp(logits,-1) ## More forgiving than using torch.max() for the most likely next event
             lse = - torch.log(torch.exp(-lse) + self.config.t_min)
-            dt = torch.clamp(targets_age - age, min=1.0)
+            dt = targets_age - age
+            if not self.config.zero_time_inflation:
+                dt = torch.clamp(dt, min=1.0)
             if self.config.mask_ties:
                 dt = torch.gather(dt, -1, (attn_mask * torch.arange(0, idx.size(1), device=device, dtype=torch.float32)
                                            .view(1, 1, 1, -1)).max(-1).indices.squeeze((1, 2)))  # Use time from last untied token
-            ldt = - torch.log(dt + self.config.t_min).view(-1)
+            ldt = - torch.log(dt + torch.tensor(self.config.t_min))
             
-            loss_dt = -(lse.reshape(-1) - torch.exp(lse.reshape(-1) - ldt.reshape(-1))) ## Exponential log-likelihood (real statistics, TM)
-            loss_dt = torch.mean(loss_dt[pass_tokens]) 
-            
+            exp_log_likelihood = lse - torch.exp(lse - ldt)
+            if not self.config.zero_time_inflation:
+                loss_dt = -exp_log_likelihood.reshape(-1) ## Exponential log-likelihood (real statistics, TM)
+            else:
+                pi = self.pi_head(logits).squeeze()
+                zero_case = - (F.softplus(-pi+lse) - F.softplus(-pi))
+                nonzero_case = - (exp_log_likelihood - pi - F.softplus(-pi)) 
+                loss_dt = (zero_case * (dt == 0) + nonzero_case * (dt > 0)).reshape(-1)
+            loss_dt = torch.mean(loss_dt[pass_tokens])
+                
             # Both losses combined
             # loss = loss_ce + loss_dt
             loss = {'loss_ce': loss_ce, 'loss_dt': loss_dt}
@@ -368,7 +390,16 @@ class Delphi(nn.Module):
         return mfu
 
     @torch.no_grad()
-    def generate(self, idx, age, max_new_tokens=100, max_age = 85*365.25, temperature=1.0, top_k=None, no_repeat=True):
+    def generate(
+        self, 
+        idx: torch.Tensor, 
+        age: torch.Tensor, 
+        max_new_tokens: int = 100, 
+        max_age: float = 85*365.25, 
+        temperature: float = 1.0, 
+        top_k: Optional[int] = None, 
+        no_repeat: bool = True
+        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
