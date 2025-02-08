@@ -252,7 +252,9 @@ class Delphi(nn.Module):
         if targets is not None:
             # next token cross entropy loss, padding masked
             logits = self.lm_head(x)
-
+            if self.config.zero_time_inflation:
+                pi = self.pi_head(logits).squeeze()
+            
             # if we are given some desired targets also calculate the loss
             ignored_tokens = self.config.ignore_tokens.copy()
             if validation_loss_mode:
@@ -283,7 +285,6 @@ class Delphi(nn.Module):
             if not self.config.zero_time_inflation:
                 loss_dt = -exp_log_likelihood.reshape(-1) ## Exponential log-likelihood (real statistics, TM)
             else:
-                pi = self.pi_head(logits).squeeze()
                 zero_case = - (F.softplus(-pi+lse) - F.softplus(-pi))
                 nonzero_case = - (exp_log_likelihood - pi - F.softplus(-pi)) 
                 loss_dt = (zero_case * (dt == 0) + nonzero_case * (dt > 0)).reshape(-1)
