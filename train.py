@@ -1,6 +1,7 @@
 import os
 import time
 import math
+import yaml
 import pickle
 from contextlib import nullcontext
 
@@ -74,6 +75,9 @@ config = {k: globals()[k] for k in config_keys}  # will be useful for logging
 # -----------------------------------------------------------------------------
 
 os.makedirs(out_dir, exist_ok=True)
+with open(os.path.join(out_dir, 'config.yaml'), 'w') as f:
+    yaml.dump(config, f, default_flow_style=False)
+
 torch.manual_seed(seed)
 torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
 torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
