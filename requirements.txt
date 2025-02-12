@@ -8,3 +8,4 @@ umap-learn
 tqdm
 statsmodels
 wandb
+omegaconf

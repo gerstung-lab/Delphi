@@ -6,7 +6,7 @@ https://github.com/openai/gpt-2/blob/master/src/model.py
 2) huggingface/transformers PyTorch implementation:
 https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/modeling_gpt2.py
 """
-from typing import Optional
+from typing import Optional, Literal
 import math
 import inspect
 from dataclasses import dataclass, field
@@ -14,6 +14,24 @@ from dataclasses import dataclass, field
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+
+from delphi.model.components import ZeroTimeInflationPiProjector
+
+@dataclass
+class DelphiConfig:
+    block_size: int = 1024
+    vocab_size: int = 50304 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
+    n_layer: int = 12
+    n_head: int = 12
+    n_embd: int = 768
+    dropout: float = 0.0
+    token_dropout: float = 0.0
+    t_min: float = 1.0
+    bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    mask_ties: bool = False
+    ignore_tokens: list = field(default_factory=lambda: [0])
+    zero_time_inflation: bool = False
+    pi_projector: str = 'linear' # 'linear' or 'mlp'
 
 # @torch.jit.script # good to enable when not using torch.compile, disable when using (our default)
 def new_gelu(x):
@@ -135,21 +153,6 @@ class AgeEncoding(nn.Module):
         
         #x = self.wae[:x.size(0)]
         return y #self.dropout(x)
-    
-@dataclass
-class DelphiConfig:
-    block_size: int = 1024
-    vocab_size: int = 50304 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
-    n_layer: int = 12
-    n_head: int = 12
-    n_embd: int = 768
-    dropout: float = 0.0
-    token_dropout: float = 0.0
-    t_min: float = 1.0
-    bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
-    mask_ties: bool = False
-    ignore_tokens: list = field(default_factory=lambda: [0])
-    zero_time_inflation: bool = False
 
 class Delphi(nn.Module):
 
@@ -179,7 +182,12 @@ class Delphi(nn.Module):
         
         # zero time inflation
         if config.zero_time_inflation:
-            self.pi_head = nn.Linear(config.vocab_size, 1, bias=False)
+            if config.pi_projector == 'linear':
+                self.pi_head = nn.Linear(config.vocab_size, 1, bias=False)
+            elif config.pi_projector == 'mlp':
+                self.pi_head = ZeroTimeInflationPiProjector(config)
+            else: 
+                raise ValueError(f"Unknown pi_projector: {config.pi_projector}")
 
         # init all weights
         self.apply(self._init_weights)
