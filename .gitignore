@@ -1,2 +1,7 @@
 __pycache__
 .vscode
+submission
+log
+checkpoints
+wandb
+common_commands.txt
