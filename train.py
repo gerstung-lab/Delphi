@@ -1,9 +1,6 @@
 import os
 import time
 import math
-import yaml
-import pickle
-from typing import Literal
 from dataclasses import dataclass, field, asdict
 from contextlib import nullcontext
 
@@ -310,7 +307,7 @@ def main():
     default_cfg = OmegaConf.structured(TrainConfig())
     cfg = OmegaConf.merge(default_cfg, file_cfg, cli_args)
     cfg = OmegaConf.to_object(cfg) # stuctured config gets converted back to underlying dataclass
-    breakpoint()
+    
     train(cfg)
 
 if __name__ == "__main__":
