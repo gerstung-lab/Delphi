@@ -5,7 +5,7 @@
 
 ## Learning the natural history of human disease with generative transformers
 
-[[`Paper`](https://www.medrxiv.org/content/10.1101/2024.06.07.24308553v1)] [[`BibTeX`](#Citation)]
+[[`Paper`](https://www.medrxiv.org/content/10.1101/2024.06.07.24308553)] [[`BibTeX`](#Citation)]
 
 Artem Shmatko*, Alexander Wolfgang Jung*, Kumar Gaurav*, Søren Brunak, Laust Mortensen, Ewan Birney, Tom Fitzgerald, Moritz Gerstung (*Equal Contribution)
 
