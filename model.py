@@ -15,6 +15,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+import warnings
+
 # @torch.jit.script # good to enable when not using torch.compile, disable when using (our default)
 def new_gelu(x):
     """
@@ -351,77 +353,61 @@ class Delphi(nn.Module):
 
         return optimizer
 
-    def estimate_mfu(self, fwdbwd_per_iter, dt):
-        """ estimate model flops utilization (MFU) in units of A100 bfloat16 peak FLOPS """
-        # first estimate the number of flops we do per iteration.
-        # see PaLM paper Appendix B as ref: https://arxiv.org/abs/2204.02311
-        N = self.get_num_params()
-        cfg = self.config
-        L, H, Q, T = cfg.n_layer, cfg.n_head, cfg.n_embd//cfg.n_head, cfg.block_size
-        flops_per_token = 6*N + 12*L*H*Q*T
-        flops_per_fwdbwd = flops_per_token * T
-        flops_per_iter = flops_per_fwdbwd * fwdbwd_per_iter
-        # express our flops throughput as ratio of A100 bfloat16 peak flops
-        flops_achieved = flops_per_iter * (1.0/dt) # per second
-        flops_promised = 312e12 # A100 GPU bfloat16 peak flops is 312 TFLOPS
-        mfu = flops_achieved / flops_promised
-        return mfu
-
     @torch.no_grad()
-    def generate(self, idx, age, max_new_tokens=100, max_age = 85*365.25, temperature=1.0, top_k=None, no_repeat=True):
+    def generate(self, idx, age, max_new_tokens=100, max_age=85*365.25, no_repeat=True, termination_tokens=[1269], top_k=None):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
-        """
-        if max_new_tokens == -1:
-            max_new_tokens = 10000
-        for _ in range(max_new_tokens):
-            # if the sequence context is growing too long we must crop it at block_size
-            idx_cond = idx #if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
-            age_cond = age #if age.size(1) <= self.config.block_size else age[:, -self.config.block_size:]
 
-            # forward the model to get the logits for the index in the sequence
-            logits, _, _ = self(idx_cond, age_cond)
-            # pluck the logits at the final step and scale by desired temperature
-            logits = logits[:, -1, :] / temperature
-            logits[:,self.config.ignore_tokens] = -float('Inf')
-            # optionally crop the logits to only the top k options
-            if top_k is not None:
-                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < v[:, [-1]]] = -float('Inf')
-                
+        Selected parameters:
+        --------------------
+
+        termination_tokens: list[int] -  a list of tokens that indicate the and of the trajectory.
+        Usually it is the "Death" token, but could be several tokens e.g. to indicate different
+        death reasons.
+        top_k: None, does nothing
+        """
+
+        warnings.warn('When using a custem dataset, consider changing the `termination_tokens` argument.')
+        
+        termination_tokens = torch.tensor(termination_tokens, dtype=torch.int64, device=idx.device)
+        mask_time = -10000
+
+        if max_new_tokens == -1:
+            max_new_tokens = 128
+
+        for _ in range(max_new_tokens):
+            logits, _, _ = self(idx, age)
+            logits = logits[:, -1, :]
+            logits[:,self.config.ignore_tokens] = -torch.inf
+
             if no_repeat:
-                fill = idx + 0
+                fill = idx.clone()
                 fill[fill == 1] = 0
-                logits = logits.scatter_(1, fill, -float("Inf"))
+                logits = logits.scatter_(1, fill, -torch.inf)
             
-            # apply softmax to convert logits to (normalized) probabilities
-            # probs = F.softmax(logits, dim=-1)
-            # sample from the distribution
-            # idx_next = torch.multinomial(probs, num_samples=1)
-            # lse = torch.logsumexp(logits, -1)[:,None]
-            t_next = torch.clamp( -torch.exp(-logits) * torch.rand(logits.shape, device=idx.device).log(),
-                min=0, max=365*80.
-            ).min(1)
-            #age_next = age[...,[-1]] + torch.clamp(-torch.exp(-lse) * torch.rand(lse.shape, device=idx.device).log(), min=self.config.t_min, max=365*80.) #torch.normal(torch.zeros((1,1), device=idx.device),1.)
-            idx_next = t_next[1][:,None]
-            age_next = age[...,[-1]] + t_next[0][:,None]
+            # sample from exponential distributions for each disease using the inverse CDF method, then take min
+            t_next = torch.clamp(-torch.exp(-logits) * torch.rand(logits.shape, device=idx.device).log(), min=0, max=365*80).min(1)
+            idx_next = t_next[1][:,None] # the index of the min sampled time
+            age_next = age[...,[-1]] + t_next[0][:,None] # the value of the min sampled time
             
             # append sampled index to the running sequence and continue
             idx = torch.cat((idx, idx_next), dim=1)
             age = torch.cat((age, age_next), dim=1)
             
-            if torch.all(idx_next == self.config.vocab_size -1) or torch.all(age_next > max_age):
+            if torch.logical_or(torch.isin(idx, termination_tokens).any(-1), age_next > max_age).all():
                 break
         
-        pad = (torch.cumsum(torch.cumsum(idx == self.config.vocab_size -1,1).int(),1) > 1) + (age > max_age)
+        pad = (torch.cumsum(torch.cumsum(torch.isin(idx, termination_tokens), 1).bool().int(), 1) > 1) + (age > max_age)
+
         logits, _, _ = self(idx, age)
         idx[pad] = 0
-        age[pad] = float('NaN')
+        age[pad] = mask_time
+
         if no_repeat:
             fill = idx + 0
             fill[fill == 1] = 0
-            logits = torch.stack([logits[:,j].scatter_(1, fill[:,:j+1], float("NaN")) for j in range(fill.shape[1])]).transpose(0,1)
+            logits = torch.stack([logits[:,j].scatter_(1, fill[:,:j+1], -torch.inf) for j in range(fill.shape[1])]).transpose(0,1)
 
         return idx, age, logits
