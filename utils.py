@@ -5,7 +5,7 @@ import re
 
 def get_p2i(data):
     """
-    Get the patient to index mapping.
+    Get the patient to index mapping. (patient index in data -> length of sequence)
     """
 
     px = data[:, 0].astype('int')
