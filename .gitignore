@@ -5,3 +5,4 @@ log
 checkpoints
 wandb
 common_commands.txt
+data/synthetic
