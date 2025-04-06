@@ -38,4 +38,7 @@ repos:
     rev: v2.4.1
     hooks:
       - id: codespell
-        args: [ "--skip=*.ipynb,*.tsv,*.csv" ]
+        args:
+          - "--skip=*.ipynb,*.tsv,*.csv"
+          - "--ignore-words"
+          - ".pre-commit/codespell-ignore-words.txt"

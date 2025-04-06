@@ -1,6 +1,7 @@
+import re
+
 import numpy as np
 import torch
-import re
 
 
 def get_p2i(data):
@@ -8,7 +9,7 @@ def get_p2i(data):
     Get the patient to index mapping. (patient index in data -> length of sequence)
     """
 
-    px = data[:, 0].astype('int')
+    px = data[:, 0].astype("int")
     p2i = []
     j = 0
     q = px[0]
@@ -20,9 +21,19 @@ def get_p2i(data):
     return np.array(p2i)
 
 
-def get_batch(ix, data, p2i, select='center', index='patient', padding='regular',
-              block_size=48, device='cpu', lifestyle_augmentations=False, 
-              no_event_token_rate=5, cut_batch=False):
+def get_batch(
+    ix,
+    data,
+    p2i,
+    select="center",
+    index="patient",
+    padding="regular",
+    block_size=48,
+    device="cpu",
+    lifestyle_augmentations=False,
+    no_event_token_rate=5,
+    cut_batch=False,
+):
     """
     Get a batch of data from the dataset. This function packs sequences in a batch and also
     inserts "no event" tokens randomly with the average rate of one every five years.
@@ -47,21 +58,28 @@ def get_batch(ix, data, p2i, select='center', index='patient', padding='regular'
         b: target ages
     """
 
-    mask_time = -10000.
+    mask_time = -10000.0
 
     x = torch.tensor(np.array([p2i[int(i)] for i in ix]))
     ix = torch.tensor(np.array(ix))
 
-    gen = torch.Generator(device='cpu')
-    gen.manual_seed(ix.sum().item())  # we want some things be random, but also deterministic
+    gen = torch.Generator(device="cpu")
+    gen.manual_seed(
+        ix.sum().item()
+    )  # we want some things be random, but also deterministic
 
-    if index == 'patient':
-        if select == 'left':
+    if index == "patient":
+        if select == "left":
             traj_start_idx = x[:, 0]
-        elif select == 'right':
-            traj_start_idx = torch.clamp(x[:, 0] + x[:, 1] - block_size - 1, 0, data.shape[0])
-        elif select == 'random':
-            traj_start_idx = x[:, 0] + (torch.randint(2**63-1, (len(ix),), generator=gen) % torch.clamp(x[:, 1] - block_size, 1))
+        elif select == "right":
+            traj_start_idx = torch.clamp(
+                x[:, 0] + x[:, 1] - block_size - 1, 0, data.shape[0]
+            )
+        elif select == "random":
+            traj_start_idx = x[:, 0] + (
+                torch.randint(2**63 - 1, (len(ix),), generator=gen)
+                % torch.clamp(x[:, 1] - block_size, 1)
+            )
             traj_start_idx = torch.clamp(traj_start_idx, 0, data.shape[0])
         else:
             raise NotImplementedError
@@ -74,7 +92,9 @@ def get_batch(ix, data, p2i, select='center', index='patient', padding='regular'
     batch_idx = np.arange(block_size + 1)[None, :] + traj_start_idx[:, None]
 
     mask = torch.from_numpy(data[:, 0][batch_idx].astype(np.int64))
-    mask = mask == torch.tensor(data[p2i[ix.numpy()][:, 0], 0][:, None].astype(np.int64)).to(mask.dtype)
+    mask = mask == torch.tensor(
+        data[p2i[ix.numpy()][:, 0], 0][:, None].astype(np.int64)
+    ).to(mask.dtype)
 
     tokens = torch.from_numpy(data[:, 2][batch_idx].astype(np.int64))
     ages = torch.from_numpy(data[:, 1][batch_idx].astype(np.float32))
@@ -83,24 +103,34 @@ def get_batch(ix, data, p2i, select='center', index='patient', padding='regular'
     if lifestyle_augmentations:
         lifestyle_idx = (tokens >= 3) * (tokens <= 11)
         if lifestyle_idx.sum():
-            ages[lifestyle_idx] += torch.randint(-20*365, 365*40, (lifestyle_idx.sum(),), generator=gen).float()
+            ages[lifestyle_idx] += torch.randint(
+                -20 * 365, 365 * 40, (lifestyle_idx.sum(),), generator=gen
+            ).float()
 
     tokens = tokens.masked_fill(~mask, -1)
     ages = ages.masked_fill(~mask, mask_time)
 
     # insert a "no event" token every 5 years on average
-    if (padding.lower() == 'none' or
-            padding is None or
-            no_event_token_rate == 0 or
-            no_event_token_rate is None):
+    if (
+        padding.lower() == "none"
+        or padding is None
+        or no_event_token_rate == 0
+        or no_event_token_rate is None
+    ):
         pad = torch.ones(len(ix), 0)
-    elif padding == 'regular':
-        pad = torch.arange(0, 36525, 365.25 * no_event_token_rate) * torch.ones(len(ix), 1) + 1
-    elif padding == 'random':
-        pad = torch.randint(1, 36525, (len(ix), int(100 / no_event_token_rate)), generator=gen)
+    elif padding == "regular":
+        pad = (
+            torch.arange(0, 36525, 365.25 * no_event_token_rate)
+            * torch.ones(len(ix), 1)
+            + 1
+        )
+    elif padding == "random":
+        pad = torch.randint(
+            1, 36525, (len(ix), int(100 / no_event_token_rate)), generator=gen
+        )
     else:
         raise NotImplementedError
-    
+
     m = ages.max(1, keepdim=True).values
 
     # stack "no event" tokens with real tokens
@@ -138,13 +168,18 @@ def get_batch(ix, data, p2i, select='center', index='patient', padding='regular'
     b = ages[:, 1:]
 
     # if the first token is a "no event" token, mask it and the corresponding target
-    x = x.masked_fill((x == 0) * (y == 1), 0)
+    # TODO: do you mean if the first token is a padding token??
+    x = x.masked_fill(
+        (x == 0) * (y == 1), 0
+    )  # TODO: don't think this does anything; verify and remove if not
     y = y.masked_fill(x == 0, 0)
     b = b.masked_fill(x == 0, mask_time)
 
-    if device == 'cuda':
+    if device == "cuda":
         # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
-        x, a, y, b = [i.pin_memory().to(device, non_blocking=True) for i in [x, a, y, b]]
+        x, a, y, b = [
+            i.pin_memory().to(device, non_blocking=True) for i in [x, a, y, b]
+        ]
     else:
         x, a, y, b = x.to(device), a.to(device), y.to(device), b.to(device)
     return x, a, y, b
@@ -175,18 +210,21 @@ def shap_model_creator(model, disease_ids, person_tokens_ids, person_ages, devic
     Creates a pseudo model that returns only logits for specified tokens.
     Needed for SHAP values, otherwise the SHAP visualisation is too huge.
     """
+
     def f(ps):
         xs = []
         as_ = []
 
         for p in ps:
             if len(p) == 0:
-                print('No tokens found??')
+                print("No tokens found??")
                 raise
             p = list(map(int, p))
             new_tokens = []
             new_ages = []
-            for num, (masked, value, age) in enumerate(zip(p, person_tokens_ids, person_ages)):
+            for num, (masked, value, age) in enumerate(
+                zip(p, person_tokens_ids, person_ages)
+            ):
                 if num == 0:
                     new_ages.append(age)
                     if masked == 10000:
@@ -198,16 +236,22 @@ def shap_model_creator(model, disease_ids, person_tokens_ids, person_ages, devic
                         new_ages.append(age)
                         new_tokens.append(value)
 
-            x = (torch.tensor(new_tokens, device=device)[None, ...])
-            a = (torch.tensor(new_ages, device=device)[None, ...])
+            x = torch.tensor(new_tokens, device=device)[None, ...]
+            a = torch.tensor(new_ages, device=device)[None, ...]
 
             xs.append(x)
             as_.append(a)
 
         max_length = max([x.shape[-1] for x in xs])
 
-        xs = [torch.nn.functional.pad(x, (max_length - x.shape[-1], 0), value=0) for x in xs]
-        as_ = [torch.nn.functional.pad(x, (max_length - x.shape[-1], 0), value=-10000) for x in as_]
+        xs = [
+            torch.nn.functional.pad(x, (max_length - x.shape[-1], 0), value=0)
+            for x in xs
+        ]
+        as_ = [
+            torch.nn.functional.pad(x, (max_length - x.shape[-1], 0), value=-10000)
+            for x in as_
+        ]
 
         x = torch.cat(xs)
         a = torch.cat(as_)

@@ -6,3 +6,4 @@ checkpoints
 wandb
 common_commands.txt
 data/synthetic
+.ipynb_checkpoints

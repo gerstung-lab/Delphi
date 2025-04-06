@@ -9,4 +9,5 @@ tqdm
 statsmodels
 wandb
 omegaconf
-precommit
+pre-commit
+dacite

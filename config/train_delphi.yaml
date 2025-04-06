@@ -16,7 +16,7 @@ dataset: ukb_real_data
 gradient_accumulation_steps: 1
 batch_size: 128
 
-model: 
+model:
   block_size: 48
   vocab_size: 1271
   n_layer: 12
