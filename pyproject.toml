@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "delphi"
+readme = "README.md"
+license = { file = "LICENSE" }
+version = "0.0.1"
+requires-python = ">=3.11"
+
+[tool.hatch.build.targets.wheel]
+packages = ["delphi"]
+
+[tool.isort]
+known_third_party = ["wandb"]
