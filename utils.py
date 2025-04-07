@@ -17,6 +17,9 @@ def get_p2i(data):
             p2i.append([j, i - j])
             q = p
             j = i
+        if i == len(px) - 1:
+            # add last participant
+            p2i.append([j, i - j + 1])
     return np.array(p2i)
 
 
