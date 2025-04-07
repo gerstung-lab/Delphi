@@ -63,10 +63,10 @@ class DelphiEmbedding(nn.Module):
                 ).to(torch.int)
                 attn_mask *= ties_mask
 
-        # attn_mask = torch.logical_or(
-        #     attn_mask.to(torch.bool),
-        #     torch.eye(seq_len, device=x0.device).unsqueeze(0).to(torch.bool)
-        # )
+        attn_mask = torch.logical_or(
+            attn_mask.to(torch.bool),
+            torch.eye(seq_len, device=x0.device).unsqueeze(0).to(torch.bool),
+        )
 
         return attn_mask.unsqueeze(1)
 
