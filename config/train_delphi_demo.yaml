@@ -1,4 +1,4 @@
-out_dir: checkpoints/Delphi-demo
+ckpt_dir: ${oc.env:DELPHI_CKPT_DIR}
 eval_interval: 250 # keep frequent because we'll overfit
 eval_iters: 25
 log_interval: 25 # don't print too too often
@@ -12,9 +12,10 @@ wandb_log: true # override via command line if you like
 wandb_project: delphi
 wandb_run_name: delphi_demo
 
+data_dir: ${oc.env:DELPHI_DATA_DIR}
 dataset: ukb_simulated_data
 gradient_accumulation_steps: 1
-batch_size: 128
+batch_size: 256
 
 model:
   block_size: 48
@@ -38,6 +39,8 @@ min_lr: 2e-4 # learning_rate / 10 usually
 beta2: 0.99 # make a bit bigger because number of tokens per iter is small
 
 warmup_iters: 500 # not super necessary potentially
+
+device: cpu
 
 data_fraction: 1.0
 no_event_token_rate: 5

@@ -1,0 +1,3 @@
+bsub -R rusage[mem=16GB] -gpu num=1:j_exclusive=yes:gmem=10G -o debug.stdout -e debug.stderr -q gpu-debian ./submit/dkfz/submit.sh
+
+bsub -R rusage[mem=16GB]  -q interactive-long -Is /bin/bash

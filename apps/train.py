@@ -1,6 +1,7 @@
 import math
 import os
 import time
+from datetime import datetime
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 
@@ -14,7 +15,9 @@ from delphi.utils import get_batch, get_p2i
 
 @dataclass
 class TrainConfig:
-    out_dir: str = "out"
+    run_name: str = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    ckpt_dir: str = "./checkpoints"
+    
     eval_interval: int = 2000
     log_interval: int = 1
     eval_iters: int = 200
@@ -30,6 +33,7 @@ class TrainConfig:
     wandb_run_name: str = "run" + str(time.time())
 
     # data
+    data_dir: str = "./data"
     dataset: str = "ukb_data"
     gradient_accumulation_steps: int = 1  # used to simulate larger batch sizes
     batch_size: int = 128
@@ -68,8 +72,9 @@ class TrainConfig:
 
 def train(cfg: TrainConfig):
 
-    os.makedirs(cfg.out_dir, exist_ok=True)
-    with open(os.path.join(cfg.out_dir, "config.yaml"), "w") as f:
+    run_dir = os.path.join(cfg.ckpt_dir, cfg.run_name)
+    os.makedirs(run_dir, exist_ok=True)
+    with open(os.path.join(run_dir, "config.yaml"), "w") as f:
         OmegaConf.save(config=cfg, f=f)
 
     torch.manual_seed(cfg.seed)
@@ -93,13 +98,13 @@ def train(cfg: TrainConfig):
 
     torch.set_default_dtype(ptdtype)
 
-    # poor man's data loader
-    data_dir = os.path.join("data", cfg.dataset)
+    dataset_dir = os.path.join(cfg.data_dir, cfg.dataset)
+    assert os.path.exists(dataset_dir), f"dataset_dir {dataset_dir} does not exist"
     train_data = np.memmap(
-        os.path.join(data_dir, "train.bin"), dtype=np.uint32, mode="r"
+        os.path.join(dataset_dir, "train.bin"), dtype=np.uint32, mode="r"
     ).reshape(-1, 3)
     val_data = np.memmap(
-        os.path.join(data_dir, "val.bin"), dtype=np.uint32, mode="r"
+        os.path.join(dataset_dir, "val.bin"), dtype=np.uint32, mode="r"
     ).reshape(-1, 3)
 
     train_p2i = get_p2i(train_data)
@@ -121,9 +126,9 @@ def train(cfg: TrainConfig):
         # determine the vocab size we'll use for from-scratch training
         model = Delphi(cfg.model)
     elif cfg.init_from == "resume":
-        print(f"Resuming training from {cfg.out_dir}")
+        print(f"Resuming training from {run_dir}")
         # resume training from a checkpoint.
-        ckpt_path = os.path.join(cfg.out_dir, "ckpt.pt")
+        ckpt_path = os.path.join(run_dir, "ckpt.pt")
         checkpoint = torch.load(ckpt_path, map_location=cfg.device)
         checkpoint_model_args = checkpoint["model_args"]
         # force these config attributes to be equal otherwise we can't even resume training
@@ -272,8 +277,8 @@ def train(cfg: TrainConfig):
                         "best_val_loss": val_loss,
                         "config": asdict(cfg),
                     }
-                    print(f"saving checkpoint to {cfg.out_dir}")
-                    torch.save(checkpoint, os.path.join(cfg.out_dir, "ckpt.pt"))
+                    print(f"saving checkpoint to {run_dir}")
+                    torch.save(checkpoint, os.path.join(run_dir, "ckpt.pt"))
 
             if iter_num % 10_000 == 0:
                 checkpoint = {
@@ -284,8 +289,8 @@ def train(cfg: TrainConfig):
                     "best_val_loss": best_val_loss,
                     "config": asdict(cfg),
                 }
-                print(f"saving checkpoint to {cfg.out_dir}")
-                torch.save(checkpoint, os.path.join(cfg.out_dir, f"ckpt_{iter_num}.pt"))
+                print(f"saving checkpoint to {run_dir}")
+                torch.save(checkpoint, os.path.join(run_dir, f"ckpt_{iter_num}.pt"))
 
         if iter_num == 0 and cfg.eval_only:
             break
