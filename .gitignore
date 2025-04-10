@@ -7,3 +7,5 @@ wandb
 common_commands.txt
 data/synthetic
 .ipynb_checkpoints
+logs
+submit/dkfz/*.yaml

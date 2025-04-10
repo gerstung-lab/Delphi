@@ -1,5 +1,5 @@
 ckpt_dir: ${oc.env:DELPHI_CKPT_DIR}
-run_name: Delphi
+run_name: Delphi_synthetic
 eval_interval: 250 # keep frequent because we'll overfit
 eval_iters: 25
 log_interval: 25 # don't print too too often
@@ -11,10 +11,10 @@ seed: 42
 
 wandb_log: true # override via command line if you like
 wandb_project: delphi
-wandb_run_name: delphi
+wandb_run_name: delphi_synthetic
 
 data_dir: ${oc.env:DELPHI_DATA_DIR}
-dataset: ukb_real_data
+dataset: ukb_simulated_data
 gradient_accumulation_steps: 1
 batch_size: 128
 
@@ -40,6 +40,8 @@ min_lr: 6e-5 # learning_rate / 10 usually
 beta2: 0.99 # make a bit bigger because number of tokens per iter is small
 
 warmup_iters: 1000 # not super necessary potentially
+
+device: cuda
 
 data_fraction: 1.0
 no_event_token_rate: 5
