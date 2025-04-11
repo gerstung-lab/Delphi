@@ -1,7 +1,6 @@
 import os
-import time
 from dataclasses import dataclass, field
-from typing import Optional, Sequence, Tuple, Union
+from typing import Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -12,9 +11,10 @@ from matplotlib.figure import Figure
 from tqdm import tqdm
 
 from delphi import DAYS_PER_YEAR
-from delphi.data import Cohort, DelphiTrajectories, cohort_from_ukb_data, get_p2i
+from delphi.data import DelphiTrajectories, cohort_from_ukb_data, get_p2i
+from delphi.eval import eval_task
 from delphi.model.transformer import Delphi
-from delphi.tokenizer import CoreEvents, Gender, Tokenizer
+from delphi.tokenizer import Gender, Tokenizer
 from delphi.utils import get_batch
 
 
@@ -27,8 +27,8 @@ class AgeGroups:
 
 
 @dataclass
-class AUCConfig:
-    diseases: list[str]
+class AUCArgs:
+    diseases: list[str] = field(default_factory=list)
     data_memmap: str = "data/ukb_simulated_data/val.bin"
     sample_size: int = 1000
     device: str = "cpu"
@@ -112,15 +112,17 @@ def box_plot_disease_rates(
 def auc_by_age_group(
     disease_token: int,
     val_trajectories: DelphiTrajectories,
-    config: AUCConfig,
+    task_args: AUCArgs,
 ) -> tuple:
 
-    if config.age_groups.groups is None:
+    if task_args.age_groups.groups is None:
         age_groups = np.arange(
-            config.age_groups.start, config.age_groups.end, config.age_groups.step
+            task_args.age_groups.start,
+            task_args.age_groups.end,
+            task_args.age_groups.step,
         )
     else:
-        age_groups = config.age_groups.groups
+        age_groups = task_args.age_groups.groups
 
     age_buckets = [(i, j) for i, j in zip(age_groups[:-1], age_groups[1:])]
     l = len(age_buckets)
@@ -134,7 +136,7 @@ def auc_by_age_group(
 
         tw = (age_start * DAYS_PER_YEAR, age_end * DAYS_PER_YEAR)
         has_valid_pred_in_tw = val_trajectories.has_any_valid_predictions(
-            min_time_gap=config.min_time_gap,
+            min_time_gap=task_args.min_time_gap,
             t0_range=tw,
         )
         has_dis_in_tw = val_trajectories.has_token(
@@ -168,25 +170,26 @@ def auc_by_age_group(
     return auc_vals, ctl_counts, dis_counts, fig, ax
 
 
+@eval_task.register
 def run_auc_eval(
-    model: Delphi, tokenizer: Tokenizer, task_cfg: AUCConfig, dump_dir: str
+    task_args: AUCArgs, model: Delphi, tokenizer: Tokenizer, dump_dir: str
 ) -> None:
 
-    val = np.fromfile(task_cfg.data_memmap, dtype=np.uint32).reshape(-1, 3)
+    val = np.fromfile(task_args.data_memmap, dtype=np.uint32).reshape(-1, 3)
     val_p2i = get_p2i(val)
 
     d100k = get_batch(
-        range(task_cfg.sample_size),
+        range(task_args.sample_size),
         val,
         val_p2i,
         select="left",
         block_size=64,
-        device=task_cfg.device,
+        device=task_args.device,
         padding="random",
     )
 
     p100k = []
-    model.to(task_cfg.device)
+    model.to(task_args.device)
     batch_size = 512
     with torch.no_grad():
         for dd in tqdm(
@@ -194,7 +197,7 @@ def run_auc_eval(
             total=d100k[0].shape[0] // batch_size + 1,
         ):
             p100k.append(
-                model(*[x.to(task_cfg.device) for x in dd])[0].cpu().detach().numpy()
+                model(*[x.to(task_args.device) for x in dd])[0].cpu().detach().numpy()
             )
     p100k = np.vstack(p100k)
 
@@ -210,7 +213,7 @@ def run_auc_eval(
     )
 
     val_cohort = cohort_from_ukb_data(data=val)
-    val_cohort = val_cohort[range(task_cfg.sample_size)]
+    val_cohort = val_cohort[range(task_args.sample_size)]
 
     is_female = val_cohort.has_token(tokenizer[Gender.FEMALE.value])
     is_male = val_cohort.has_token(tokenizer[Gender.MALE.value])
@@ -222,14 +225,14 @@ def run_auc_eval(
 
     for gender, is_gender in is_gender_dict.items():
 
-        for disease in task_cfg.diseases:
+        for disease in task_args.diseases:
 
             disease_token = tokenizer[disease]
 
             auc_vals, ctl_counts, dis_counts, fig, ax = auc_by_age_group(
                 disease_token=disease_token,
                 val_trajectories=val_trajectories[is_gender],
-                config=task_cfg,
+                task_args=task_args,
             )
 
             pd.DataFrame(

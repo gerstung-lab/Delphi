@@ -1,0 +1,21 @@
+name: debug_gen
+ckpt_path: checkpoints/dkfz-demo
+prompt:
+  data_memmap: data/ukb_simulated_data_large/train.bin
+  subsample: 128
+  start_age_in_years: 60
+generator:
+  no_repeat: true
+  top_k: null
+  temperature: 1.0
+  max_age_in_years: 80
+  max_new_tokens: 128
+  termination_tokens:
+    - death
+  simulate_comorbid: true
+  comorbid_cutoff: 0.08
+  always_single_tokens:
+    - no_event
+    - death
+  device: cpu
+  batch_size: 128
