@@ -273,8 +273,6 @@ def load_prompt(
         (d[1].cpu().detach().numpy() <= start_age).any(1)
         * (d[3].cpu().detach().numpy() >= start_age).any(1)
     )
-    # select everything
-    # w = np.arange(d[0].shape[0])[None]
     u = np.unique(w[0])
 
     d0 = d[0][u].clone().detach()
@@ -320,10 +318,6 @@ def gen(gen_cfg: GenConfig) -> None:
 
     d0, d1 = load_prompt(cfg=gen_cfg.prompt)
 
-    token_batch_lst = []
-    timesteps_batch_lst = []
-    logits_batch_lst = []
-
     batch = 0
     for dd in zip(*map(lambda x: torch.split(x, gen_cfg.batch_size), (d0, d1))):
 
@@ -333,19 +327,15 @@ def gen(gen_cfg: GenConfig) -> None:
             dd[1].to(gen_cfg.device),
         )
 
-        token_batch_lst.append(idx.cpu().numpy().astype(np.uint16))
-        timesteps_batch_lst.append(age.cpu().numpy().astype(np.int32))
-        logits_batch_lst.append(logits.cpu().numpy().astype(np.float16))
+        tokens = idx.cpu().numpy().astype(np.uint16)
+        timesteps = age.cpu().numpy().astype(np.int32)
+        logits = logits.cpu().numpy().astype(np.float16)
+
+        np.save(arr=tokens, file=os.path.join(dump_dir, f"_{batch}_token.npy"))
+        np.save(arr=timesteps, file=os.path.join(dump_dir, f"_{batch}_timesteps.npy"))
+        np.save(arr=logits, file=os.path.join(dump_dir, f"_{batch}_logits.npy"))
 
         batch += 1
-
-    tokens = pack_arrays(token_batch_lst, pad_val=0)
-    timesteps = pack_arrays(timesteps_batch_lst, pad_val=-10000)
-    logits = pack_arrays(logits_batch_lst, pad_val=-np.inf)
-
-    np.save(arr=tokens, file=os.path.join(dump_dir, "token.npy"))
-    np.save(arr=timesteps, file=os.path.join(dump_dir, "timesteps.npy"))
-    np.save(arr=logits, file=os.path.join(dump_dir, "logits.npy"))
 
 
 def main():
