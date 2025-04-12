@@ -1,5 +1,6 @@
 import os
-from dataclasses import dataclass, field
+import time
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -24,6 +25,13 @@ from delphi.utils import get_batch, get_p2i
 
 
 @dataclass
+class LogConfig:
+    wandb_log: bool = True
+    wandb_project: str = "delphi"
+    wandb_run_name: str = "gen" + str(time.time())
+
+
+@dataclass
 class PromptConfig:
     data_memmap: str = "data/ukb_simulated_data/train.bin"
     subsample: Optional[int] = None
@@ -42,8 +50,6 @@ class GeneratorConfig:
     simulate_comorbid: bool = True
     comorbid_cutoff: float = 0.2
     always_single_tokens: list[str] = field(default_factory=list)
-    device: str = "cpu"
-    batch_size: int = 512
 
 
 @dataclass
@@ -52,6 +58,9 @@ class GenConfig:
     ckpt_path: str = "checkpoints/Delphi-demo"
     prompt: PromptConfig = field(default_factory=PromptConfig)
     generator: GeneratorConfig = field(default_factory=GeneratorConfig)
+    log: LogConfig = field(default_factory=LogConfig)
+    device: str = "cpu"
+    batch_size: int = 512
 
 
 def validate_generator_config():
@@ -83,6 +92,9 @@ class Generator:
         self.cfg = cfg
         self.model = model
         self.tokenizer = tokenizer
+
+        torch.manual_seed(cfg.seed)
+        torch.cuda.manual_seed(cfg.seed)
 
     @torch.no_grad()
     def next_token(
@@ -132,8 +144,12 @@ class Generator:
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
 
-        termination_tokens = torch.Tensor(
-            [self.tokenizer[token] for token in self.cfg.termination_tokens]
+        termination_tokens = (
+            torch.Tensor(
+                [self.tokenizer[token] for token in self.cfg.termination_tokens]
+            )
+            .to(idx.device)
+            .long()
         )
 
         max_age = self.cfg.max_age_in_years * DAYS_PER_YEAR
@@ -186,37 +202,6 @@ class Generator:
             ).transpose(0, 1)
 
         return idx, age, logits
-
-    def generate(
-        self,
-        d0: torch.Tensor,
-        d1: torch.Tensor,
-    ) -> tuple[list, list, list]:
-
-        torch.manual_seed(self.cfg.seed)
-        torch.cuda.manual_seed(self.cfg.seed)
-
-        token_paths = []
-        time_paths = []
-        logits_paths = []
-
-        self.model.to(self.cfg.device)
-        batch = 0
-        for dd in zip(*map(lambda x: torch.split(x, self.cfg.batch_size), (d0, d1))):
-
-            print(f"generating batch {batch}...")
-            idx, age, logits = self.generate_one_batch(
-                dd[0].to(self.cfg.device),
-                dd[1].to(self.cfg.device),
-            )
-
-            token_paths.append(idx.cpu().numpy())
-            time_paths.append(age.cpu().numpy())
-            logits_paths.append(logits.cpu().numpy())
-
-            batch += 1
-
-        return token_paths, time_paths, logits_paths
 
 
 def load_tokenizer(
@@ -282,8 +267,6 @@ def load_prompt(
         cut_batch=True,
     )
 
-    n_samples = 1024 * 1024  # TODO: find out the purpose of this
-
     start_age = cfg.start_age_in_years * DAYS_PER_YEAR
 
     w = np.where(
@@ -294,8 +277,8 @@ def load_prompt(
     # w = np.arange(d[0].shape[0])[None]
     u = np.unique(w[0])
 
-    d0 = d[0][u[:n_samples]].clone().detach()
-    d1 = d[1][u[:n_samples]].clone().detach()
+    d0 = d[0][u].clone().detach()
+    d1 = d[1][u].clone().detach()
 
     d0[d1 > start_age] = 0
     d1[d1 > start_age] = -10000.0
@@ -316,25 +299,52 @@ def gen(gen_cfg: GenConfig) -> None:
     Generate data using the generator.
     """
 
+    if gen_cfg.log.wandb_log:
+        import wandb
+
+        wandb.init(
+            project=gen_cfg.log.wandb_project,
+            name=gen_cfg.log.wandb_run_name,
+            config=asdict(gen_cfg),
+        )
+
     dump_dir = os.path.join(gen_cfg.ckpt_path, gen_cfg.name)
     os.makedirs(dump_dir, exist_ok=True)
     with open(os.path.join(dump_dir, "config.yaml"), "w") as f:
         OmegaConf.save(config=gen_cfg, f=f)
 
     model, _ = load_model(gen_cfg.ckpt_path)
+    model.to(gen_cfg.device)
     tokenizer = load_tokenizer(gen_cfg.ckpt_path)
     gen = Generator(cfg=gen_cfg.generator, model=model, tokenizer=tokenizer)
 
     d0, d1 = load_prompt(cfg=gen_cfg.prompt)
 
-    tokens, timesteps, logits = gen.generate(d0=d0, d1=d1)
+    token_batch_lst = []
+    timesteps_batch_lst = []
+    logits_batch_lst = []
 
-    tokens = pack_arrays(tokens, pad_val=0)
-    timesteps = pack_arrays(timesteps, pad_val=-10000)
-    logits = pack_arrays(logits, pad_val=-np.inf)
+    batch = 0
+    for dd in zip(*map(lambda x: torch.split(x, gen_cfg.batch_size), (d0, d1))):
+
+        print(f"generating batch {batch}...")
+        idx, age, logits = gen.generate_one_batch(
+            dd[0].to(gen_cfg.device),
+            dd[1].to(gen_cfg.device),
+        )
+
+        token_batch_lst.append(idx.cpu().numpy().astype(np.uint16))
+        timesteps_batch_lst.append(age.cpu().numpy().astype(np.int32))
+        logits_batch_lst.append(logits.cpu().numpy().astype(np.float16))
+
+        batch += 1
+
+    tokens = pack_arrays(token_batch_lst, pad_val=0)
+    timesteps = pack_arrays(timesteps_batch_lst, pad_val=-10000)
+    logits = pack_arrays(logits_batch_lst, pad_val=-np.inf)
 
     np.save(arr=tokens, file=os.path.join(dump_dir, "token.npy"))
-    np.save(arr=timesteps.astype(int), file=os.path.join(dump_dir, "timesteps.npy"))
+    np.save(arr=timesteps, file=os.path.join(dump_dir, "timesteps.npy"))
     np.save(arr=logits, file=os.path.join(dump_dir, "logits.npy"))
 
 
