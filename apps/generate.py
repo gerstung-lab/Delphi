@@ -56,39 +56,23 @@ class GeneratorConfig:
 class GenConfig:
     name: str = "debug"
     ckpt_path: str = "checkpoints/Delphi-demo"
+    device: str = "cpu"
+    batch_size: int = 512
+    save_tokens: bool = True
+    save_logits: bool = False
     prompt: PromptConfig = field(default_factory=PromptConfig)
     generator: GeneratorConfig = field(default_factory=GeneratorConfig)
     log: LogConfig = field(default_factory=LogConfig)
-    device: str = "cpu"
-    batch_size: int = 512
 
 
 def validate_generator_config():
     pass
 
 
-def pack_arrays(matrices: list[np.ndarray], pad_val: float = 0) -> np.ndarray:
-
-    max_cols = max(matrix.shape[1] for matrix in matrices)
-
-    padded_matrices = []
-
-    for matrix in matrices:
-        padding = max_cols - matrix.shape[1]
-        if padding > 0:
-            padded_matrix = np.pad(
-                matrix, ((0, 0), (0, padding)), mode="constant", constant_values=pad_val
-            )
-        else:
-            padded_matrix = matrix
-        padded_matrices.append(padded_matrix)
-
-    return np.vstack(padded_matrices)
-
-
 class Generator:
 
     def __init__(self, cfg: GeneratorConfig, model: Delphi, tokenizer: Tokenizer):
+
         self.cfg = cfg
         self.model = model
         self.tokenizer = tokenizer
@@ -133,7 +117,7 @@ class Generator:
 
     @clock
     @torch.no_grad()
-    def generate_one_batch(
+    def generate(
         self,
         idx: torch.Tensor,
         age: torch.Tensor,
@@ -318,22 +302,48 @@ def gen(gen_cfg: GenConfig) -> None:
 
     d0, d1 = load_prompt(cfg=gen_cfg.prompt)
 
+    prompt_len = (d0 > 0).sum().item()
+    max_total_len = prompt_len + gen_cfg.generator.max_new_tokens * d0.shape[0]
+    if gen_cfg.save_tokens:
+        gen_bin = np.memmap(
+            os.path.join(dump_dir, "gen.bin"),
+            dtype=np.uint32,
+            mode="w+",
+            shape=(int(max_total_len), 3),
+        )
+
     batch = 0
+    token_offset = 0
+    participant_offset = 0
     for dd in zip(*map(lambda x: torch.split(x, gen_cfg.batch_size), (d0, d1))):
 
         print(f"generating batch {batch}...")
-        idx, age, logits = gen.generate_one_batch(
+        idx, age, logits = gen.generate(
             dd[0].to(gen_cfg.device),
             dd[1].to(gen_cfg.device),
         )
+
+        batch_size = idx.shape[0]
 
         tokens = idx.cpu().numpy().astype(np.uint16)
         timesteps = age.cpu().numpy().astype(np.int32)
         logits = logits.cpu().numpy().astype(np.float16)
 
-        np.save(arr=tokens, file=os.path.join(dump_dir, f"_{batch}_token.npy"))
-        np.save(arr=timesteps, file=os.path.join(dump_dir, f"_{batch}_timesteps.npy"))
-        np.save(arr=logits, file=os.path.join(dump_dir, f"_{batch}_logits.npy"))
+        if gen_cfg.save_tokens:
+            sub_idx, pos_idx = np.nonzero(tokens > 0)
+            packed_batch_data = np.stack(
+                (
+                    sub_idx + participant_offset,
+                    tokens[sub_idx, pos_idx],
+                    timesteps[sub_idx, pos_idx],
+                ),
+                axis=-1,
+            )
+            combined_len = packed_batch_data.shape[0]
+            gen_bin[token_offset : token_offset + combined_len, :] = packed_batch_data
+            gen_bin.flush()
+            participant_offset += batch_size
+            token_offset += combined_len
 
         batch += 1
 

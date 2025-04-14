@@ -1,8 +1,12 @@
 name: debug_gen
 ckpt_path: checkpoints/dkfz-demo
+device: cpu
+batch_size: 128
+save_tokens: true
+save_logits: false
 prompt:
   data_memmap: data/ukb_simulated_data_large/train.bin
-  subsample: 128
+  subsample: 256
   start_age_in_years: 60
 generator:
   no_repeat: true
@@ -17,5 +21,3 @@ generator:
   always_single_tokens:
     - no_event
     - death
-  device: cpu
-  batch_size: 128
