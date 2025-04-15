@@ -1,5 +1,5 @@
 import os
-from typing import Callable, List, Literal, Optional, Tuple, Union
+from typing import Callable, Iterator, List, Literal, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -31,30 +31,101 @@ def get_p2i(data):
     return np.array(p2i)
 
 
-def data_loader(
-    dataset: "Dataset",
-    batch_size: int,
-    transforms: Optional[List[Callable]] = None,
-):
+def sort_by_time(X: np.ndarray, T: np.ndarray):
+
+    s = np.argsort(T, axis=1)
+    X = np.take_along_axis(X, s, axis=1)
+    T = np.take_along_axis(T, s, axis=1)
+
+    return X, T
+
+
+def squeeze(X: np.ndarray, T: np.ndarray):
+
+    squeeze_margin = np.min(np.sum(X == 0, axis=1))
+    X = X[:, squeeze_margin:]
+    T = T[:, squeeze_margin:]
+
+    return X, T
+
+
+def eval_iter(total_size: int, batch_size: int) -> Iterator[np.ndarray]:
+
+    batch_start_pos = np.arange(0, total_size, batch_size)
+    batch_end_pos = batch_start_pos + batch_size
+    batch_end_pos[-1] = total_size
+
+    for start, end in zip(batch_start_pos, batch_end_pos):
+        yield np.arange(start, end)
+
+
+def train_iter(total_size: int, batch_size: int) -> Iterator[np.ndarray]:
 
     while True:
+        yield np.random.randint(total_size, (batch_size,))
 
-        ix = np.random.randint(len(dataset), (batch_size,))
-        _, X, T = dataset.get_batch(ix)
+
+def load_and_transform_sequences(
+    idx_iterator: Iterator,
+    dataset: "Dataset",
+    transforms: Optional[List[Callable]] = None,
+) -> Iterator:
+
+    for idx in idx_iterator:
+
+        _, X, T = dataset.get_batch(idx)
 
         if transforms is not None:
             for transform in transforms:
                 X, T = transform(X, T)
 
+        X, T = sort_by_time(X=X, T=T)
+
+        X, T = squeeze(X=X, T=T)
+
         X = torch.tensor(X, dtype=torch.long)
         T = torch.tensor(T, dtype=torch.float)
 
-        X_t0 = X[:, :-1]
-        T_t0 = T[:, :-1]
-        X_t1 = X[:, 1:]
-        T_t1 = T[:, 1:]
+        yield X, T
 
-        yield X_t0, T_t0, X_t1, T_t1
+
+def build_prefetch_data_loader(data_loader: Iterator) -> Iterator:
+
+    sentinel = object()
+    next_batch = next(data_loader)
+
+    while True:
+        yield next_batch
+        next_batch = next(data_loader, sentinel)
+        if next_batch is sentinel:
+            return
+
+
+def dataset_from_ukb(
+    data: Optional[np.ndarray] = None, data_path: Optional[str] = None
+) -> "Dataset":
+
+    if data is None:  # if raw data is not provided, load from file
+        assert data_path is not None, "Either data_path or data must be provided"
+        assert data_path.endswith(".bin"), "Cohort data must be a .bin NumPy memory bin"
+        data = np.fromfile(data_path, dtype=np.uint32).reshape(-1, 3)
+    else:
+        data = data  # allow direct data injection
+
+    p2i = get_p2i(data)
+    participants = p2i[:, 0]
+    seq_len = p2i[:, 1]
+    start_pos = np.cumsum(p2i[:, 1]) - p2i[:, 1]
+    tokens = data[:, 2] + 1
+    time_steps = data[:, 1]
+
+    return Dataset(
+        participants=participants,
+        tokens=tokens,
+        time_steps=time_steps,
+        start_pos=start_pos,
+        seq_len=seq_len,
+    )
 
 
 def cohort_from_ukb_data(
@@ -122,23 +193,25 @@ class Dataset:
     def get_batch(self, batch_idx):
 
         batch_size = batch_idx.size
-        batch_len = self.seq_len[batch_idx]
-        batch_slice = np.concatenate(
-            [np.arange(s, s + l) for s, l in zip(self.start_pos[batch_idx], batch_len)]
+        batch_seq_len = self.seq_len[batch_idx]
+        batch_seq_slice = np.concatenate(
+            [
+                np.arange(s, s + l)
+                for s, l in zip(self.start_pos[batch_idx], batch_seq_len)
+            ]
         )
-        batch_tokens = self.tokens[batch_slice]
-        batch_time_steps = self.time_steps[batch_slice]
-        row_idx = np.repeat(np.arange(batch_size), batch_len)
-        col_idx = np.concatenate([np.arange(length) for length in batch_len])
+        batch_tokens = self.tokens[batch_seq_slice]
+        batch_time_steps = self.time_steps[batch_seq_slice]
+        row_idx = np.repeat(np.arange(batch_size), batch_seq_len)
+        col_idx = np.concatenate([np.arange(length) for length in batch_seq_len])
 
         P = self.participants[batch_idx]
 
         X = coo_array(
-            (batch_tokens, (row_idx, col_idx)), shape=(batch_size, batch_len.max())
+            (batch_tokens, (row_idx, col_idx)), shape=(batch_size, batch_seq_len.max())
         ).toarray()
-        T = coo_array(
-            (batch_time_steps, (row_idx, col_idx)), shape=(batch_size, batch_len.max())
-        ).toarray()
+        T = np.full(X.shape, -10000, dtype=np.float32)
+        T[row_idx, col_idx] = batch_time_steps
 
         return P, X, T
 

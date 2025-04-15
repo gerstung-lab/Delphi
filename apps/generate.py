@@ -10,6 +10,16 @@ from omegaconf import OmegaConf
 
 from delphi import DAYS_PER_YEAR
 from delphi.config import dataclass_from_dict
+from delphi.data.dataset import (
+    build_prefetch_data_loader,
+    dataset_from_ukb,
+    eval_iter,
+    load_and_transform_sequences,
+)
+from delphi.data.transform import (
+    AddNoEvent,
+    Prompt,
+)
 from delphi.eval import clock
 from delphi.model.transformer import Delphi, DelphiConfig
 from delphi.sample import (
@@ -21,7 +31,6 @@ from delphi.tokenizer import (
     Tokenizer,
     load_tokenizer_from_yaml,
 )
-from delphi.utils import get_batch, get_p2i
 
 
 @dataclass
@@ -36,6 +45,8 @@ class PromptConfig:
     data_memmap: str = "data/ukb_simulated_data/train.bin"
     subsample: Optional[int] = None
     start_age_in_years: float = 60
+    no_event_interval: int = 5
+    no_event_mode: str = "random"
 
 
 @dataclass
@@ -46,6 +57,7 @@ class GeneratorConfig:
     temperature: float = 1.0
     max_age_in_years: float = 80
     max_new_tokens: int = 128
+    max_total_tokens: int = 256
     termination_tokens: list[str] = field(default_factory=list)
     simulate_comorbid: bool = True
     comorbid_cutoff: float = 0.2
@@ -137,7 +149,8 @@ class Generator:
         )
 
         max_age = self.cfg.max_age_in_years * DAYS_PER_YEAR
-        n_new_tokens = 0
+        n_new = 0
+        n_total = 0
         while True:
 
             idx_next, time_til_next = self.next_token(
@@ -147,8 +160,11 @@ class Generator:
             age_next = age[..., [-1]] + time_til_next
             age_next[time_til_next == -10000] = -10000
 
-            n_new_tokens += idx_next.shape[1]
-            if n_new_tokens >= self.cfg.max_new_tokens:
+            n_new += idx_next.shape[1]
+            too_many_new = n_new > self.cfg.max_new_tokens
+            n_total = idx_next.shape[1] + idx.shape[1]
+            too_many_total = n_total > self.cfg.max_total_tokens
+            if too_many_new or too_many_total:
                 break
 
             idx = torch.cat((idx, idx_next), dim=1)
@@ -165,6 +181,7 @@ class Generator:
                 break
 
         exceed_max_age = age > max_age
+        # mask all tokens after the *second* occurrence of a termination token
         beyond_termination = (
             torch.cumsum(torch.cumsum(is_termination_token.int(), 1), 1) > 1
         )
@@ -227,55 +244,6 @@ def load_model(
     return model, train_cfg
 
 
-def load_prompt(
-    cfg: PromptConfig,
-) -> tuple[torch.Tensor, torch.Tensor]:
-
-    val = np.fromfile(cfg.data_memmap, dtype=np.uint32).reshape(-1, 3)
-
-    val_p2i = get_p2i(val)
-
-    if cfg.subsample is not None:
-        ix = range(0, cfg.subsample, 1)
-    else:
-        ix = range(0, val_p2i.shape[0] - 1, 1)
-
-    d = get_batch(
-        ix=ix,
-        data=val,
-        p2i=val_p2i,
-        select="left",
-        block_size=63,
-        device="cpu",  # TODO: fix this with a proper device
-        padding="random",
-        cut_batch=True,
-    )
-
-    start_age = cfg.start_age_in_years * DAYS_PER_YEAR
-
-    w = np.where(
-        (d[1].cpu().detach().numpy() <= start_age).any(1)
-        * (d[3].cpu().detach().numpy() >= start_age).any(1)
-    )
-    u = np.unique(w[0])
-
-    d0 = d[0][u].clone().detach()
-    d1 = d[1][u].clone().detach()
-
-    d0[d1 > start_age] = 0
-    d1[d1 > start_age] = -10000.0
-
-    if start_age > 0:
-        d0 = torch.nn.functional.pad(d0, (0, 1), "constant", 1)
-        d1 = torch.nn.functional.pad(d1, (0, 1), "constant", start_age)
-
-    o = d1.argsort(1)
-    d0 = d0.gather(1, o)
-    d1 = d1.gather(1, o)
-
-    return d0, d1
-
-
 def gen(gen_cfg: GenConfig) -> None:
     """
     Generate data using the generator.
@@ -298,12 +266,38 @@ def gen(gen_cfg: GenConfig) -> None:
     model, _ = load_model(gen_cfg.ckpt_path)
     model.to(gen_cfg.device)
     tokenizer = load_tokenizer(gen_cfg.ckpt_path)
-    gen = Generator(cfg=gen_cfg.generator, model=model, tokenizer=tokenizer)
+    generator = Generator(cfg=gen_cfg.generator, model=model, tokenizer=tokenizer)
 
-    d0, d1 = load_prompt(cfg=gen_cfg.prompt)
+    ds = dataset_from_ukb(data_path=gen_cfg.prompt.data_memmap)
+    transforms = [
+        AddNoEvent(
+            no_event_interval=gen_cfg.prompt.no_event_interval,
+            mode=gen_cfg.prompt.no_event_mode,
+            tokenizer=tokenizer,
+        ),
+        Prompt(
+            tokenizer=tokenizer,
+            start_age=gen_cfg.prompt.start_age_in_years * DAYS_PER_YEAR,
+        ),
+    ]
 
-    prompt_len = (d0 > 0).sum().item()
-    max_total_len = prompt_len + gen_cfg.generator.max_new_tokens * d0.shape[0]
+    n_seq = (
+        ds.n_participants
+        if gen_cfg.prompt.subsample is None
+        else gen_cfg.prompt.subsample
+    )
+    it = eval_iter(
+        total_size=n_seq,
+        batch_size=gen_cfg.batch_size,
+    )
+    loader = load_and_transform_sequences(
+        idx_iterator=it,
+        dataset=ds,
+        transforms=transforms,
+    )
+    loader = build_prefetch_data_loader(data_loader=loader)
+
+    max_total_len = gen_cfg.generator.max_total_tokens * n_seq
     if gen_cfg.save_tokens:
         gen_bin = np.memmap(
             os.path.join(dump_dir, "gen.bin"),
@@ -315,10 +309,10 @@ def gen(gen_cfg: GenConfig) -> None:
     batch = 0
     token_offset = 0
     participant_offset = 0
-    for dd in zip(*map(lambda x: torch.split(x, gen_cfg.batch_size), (d0, d1))):
+    for dd in loader:
 
         print(f"generating batch {batch}...")
-        idx, age, logits = gen.generate(
+        idx, age, logits = generator.generate(
             dd[0].to(gen_cfg.device),
             dd[1].to(gen_cfg.device),
         )
