@@ -8,4 +8,4 @@ common_commands.txt
 data/synthetic
 .ipynb_checkpoints
 logs
-submit/dkfz/*.yaml
+submit/dkfz/exp/*.yaml

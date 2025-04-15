@@ -1,9 +1,9 @@
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
 
-from dacite import from_dict
 from omegaconf import OmegaConf
 
 
@@ -74,9 +74,11 @@ def main():
             command += f" -gpu {gpu_args}"
 
         if run_cfg.stdout:
+            os.makedirs(os.path.dirname(run_cfg.stdout), exist_ok=True)
             command += f" -o {run_cfg.stdout}"
 
         if run_cfg.stderr:
+            os.makedirs(os.path.dirname(run_cfg.stderr), exist_ok=True)
             command += f" -e {run_cfg.stderr}"
 
         command += f" -q {run_cfg.queue}"
