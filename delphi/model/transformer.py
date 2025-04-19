@@ -10,12 +10,15 @@ https://github.com/huggingface/transformers/blob/main/src/transformers/models/gp
 import inspect
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 import torch
 import torch.nn as nn
+from omegaconf import OmegaConf
 from torch.nn import functional as F
 
+from delphi.config import dataclass_from_dict
 from delphi.model.components import (
     AgeEncoding,
     DelphiEmbedding,
@@ -40,22 +43,6 @@ class DelphiConfig:
     ignore_tokens: list = field(default_factory=lambda: [0])
     zero_time_inflation: bool = False
     pi_projector: str = "linear"  # 'linear' or 'mlp'
-
-
-# @torch.jit.script # good to enable when not using torch.compile, disable when using (our default)
-def new_gelu(x):
-    """
-    Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT).
-    Reference: Gaussian Error Linear Units (GELU) paper: https://arxiv.org/abs/1606.08415
-    """
-    return (
-        0.5
-        * x
-        * (
-            1.0
-            + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow(x, 3.0)))
-        )
-    )
 
 
 class LayerNorm(nn.Module):
@@ -98,9 +85,8 @@ class CausalSelfAttention(nn.Module):
             )
 
     def forward(self, x, attn_mask):
-        B, T, C = (
-            x.size()
-        )  # batch size, sequence length, embedding dimensionality (n_embd)
+        B, T, C = x.size()
+        # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
@@ -143,11 +129,12 @@ class MLP(nn.Module):
         super().__init__()
         self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
         self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
+        self.gelu = nn.GELU(approximate="tanh")
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
         x = self.c_fc(x)
-        x = new_gelu(x)
+        x = self.gelu(x)
         x = self.c_proj(x)
         x = self.dropout(x)
         return x
@@ -309,9 +296,6 @@ class Delphi(nn.Module):
             for k in ignored_tokens:  # and gender
                 pass_tokens *= targets != k
 
-            # age_min = age.gather(1,(((idx >=4) * (idx <=12)) + 0).argmax(1)[:,None])
-            # logits[...,-1][age <= age_min] = -100. #-float('Inf') ## Death can only occur after age_min
-
             loss_ce = F.cross_entropy(
                 logits.reshape(-1, logits.size(-1))[pass_tokens],
                 targets[pass_tokens],
@@ -437,21 +421,61 @@ class Delphi(nn.Module):
 
         return optimizer
 
-    def estimate_mfu(self, fwdbwd_per_iter, dt):
-        """estimate model flops utilization (MFU) in units of A100 bfloat16 peak FLOPS"""
-        # first estimate the number of flops we do per iteration.
-        # see PaLM paper Appendix B as ref: https://arxiv.org/abs/2204.02311
-        N = self.get_num_params()
-        cfg = self.config
-        L, H, Q, T = cfg.n_layer, cfg.n_head, cfg.n_embd // cfg.n_head, cfg.block_size
-        flops_per_token = 6 * N + 12 * L * H * Q * T
-        flops_per_fwdbwd = flops_per_token * T
-        flops_per_iter = flops_per_fwdbwd * fwdbwd_per_iter
-        # express our flops throughput as ratio of A100 bfloat16 peak flops
-        flops_achieved = flops_per_iter * (1.0 / dt)  # per second
-        flops_promised = 312e12  # A100 GPU bfloat16 peak flops is 312 TFLOPS
-        mfu = flops_achieved / flops_promised
-        return mfu
+    def loss(self):
+        pass
+
+    def ce_loss(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+
+        loss_ce = F.cross_entropy(
+            logits,
+            targets,
+            ignore_index=-1,
+        )
+
+        return loss_ce
+
+    def time_loss(
+        self,
+        logits: torch.Tensor,
+        age: torch.Tensor,
+        targets_age: torch.Tensor,
+    ) -> torch.Tensor:
+
+        # time to next event loss, padding masked
+        lse = torch.logsumexp(
+            logits, -1
+        )  ## More forgiving than using torch.max() for the most likely next event
+        lse = -torch.log(torch.exp(-lse) + self.config.t_min)
+        dt = targets_age - age
+        dt = torch.clamp(dt, min=1.0)
+        ldt = -torch.log(dt + torch.tensor(self.config.t_min))
+        exp_log_likelihood = lse - torch.exp(lse - ldt)
+        loss_dt = -exp_log_likelihood.reshape(-1)
+
+        return loss_dt
+
+    def zero_inflated_time_loss(
+        self,
+        logits: torch.Tensor,
+        age: torch.Tensor,
+        targets_age: torch.Tensor,
+    ) -> torch.Tensor:
+
+        pi = self.pi_head(logits).squeeze()
+
+        lse = torch.logsumexp(logits, -1)
+        lse = -torch.log(torch.exp(-lse) + self.config.t_min)
+        dt = targets_age - age
+
+        ldt = -torch.log(dt + torch.tensor(self.config.t_min))
+        exp_log_likelihood = lse - torch.exp(lse - ldt)
+        loss_dt = -exp_log_likelihood.reshape(-1)
+
+        zero_case = -(F.softplus(-pi + lse) - F.softplus(-pi))
+        nonzero_case = -(exp_log_likelihood - pi - F.softplus(-pi))
+        loss_dt = (zero_case * (dt == 0) + nonzero_case * (dt > 0)).reshape(-1)
+
+        return loss_dt
 
     @torch.no_grad()
     def generate(
@@ -532,3 +556,32 @@ class Delphi(nn.Module):
             ).transpose(0, 1)
 
         return idx, age, logits
+
+
+def load_model(
+    ckpt_path,
+    model_cls=Delphi,
+    model_cfg_cls=DelphiConfig,
+):
+
+    ckpt_path = Path(ckpt_path)
+    train_cfg = OmegaConf.load(ckpt_path / "config.yaml")
+    ckpt_dict = torch.load(
+        ckpt_path / "ckpt.pt",
+        map_location=torch.device("cpu") if not torch.cuda.is_available() else None,
+    )
+
+    param_dtype = dict(
+        float32=torch.float32,
+        float64=torch.float64,
+        float16=torch.float16,
+        bfloat16=torch.bfloat16,
+    )[train_cfg.dtype]
+    model_cfg = dataclass_from_dict(model_cfg_cls, train_cfg.model, strict=False)
+    model = model_cls(model_cfg)
+    model.load_state_dict(ckpt_dict["model"])
+    model = model.eval()
+    for param in model.parameters():
+        param.data = param.data.to(dtype=param_dtype)
+
+    return model, train_cfg

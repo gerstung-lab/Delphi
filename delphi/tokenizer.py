@@ -1,5 +1,7 @@
+import os
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 
 import yaml
 from dacite import from_dict
@@ -58,6 +60,8 @@ class Tokenizer:
             self[CoreEvents.PADDING.value] == 0
         ), "padding token must be the same as the padding key"
 
+        self.vocab_size = len(self.disease_ids)
+
     def __getitem__(self, key: str) -> int:
         if key not in self.mapping:
             raise KeyError(f"disease key {key} not found in tokenizer.")
@@ -87,3 +91,13 @@ def load_tokenizer_from_yaml(
         )
 
     return Tokenizer(tokenizer_schema)
+
+
+def load_tokenizer_from_ckpt(
+    ckpth_path,
+) -> Tokenizer:
+
+    tokenizer_path = os.path.join(ckpth_path, "tokenizer.yaml")
+    tokenizer = load_tokenizer_from_yaml(tokenizer_path)
+
+    return tokenizer

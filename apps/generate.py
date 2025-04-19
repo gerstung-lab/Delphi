@@ -1,359 +1,123 @@
+import math
 import os
-import time
-from dataclasses import asdict, dataclass, field
-from pathlib import Path
+from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
-import torch
 from omegaconf import OmegaConf
 
-from delphi import DAYS_PER_YEAR
-from delphi.config import dataclass_from_dict
 from delphi.data.dataset import (
-    build_prefetch_data_loader,
-    dataset_from_ukb,
+    PromptDataset,
+    UKBDataConfig,
+    build_prefetch_loader,
     eval_iter,
-    load_and_transform_sequences,
+    load_sequences,
 )
-from delphi.data.transform import (
-    AddNoEvent,
-    Prompt,
-)
-from delphi.eval import clock
-from delphi.model.transformer import Delphi, DelphiConfig
-from delphi.sample import (
-    sample_comorbid_based_on_cutoff,
-    sample_competing_exponentials,
-    truncate_top_k,
+from delphi.log import GenLogConfig, GenLogger
+from delphi.model.transformer import Delphi, load_model
+from delphi.sampler import (
+    CausalSampler,
+    CausalSamplerConfig,
 )
 from delphi.tokenizer import (
     Tokenizer,
-    load_tokenizer_from_yaml,
+    load_tokenizer_from_ckpt,
 )
-
-
-@dataclass
-class LogConfig:
-    wandb_log: bool = True
-    wandb_project: str = "delphi"
-    wandb_run_name: str = "gen" + str(time.time())
-
-
-@dataclass
-class PromptConfig:
-    data_memmap: str = "data/ukb_simulated_data/train.bin"
-    subsample: Optional[int] = None
-    start_age_in_years: float = 60
-    no_event_interval: int = 5
-    no_event_mode: str = "random"
-
-
-@dataclass
-class GeneratorConfig:
-    seed: int = 1337
-    no_repeat: bool = True
-    top_k: Optional[int] = None
-    temperature: float = 1.0
-    max_age_in_years: float = 80
-    max_new_tokens: int = 128
-    max_total_tokens: int = 256
-    termination_tokens: list[str] = field(default_factory=list)
-    simulate_comorbid: bool = True
-    comorbid_cutoff: float = 0.2
-    always_single_tokens: list[str] = field(default_factory=list)
 
 
 @dataclass
 class GenConfig:
     name: str = "debug"
-    ckpt_path: str = "checkpoints/Delphi-demo"
     device: str = "cpu"
     batch_size: int = 512
-    save_tokens: bool = True
-    save_logits: bool = False
-    prompt: PromptConfig = field(default_factory=PromptConfig)
-    generator: GeneratorConfig = field(default_factory=GeneratorConfig)
-    log: LogConfig = field(default_factory=LogConfig)
+    subsample: Optional[int] = None
+    start_age_in_years: float = 60.0
+    data: UKBDataConfig = field(default_factory=UKBDataConfig)
+    sampler: CausalSamplerConfig = field(default_factory=CausalSamplerConfig)
+    log: GenLogConfig = field(default_factory=GenLogConfig)
 
 
-def validate_generator_config():
-    pass
-
-
-class Generator:
-
-    def __init__(self, cfg: GeneratorConfig, model: Delphi, tokenizer: Tokenizer):
-
-        self.cfg = cfg
-        self.model = model
-        self.tokenizer = tokenizer
-
-        torch.manual_seed(cfg.seed)
-        torch.cuda.manual_seed(cfg.seed)
-
-    @torch.no_grad()
-    def next_token(
-        self,
-        idx: torch.Tensor,
-        age: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-
-        logits, _, _ = self.model(idx, age)
-
-        logits = logits[:, -1, :] / self.cfg.temperature
-
-        logits[:, self.model.config.ignore_tokens] = -torch.inf
-
-        if self.cfg.top_k is not None:
-            logits = truncate_top_k(logits, self.cfg.top_k)
-
-        if self.cfg.no_repeat:
-            fill = idx + 0
-            fill[fill == 1] = 0
-            logits = logits.scatter_(1, fill, -torch.inf)
-
-        if self.cfg.simulate_comorbid:
-            always_single_tokens = [
-                self.tokenizer[disease] for disease in self.cfg.always_single_tokens
-            ]
-            idx_next, time_til_next = sample_comorbid_based_on_cutoff(
-                logits=logits,
-                comorbid_cutoff=self.cfg.comorbid_cutoff,
-                always_single_tokens=always_single_tokens,
-            )
-        else:
-            idx_next, time_til_next = sample_competing_exponentials(logits)
-
-        return idx_next, time_til_next
-
-    @clock
-    @torch.no_grad()
-    def generate(
-        self,
-        idx: torch.Tensor,
-        age: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
-        the sequence max_new_tokens times, feeding the predictions back into the model each time.
-        Most likely you'll want to make sure to be in model.eval() mode of operation for this.
-        """
-
-        termination_tokens = (
-            torch.Tensor(
-                [self.tokenizer[token] for token in self.cfg.termination_tokens]
-            )
-            .to(idx.device)
-            .long()
-        )
-
-        max_age = self.cfg.max_age_in_years * DAYS_PER_YEAR
-        n_new = 0
-        n_total = 0
-        while True:
-
-            idx_next, time_til_next = self.next_token(
-                idx=idx,
-                age=age,
-            )
-            age_next = age[..., [-1]] + time_til_next
-            age_next[time_til_next == -10000] = -10000
-
-            n_new += idx_next.shape[1]
-            too_many_new = n_new > self.cfg.max_new_tokens
-            n_total = idx_next.shape[1] + idx.shape[1]
-            too_many_total = n_total > self.cfg.max_total_tokens
-            if too_many_new or too_many_total:
-                break
-
-            idx = torch.cat((idx, idx_next), dim=1)
-            age = torch.cat((age, age_next), dim=1)
-
-            sort_by_time = age.argsort(1)
-            idx = idx.gather(1, sort_by_time)
-            age = age.gather(1, sort_by_time)
-
-            is_termination_token = torch.isin(idx, termination_tokens)
-            if torch.logical_or(
-                is_termination_token.any(-1), (age_next > max_age).any(-1)
-            ).all():
-                break
-
-        exceed_max_age = age > max_age
-        # mask all tokens after the *second* occurrence of a termination token
-        beyond_termination = (
-            torch.cumsum(torch.cumsum(is_termination_token.int(), 1), 1) > 1
-        )
-
-        pad = exceed_max_age | beyond_termination
-        idx[pad] = 0
-        age[pad] = -10000
-
-        logits, _, _ = self.model(idx, age)
-
-        if self.cfg.no_repeat:
-            fill = idx + 0
-            fill[fill == 1] = 0
-            logits = torch.stack(
-                [
-                    logits[:, j].scatter_(1, fill[:, : j + 1], float("NaN"))
-                    for j in range(fill.shape[1])
-                ]
-            ).transpose(0, 1)
-
-        return idx, age, logits
-
-
-def load_tokenizer(
-    ckpth_path,
-) -> Tokenizer:
-
-    tokenizer_path = Path(ckpth_path) / "tokenizer.yaml"
-    tokenizer = load_tokenizer_from_yaml(tokenizer_path)
-
-    return tokenizer
-
-
-def load_model(
-    ckpt_path,
-    model_cls=Delphi,
-    model_cfg_cls=DelphiConfig,
-):
-
-    ckpt_path = Path(ckpt_path)
-    train_cfg = OmegaConf.load(ckpt_path / "config.yaml")
-    ckpt_dict = torch.load(
-        ckpt_path / "ckpt.pt",
-        map_location=torch.device("cpu") if not torch.cuda.is_available() else None,
-    )
-
-    param_dtype = dict(
-        float32=torch.float32,
-        float64=torch.float64,
-        float16=torch.float16,
-        bfloat16=torch.bfloat16,
-    )[train_cfg.dtype]
-    model_cfg = dataclass_from_dict(model_cfg_cls, train_cfg.model, strict=False)
-    model = model_cls(model_cfg)
-    model.load_state_dict(ckpt_dict["model"])
-    model = model.eval()
-    for param in model.parameters():
-        param.data = param.data.to(dtype=param_dtype)
-
-    return model, train_cfg
-
-
-def gen(gen_cfg: GenConfig) -> None:
+def gen(
+    gen_cfg: GenConfig,
+    ckpt: str,
+    model: Optional[Delphi] = None,
+    tokenizer: Optional[Tokenizer] = None,
+) -> None:
     """
     Generate data using the generator.
     """
 
-    if gen_cfg.log.wandb_log:
-        import wandb
+    if model is None:
+        model, _ = load_model(ckpt)
+    model.eval()
+    model.to(gen_cfg.device)
 
-        wandb.init(
-            project=gen_cfg.log.wandb_project,
-            name=gen_cfg.log.wandb_run_name,
-            config=asdict(gen_cfg),
-        )
+    if tokenizer is None:
+        tokenizer = load_tokenizer_from_ckpt(ckpt)
 
-    dump_dir = os.path.join(gen_cfg.ckpt_path, gen_cfg.name)
+    dump_dir = os.path.join(ckpt, gen_cfg.name)
     os.makedirs(dump_dir, exist_ok=True)
+    logger = GenLogger(cfg=gen_cfg.log, dump_dir=dump_dir)
     with open(os.path.join(dump_dir, "config.yaml"), "w") as f:
         OmegaConf.save(config=gen_cfg, f=f)
 
-    model, _ = load_model(gen_cfg.ckpt_path)
-    model.to(gen_cfg.device)
-    tokenizer = load_tokenizer(gen_cfg.ckpt_path)
-    generator = Generator(cfg=gen_cfg.generator, model=model, tokenizer=tokenizer)
+    sampler = CausalSampler(cfg=gen_cfg.sampler, model=model, tokenizer=tokenizer)
 
-    ds = dataset_from_ukb(data_path=gen_cfg.prompt.data_memmap)
-    transforms = [
-        AddNoEvent(
-            no_event_interval=gen_cfg.prompt.no_event_interval,
-            mode=gen_cfg.prompt.no_event_mode,
-            tokenizer=tokenizer,
-        ),
-        Prompt(
-            tokenizer=tokenizer,
-            start_age=gen_cfg.prompt.start_age_in_years * DAYS_PER_YEAR,
-        ),
-    ]
+    ds = PromptDataset(gen_cfg.data, start_age_in_years=gen_cfg.start_age_in_years)
 
-    n_seq = (
-        ds.n_participants
-        if gen_cfg.prompt.subsample is None
-        else gen_cfg.prompt.subsample
-    )
-    it = eval_iter(
-        total_size=n_seq,
-        batch_size=gen_cfg.batch_size,
-    )
-    loader = load_and_transform_sequences(
-        idx_iterator=it,
-        dataset=ds,
-        transforms=transforms,
-    )
-    loader = build_prefetch_data_loader(data_loader=loader)
+    n_participants = len(ds) if gen_cfg.subsample is None else gen_cfg.subsample
 
-    max_total_len = gen_cfg.generator.max_total_tokens * n_seq
-    if gen_cfg.save_tokens:
-        gen_bin = np.memmap(
-            os.path.join(dump_dir, "gen.bin"),
-            dtype=np.uint32,
-            mode="w+",
-            shape=(int(max_total_len), 3),
+    it = eval_iter(total_size=n_participants, batch_size=gen_cfg.batch_size)
+    total_batch = math.ceil(n_participants / gen_cfg.batch_size)
+    loader = load_sequences(it=it, dataset=ds)
+    loader = build_prefetch_loader(loader=loader)
+
+    n_max_token = n_participants * gen_cfg.sampler.max_new_tokens
+    logger.init_memmaps(
+        n_max_token=n_max_token,
+        # +1 to account for 0 padding
+        n_vocab=tokenizer.vocab_size + 1,
+    )
+
+    batch = 1
+    for P, X, T in loader:
+
+        print(f"generating batch {batch}/{total_batch}...")
+        idx, age, logits = sampler.generate(
+            X.to(gen_cfg.device),
+            T.to(gen_cfg.device),
         )
-
-    batch = 0
-    token_offset = 0
-    participant_offset = 0
-    for dd in loader:
-
-        print(f"generating batch {batch}...")
-        idx, age, logits = generator.generate(
-            dd[0].to(gen_cfg.device),
-            dd[1].to(gen_cfg.device),
-        )
-
-        batch_size = idx.shape[0]
 
         tokens = idx.cpu().numpy().astype(np.uint16)
         timesteps = age.cpu().numpy().astype(np.int32)
         logits = logits.cpu().numpy().astype(np.float16)
 
-        if gen_cfg.save_tokens:
-            sub_idx, pos_idx = np.nonzero(tokens > 0)
-            packed_batch_data = np.stack(
-                (
-                    sub_idx + participant_offset,
-                    tokens[sub_idx, pos_idx],
-                    timesteps[sub_idx, pos_idx],
-                ),
-                axis=-1,
-            )
-            combined_len = packed_batch_data.shape[0]
-            gen_bin[token_offset : token_offset + combined_len, :] = packed_batch_data
-            gen_bin.flush()
-            participant_offset += batch_size
-            token_offset += combined_len
+        logger.write_memmaps(
+            participants=P.cpu().numpy(),
+            tokens=tokens,
+            timesteps=timesteps,
+            logits=logits,
+        )
 
         batch += 1
+
+    logger.close()
 
 
 def main():
 
     cli_args = OmegaConf.from_cli()
     file_cfg = OmegaConf.load(cli_args.config)
-    # We remove 'config' attribute from config as the underlying DataClass does not have it
     del cli_args.config
+    ckpt = cli_args.ckpt
+    del cli_args.ckpt
+    # remove 'config' and 'ckpt' attributes as the underlying dataclass does not have it
 
     default_cfg = OmegaConf.structured(GenConfig)
     gen_cfg = OmegaConf.merge(default_cfg, file_cfg, cli_args)
     gen_cfg = OmegaConf.to_object(gen_cfg)
 
-    gen(gen_cfg)
+    gen(gen_cfg=gen_cfg, ckpt=ckpt)  # type: ignore
 
 
 if __name__ == "__main__":

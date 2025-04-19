@@ -1,19 +1,25 @@
 name: debug_gen
-ckpt_path: checkpoints/dkfz-demo
 device: cpu
 batch_size: 128
-save_tokens: true
-save_logits: false
-prompt:
-  data_memmap: data/ukb_simulated_data_large/train.bin
-  subsample: 256
-  start_age_in_years: 60
-generator:
+subsample: 256
+start_age_in_years: 60
+data:
+  data_dir: data/ukb_simulated_data_large
+  memmap_fname: train.bin
+  tokenizer_fname: tokenizer.yaml
+  transforms:
+    - name: no-event
+      args:
+        interval_in_years: 5
+        mode: random
+sampler:
+  seed: 42
   no_repeat: true
   top_k: null
   temperature: 1.0
   max_age_in_years: 80
-  max_new_tokens: 128
+  max_new_tokens: 64
+  max_total_tokens: 128
   termination_tokens:
     - death
   simulate_comorbid: true
@@ -21,3 +27,8 @@ generator:
   always_single_tokens:
     - no_event
     - death
+log:
+  save_tokens: true
+  save_logits: true
+  flush_interval: 10
+  wandb_log: true

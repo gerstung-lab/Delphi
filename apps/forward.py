@@ -1,0 +1,108 @@
+import math
+import os
+from dataclasses import dataclass, field
+from typing import Optional
+
+import numpy as np
+import torch
+from omegaconf import OmegaConf
+from tqdm import tqdm
+
+from delphi.data.dataset import (
+    Dataset,
+    UKBDataConfig,
+    build_prefetch_loader,
+    eval_iter,
+    load_sequences,
+)
+from delphi.log import GenLogConfig, GenLogger
+from delphi.model.transformer import Delphi, load_model
+from delphi.tokenizer import (
+    Tokenizer,
+    load_tokenizer_from_ckpt,
+)
+
+
+@dataclass
+class FeedForwardConfig:
+    name: str = "debug"
+    device: str = "cpu"
+    batch_size: int = 512
+    subsample: Optional[int] = None
+    data: UKBDataConfig = field(default_factory=UKBDataConfig)
+    log: GenLogConfig = field(default_factory=GenLogConfig)
+
+
+def forward(
+    cfg: FeedForwardConfig,
+    ckpt: str,
+    model: Optional[Delphi] = None,
+    tokenizer: Optional[Tokenizer] = None,
+) -> np.ndarray:
+
+    if model is None:
+        model, _ = load_model(ckpt)
+    model.eval()
+    model.to(cfg.device)
+
+    if tokenizer is None:
+        tokenizer = load_tokenizer_from_ckpt(ckpt)
+
+    dump_dir = os.path.join(ckpt, cfg.name)
+    os.makedirs(dump_dir, exist_ok=True)
+    logger = GenLogger(cfg=cfg.log, dump_dir=dump_dir)
+    with open(os.path.join(dump_dir, "config.yaml"), "w") as f:
+        OmegaConf.save(config=cfg, f=f)
+
+    ds = Dataset(cfg.data)
+
+    n_participants = len(ds) if cfg.subsample is None else cfg.subsample
+
+    it = eval_iter(total_size=n_participants, batch_size=cfg.batch_size)
+    loader = load_sequences(it=it, dataset=ds)
+    loader = build_prefetch_loader(loader=loader)
+
+    # todo: fix quick & dirty estimate
+    n_max_token = ds.seq_len[:n_participants].sum() + 20 * n_participants
+    logger.init_memmaps(
+        n_max_token=n_max_token,
+        # +1 to account for 0 padding
+        n_vocab=tokenizer.vocab_size + 1,
+    )
+
+    loader = tqdm(loader, total=math.ceil(n_participants / cfg.batch_size), leave=True)
+    logits = []
+    with torch.no_grad():
+        for P, X, T in loader:
+            batch_logits, _, _ = model(X.to(cfg.device), T.to(cfg.device))
+            logits.append(batch_logits.cpu().numpy())
+            logger.write_memmaps(
+                participants=P.cpu().numpy(),
+                tokens=X.cpu().numpy(),
+                timesteps=T.cpu().numpy(),
+                logits=batch_logits.cpu().numpy(),
+            )
+
+    logits = np.vstack(batch_logits)
+
+    return logits
+
+
+def main():
+
+    cli_args = OmegaConf.from_cli()
+    file_cfg = OmegaConf.load(cli_args.config)
+    del cli_args.config
+    ckpt = cli_args.ckpt
+    del cli_args.ckpt
+    # remove 'config' and 'ckpt' attributes as the underlying dataclass does not have it
+
+    default_cfg = OmegaConf.structured(FeedForwardConfig)
+    cfg = OmegaConf.merge(default_cfg, file_cfg, cli_args)
+    cfg = OmegaConf.to_object(cfg)
+
+    forward(cfg=cfg, ckpt=ckpt)  # type: ignore
+
+
+if __name__ == "__main__":
+    main()

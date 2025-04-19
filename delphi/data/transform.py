@@ -1,13 +1,16 @@
-from typing import Literal, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, Literal, Optional
 
 import numpy as np
-import torch
 
 from delphi import DAYS_PER_YEAR
+from delphi.tokenizer import Tokenizer
 
 
-def parse_transform():
-    pass
+@dataclass
+class TransformArgs:
+    name: str
+    args: Dict[str, Any] = field(default_factory=dict)
 
 
 class AddNoEvent:
@@ -15,13 +18,13 @@ class AddNoEvent:
     def __init__(
         self,
         tokenizer,
-        no_event_interval: int = 5,
+        interval_in_years: int = 5,
         mode: Literal["regular", "random"] = "random",
         max_age: Optional[float] = None,
     ):
 
         self.max_age = max_age
-        self.no_event_interval = no_event_interval
+        self.no_event_interval = interval_in_years * DAYS_PER_YEAR
 
         assert mode in [
             "regular",
@@ -76,29 +79,15 @@ class AugmentLifestyle:
         pass
 
 
-class Prompt:
-
-    def __init__(self, tokenizer, start_age: float):
-
-        self.tokenizer = tokenizer
-        self.start_age = start_age
-
-        pass
-
-    def __call__(self, X, T):
-
-        X[T > self.start_age] = 0
-        T[T > self.start_age] = -1e4
-
-        X = np.pad(
-            X,
-            ((0, 0), (0, 1)),
-            mode="constant",
-            constant_values=self.tokenizer["no_event"],
-        )
-        T = np.pad(T, ((0, 0), (0, 1)), mode="constant", constant_values=self.start_age)
-
-        return X, T
+transform_registry = {
+    "no-event": AddNoEvent,
+    "augment-lifestyle": AugmentLifestyle,
+    # Add other transforms here
+}
 
 
-transform_registry = {}
+def parse_transform(transform_args: TransformArgs, tokenizer: Tokenizer) -> Any:
+
+    transform_cls = transform_registry[transform_args.name]
+
+    return transform_cls(tokenizer=tokenizer, **transform_args.args)

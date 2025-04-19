@@ -1,14 +1,13 @@
 import os
-from typing import Callable, Iterator, List, Literal, Optional, Tuple, Union
+from dataclasses import dataclass
+from typing import Iterator, List, Optional
 
 import numpy as np
-import pandas as pd
 import torch
 from scipy.sparse import coo_array
 
-PathOrArray = Union[os.PathLike, np.ndarray]
-OptionalSearchSpace = Optional[Literal["input", "target"]]
-OptionalTimeRange = Tuple[Optional[float], Optional[float]]
+from delphi.data.transform import TransformArgs, parse_transform
+from delphi.tokenizer import load_tokenizer_from_yaml
 
 
 def get_p2i(data):
@@ -65,132 +64,82 @@ def train_iter(total_size: int, batch_size: int) -> Iterator[np.ndarray]:
         yield np.random.randint(total_size, (batch_size,))
 
 
-def load_and_transform_sequences(
-    idx_iterator: Iterator,
+def load_sequences(
+    it: Iterator,
     dataset: "Dataset",
-    transforms: Optional[List[Callable]] = None,
 ) -> Iterator:
 
-    for idx in idx_iterator:
+    for idx in it:
 
-        _, X, T = dataset.get_batch(idx)
-
-        if transforms is not None:
-            for transform in transforms:
-                X, T = transform(X, T)
+        P, X, T = dataset.get_batch(idx)
 
         X, T = sort_by_time(X=X, T=T)
 
         X, T = squeeze(X=X, T=T)
 
+        P = torch.tensor(P, dtype=torch.long)
         X = torch.tensor(X, dtype=torch.long)
         T = torch.tensor(T, dtype=torch.float)
 
-        yield X, T
+        yield P, X, T
 
 
-def build_prefetch_data_loader(data_loader: Iterator) -> Iterator:
+def build_prefetch_loader(loader: Iterator) -> Iterator:
 
     sentinel = object()
-    next_batch = next(data_loader)
+    next_batch = next(loader)
 
     while True:
         yield next_batch
-        next_batch = next(data_loader, sentinel)
+        next_batch = next(loader, sentinel)
         if next_batch is sentinel:
             return
 
 
-def dataset_from_ukb(
-    data: Optional[np.ndarray] = None, data_path: Optional[str] = None
-) -> "Dataset":
-
-    if data is None:  # if raw data is not provided, load from file
-        assert data_path is not None, "Either data_path or data must be provided"
-        assert data_path.endswith(".bin"), "Cohort data must be a .bin NumPy memory bin"
-        data = np.fromfile(data_path, dtype=np.uint32).reshape(-1, 3)
-    else:
-        data = data  # allow direct data injection
-
-    p2i = get_p2i(data)
-    participants = p2i[:, 0]
-    seq_len = p2i[:, 1]
-    start_pos = np.cumsum(p2i[:, 1]) - p2i[:, 1]
-    tokens = data[:, 2] + 1
-    time_steps = data[:, 1]
-
-    return Dataset(
-        participants=participants,
-        tokens=tokens,
-        time_steps=time_steps,
-        start_pos=start_pos,
-        seq_len=seq_len,
-    )
-
-
-def cohort_from_ukb_data(
-    data: Optional[np.ndarray] = None, data_path: Optional[str] = None
-):
-
-    if data is None:  # if raw data is not provided, load from file
-        assert data_path is not None, "Either data_path or data must be provided"
-        assert data_path.endswith(".bin"), "Cohort data must be a .bin NumPy memory bin"
-        data = np.fromfile(data_path, dtype=np.uint32).reshape(-1, 3)
-    else:
-        data = data  # allow direct data injection
-
-    participants = pd.unique(data[:, 0])
-
-    p2i = get_p2i(data)
-    lengths = p2i[:, 1]
-    row_idx = np.repeat(np.arange(participants.size), lengths)
-    col_idx = np.concatenate([np.arange(length) for length in lengths])
-    tokens = coo_array(
-        (data[:, 2] + 1, (row_idx, col_idx)), shape=(participants.size, lengths.max())
-    ).toarray()
-    time_steps = coo_array(
-        (data[:, 1], (row_idx, col_idx)), shape=(participants.size, lengths.max())
-    ).toarray()
-
-    return Cohort(participants=participants, tokens=tokens, time_steps=time_steps)
+@dataclass
+class UKBDataConfig:
+    data_dir: str = "data/ukb_simulated_data"
+    memmap_fname: str = "train.bin"
+    tokenizer_fname: str = "tokenizer.yaml"
+    transforms: Optional[List[TransformArgs]] = None
 
 
 class Dataset:
 
     def __init__(
         self,
-        participants: PathOrArray,
-        tokens: PathOrArray,
-        time_steps: PathOrArray,
-        start_pos: PathOrArray,
-        seq_len: PathOrArray,
+        cfg: UKBDataConfig,
     ):
+        tokenizer_path = os.path.join(cfg.data_dir, cfg.tokenizer_fname)
+        self.tokenizer = load_tokenizer_from_yaml(tokenizer_path)
 
-        self.tokens = self._load_array(tokens, dtype=np.uint32)
-        self.time_steps = self._load_array(time_steps, dtype=np.uint32)
+        memmap_path = os.path.join(cfg.data_dir, cfg.memmap_fname)
+        data = np.fromfile(memmap_path, dtype=np.uint32).reshape(-1, 3)
+
+        p2i = get_p2i(data)
+        self.participants = p2i[:, 0]
+
+        self.seq_len = p2i[:, 1]
+        assert self.seq_len.size == self.participants.size
+
+        self.start_pos = np.cumsum(p2i[:, 1]) - p2i[:, 1]
+        assert self.start_pos.size == self.participants.size
+
+        self.tokens = data[:, 2] + 1
+        self.time_steps = data[:, 1]
         assert self.tokens.size == self.time_steps.size
 
-        self.participants = self._load_array(participants, dtype=np.uint32)
-        self.n_participants = self.participants.size
-
-        self.start_pos = self._load_array(start_pos, dtype=np.uint32)
-        assert self.start_pos.size == self.n_participants
-        self.seq_len = self._load_array(seq_len, dtype=np.uint32)
-        assert self.seq_len.size == self.n_participants
-
-    def _load_array(self, data: PathOrArray, dtype) -> np.ndarray:
-        if isinstance(data, os.PathLike):
-            return np.fromfile(data, dtype=dtype)
-        elif isinstance(data, np.ndarray):
-            return data.astype(dtype, copy=False)
-        else:
-            raise ValueError("Input must be a file path or a NumPy array")
+        self.transforms = []
+        if cfg.transforms is not None:
+            for transform in cfg.transforms:
+                transform = parse_transform(transform, tokenizer=self.tokenizer)
+                self.transforms.append(transform)
 
     def __len__(self):
 
-        return self.n_participants
+        return self.participants.size
 
-    def get_batch(self, batch_idx):
+    def get_raw_batch(self, batch_idx):
 
         batch_size = batch_idx.size
         batch_seq_len = self.seq_len[batch_idx]
@@ -215,312 +164,48 @@ class Dataset:
 
         return P, X, T
 
+    def get_batch(self, batch_idx):
 
-class Cohort:
+        P, X, T = self.get_raw_batch(batch_idx)
 
-    def __init__(
-        self, participants: np.ndarray, tokens: np.ndarray, time_steps: np.ndarray
-    ):
+        for transform in self.transforms:
+            X, T = transform(X, T)
 
-        self.participants = participants
-        self.n_participants = len(participants)
-
-        assert tokens.shape[0] == self.n_participants
-        self.tokens = tokens
-
-        assert time_steps.shape == self.tokens.shape
-        self.time_steps = time_steps
-
-    def __len__(self):
-
-        return self.n_participants
-
-    def __getitem__(self, key):
-
-        return Cohort(
-            participants=self.participants[key],
-            tokens=self.tokens[key],
-            time_steps=self.time_steps[key],
-        )
-
-    def token_counts(
-        self,
-        token: int,
-        time_range: OptionalTimeRange = (None, None),
-    ) -> np.ndarray:
-
-        in_time_range = np.ones_like(self.time_steps, dtype=bool)
-        start, end = time_range
-        if start is not None:
-            in_time_range &= self.time_steps >= start
-        if end is not None:
-            in_time_range &= self.time_steps < end
-
-        return np.logical_and(self.tokens == token, in_time_range).sum(axis=1)
-
-    def has_token(
-        self,
-        token: int,
-        min_count: int = 1,
-        time_range: OptionalTimeRange = (None, None),
-    ) -> np.ndarray:
-
-        counts = self.token_counts(token, time_range=time_range)
-
-        return counts >= min_count
-
-    def has_any_token(self, time_range: OptionalTimeRange = (None, None)) -> np.ndarray:
-
-        in_time_range = np.ones_like(self.time_steps, dtype=bool)
-        start, end = time_range
-        if start is not None:
-            in_time_range &= self.time_steps >= start
-        if end is not None:
-            in_time_range &= self.time_steps < end
-
-        return in_time_range.any(axis=1)
-
-    def survival_histogram(
-        self, time_bins, clip_age: OptionalTimeRange = (None, None)
-    ) -> Tuple[np.ndarray, np.ndarray]:
-
-        age_at_death = self.time_steps.max(axis=1)
-        if clip_age != (None, None):
-            clip_min, clip_max = clip_age
-            age_at_death = np.clip(age_at_death, a_min=clip_min, a_max=clip_max)
-
-        death_hist, time_bin_edges = np.histogram(age_at_death, time_bins)
-
-        surv_hist = self.n_participants - np.cumsum(death_hist)
-
-        return surv_hist, time_bin_edges
-
-    def token_incidence(
-        self, token: int, time_bins: np.ndarray
-    ) -> Tuple[np.ndarray, np.ndarray]:
-
-        survival_participant_hist, _ = self.survival_histogram(time_bins)
-        token_count_hist, time_bin_edges = np.histogram(
-            self.time_steps[self.tokens == token], time_bins
-        )
-
-        return token_count_hist / survival_participant_hist, time_bin_edges
-
-    def token_timestamps(self, token: int) -> np.ndarray:
-
-        assert self.has_token(
-            token
-        ).all(), f"all participants must have token {token} in their token sequence"
-
-        has_token = self.tokens == token
-
-        # todo: sampling here
-
-        return np.sum(has_token * self.time_steps, axis=1)
+        return P, X, T
 
 
-class DelphiTrajectories:
+class PromptDataset(Dataset):
 
     def __init__(
         self,
-        X_t0: np.ndarray,
-        T_t0: np.ndarray,
-        X_t1: np.ndarray,
-        T_t1: np.ndarray,
-        Y_t1: np.ndarray,
+        cfg: UKBDataConfig,
+        start_age_in_years: float,
     ):
 
-        assert X_t0.shape == T_t0.shape == X_t1.shape == T_t1.shape
+        super().__init__(cfg=cfg)
 
-        X0_pad_mask = X_t0 == 0
-        assert (T_t0[X0_pad_mask] == -10000).all()
-        X1_pad_mask = X_t1 == 0
-        assert (T_t1[X1_pad_mask] == -10000).all()
+        self.start_age = start_age_in_years * 365.25
+        first_timestep = self.time_steps[self.start_pos]
+        last_timestep = self.time_steps[self.start_pos + self.seq_len - 1]
+        time_mask = (first_timestep < self.start_age) & (last_timestep > self.start_age)
 
-        self.X0 = X_t0
-        self.T0 = T_t0
-        self.X1 = X_t1
-        self.T1 = T_t1
+        self.participants = self.participants[time_mask]
+        self.seq_len = self.seq_len[time_mask]
+        self.start_pos = self.start_pos[time_mask]
 
-        self.n_participants = X_t0.shape[0]
-        self.max_seq_len = X_t0.shape[1]
+    def get_batch(self, batch_idx):
 
-        assert Y_t1.shape[:-1] == X_t0.shape
-        self.Y_t1 = Y_t1
+        P, X, T = super().get_raw_batch(batch_idx)
 
-    def __getitem__(self, key):
+        X[T > self.start_age] = 0
+        T[T > self.start_age] = -1e4
 
-        if isinstance(key, tuple):
-            raise NotImplementedError(
-                "DelphiTrajectories only supports slicing by participant index"
-            )
-        else:
-            return DelphiTrajectories(
-                X_t0=self.X0[key],
-                T_t0=self.T0[key],
-                X_t1=self.X1[key],
-                T_t1=self.T1[key],
-                Y_t1=self.Y_t1[key],
-            )
+        X = np.pad(
+            X,
+            ((0, 0), (0, 1)),
+            mode="constant",
+            constant_values=self.tokenizer["no_event"],
+        )
+        T = np.pad(T, ((0, 0), (0, 1)), mode="constant", constant_values=self.start_age)
 
-    def _in_time_range(
-        self,
-        t0_range: OptionalTimeRange = (None, None),
-        t1_range: OptionalTimeRange = (None, None),
-    ) -> np.ndarray:
-
-        in_t0_range = np.ones_like(self.T0, dtype=bool)
-        t0_start, t0_end = t0_range
-        if t0_start is not None:
-            in_t0_range &= self.T0 >= t0_start
-        if t0_end is not None:
-            in_t0_range &= self.T0 < t0_end
-
-        in_t1_range = np.ones_like(self.T1, dtype=bool)
-        t0_start, t0_end = t1_range
-        if t0_start is not None:
-            in_t1_range &= self.T1 >= t0_start
-        if t0_end is not None:
-            in_t1_range &= self.T1 < t0_end
-
-        return in_t0_range & in_t1_range
-
-    def _sample_token_mask(
-        self,
-        token_mask: np.ndarray,
-        keep: Literal["first", "average"] = "average",
-    ):
-
-        token_mask = token_mask.astype(float)
-        if keep == "average":
-            token_mask /= np.sum(token_mask, axis=1, keepdims=True)
-        elif keep == "first":
-            token_mask = token_mask * (np.cumsum(token_mask, axis=1) == 1).astype(float)
-        else:
-            raise ValueError("keep must be either 'first' or 'average'")
-
-        return token_mask
-
-    def has_any_token(
-        self,
-        t0_range: OptionalTimeRange = (None, None),
-        t1_range: OptionalTimeRange = (None, None),
-    ) -> np.ndarray:
-        """
-        checks if any input/target token is present in the specified time range
-
-        t0_range: tuple of (start, end) for the input time range
-        t1_range: tuple of (start, end) for the target time range
-
-        returns: boolean array of shape (n_participants,)
-        """
-
-        in_time_range = self._in_time_range(t0_range=t0_range, t1_range=t1_range)
-
-        return in_time_range.any(axis=1)
-
-    def has_any_valid_predictions(
-        self,
-        min_time_gap: float,
-        t0_range: OptionalTimeRange = (None, None),
-        t1_range: OptionalTimeRange = (None, None),
-    ):
-
-        is_valid = np.cumsum(self.T0 <= (self.T1 - min_time_gap), axis=1) > 0
-        in_time = self._in_time_range(t0_range=t0_range, t1_range=t1_range)
-
-        return np.logical_and(in_time, is_valid).any(axis=1)
-
-    def has_token(
-        self,
-        token: int,
-        token_type: OptionalSearchSpace = "target",
-        t0_range: OptionalTimeRange = (None, None),
-        t1_range: OptionalTimeRange = (None, None),
-        min_count: int = 1,
-    ) -> np.ndarray:
-        """
-        checks if a specific input/target token is present in the specified time range
-
-        token_type: 'input' or 'target'
-        t0_range: tuple of (start, end) for the input time range
-        t1_range: tuple of (start, end) for the target time range
-        min_count: minimum number of tokens required to be present in the time range
-
-        returns: boolean array of shape (n_participants,)
-        """
-
-        if token_type == "input":
-            has_token = self.X0 == token
-        elif token_type == "target":
-            has_token = self.X1 == token
-        elif token_type is None:
-            has_token = np.logical_or(self.X0 == token, self.X1 == token)
-        else:
-            raise ValueError("token_type must be either 'input', 'target', or None")
-
-        in_time = self._in_time_range(t0_range=t0_range, t1_range=t1_range)
-
-        return np.logical_and(has_token, in_time).sum(axis=1) >= min_count
-
-    def token_rates(
-        self,
-        token: int,
-        t0_range: OptionalTimeRange = (None, None),
-        t1_range: OptionalTimeRange = (None, None),
-        keep: Literal["first", "average", "last", "random"] = "average",
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        computes the token rates for a specific input/target token in the specified time range
-        computes a single token rate for each participant in the specified time range
-
-        token: token ID
-        t0_range: tuple of (start, end) for the input time range
-        t1_range: tuple of (start, end) for the target time range
-        keep: 'first', 'average', 'last', or 'random'
-
-        returns: tuple of (input time, token rates)
-        input time: input timestamp array of shape (n_participants,)
-        token rates: token rates array of shape (n_participants,)
-        """
-
-        assert (
-            token < self.Y_t1.shape[-1]
-        ), "token ID out of range; check that correct tokenizer is used"
-
-        assert self.has_any_token(
-            t0_range=t0_range, t1_range=t1_range
-        ).all(), "no tokens in the specified time range"
-
-        token_rates = self.Y_t1[:, :, token]
-
-        in_time_range = self._in_time_range(t0_range=t0_range, t1_range=t1_range)
-        in_time_range = in_time_range.astype(float)
-        in_time_range = self._sample_token_mask(in_time_range, keep=keep)
-
-        t0 = np.sum(self.T0 * in_time_range, axis=1)
-        y1 = np.sum(token_rates * in_time_range, axis=1)
-
-        return t0, y1
-
-    def penultimate_token_rates(
-        self,
-        token: int,
-    ) -> Tuple[np.ndarray, np.ndarray]:
-
-        assert self.has_token(
-            token, token_type="target"
-        ).all(), f"all participants must have token {token} in their target sequence"
-
-        assert (
-            token < self.Y_t1.shape[-1]
-        ), "token ID out of range; check that correct tokenizer is used"
-        token_rates = self.Y_t1[:, :, token]
-
-        token_mask = self.X1 == token
-        token_mask = self._sample_token_mask(token_mask, keep="first")
-
-        t0 = np.sum(self.T0 * token_mask, axis=1)
-        y1 = np.sum(token_rates * token_mask, axis=1)
-
-        return t0, y1
+        return P, X, T
