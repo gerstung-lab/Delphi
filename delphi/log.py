@@ -1,3 +1,4 @@
+import gc
 import os
 import time
 from dataclasses import dataclass
@@ -44,6 +45,7 @@ class GenLogger:
     def init_memmaps(self, n_max_token: int, n_vocab: int):
 
         if self.save_tokens:
+            self.n_max_token = n_max_token
             self.gen_bin = np.memmap(
                 os.path.join(self.dump_dir, "gen.bin"),
                 dtype=np.uint32,
@@ -51,6 +53,7 @@ class GenLogger:
                 shape=(int(n_max_token), 3),
             )
             if self.save_logits:
+                self.n_vocab = n_vocab
                 self.logits_bin = np.memmap(
                     os.path.join(self.dump_dir, "logits.bin"),
                     dtype=np.float16,
@@ -63,6 +66,33 @@ class GenLogger:
             self.gen_bin.flush()
             if self.save_logits:
                 self.logits_bin.flush()
+
+            if self.step % (self.flush_freq * 10) == 0:
+                self.delete_memmaps()
+                gc.collect()
+                self.reopen_memmaps()
+
+    def delete_memmaps(self):
+        if hasattr(self, "gen_bin"):
+            del self.gen_bin
+        if hasattr(self, "logits_bin"):
+            del self.logits_bin
+
+    def reopen_memmaps(self):
+        if self.save_tokens:
+            self.gen_bin = np.memmap(
+                os.path.join(self.dump_dir, "gen.bin"),
+                dtype=np.uint32,
+                mode="r+",
+                shape=(self.n_max_token, 3),
+            )
+            if self.save_logits:
+                self.logits_bin = np.memmap(
+                    os.path.join(self.dump_dir, "logits.bin"),
+                    dtype=np.float16,
+                    mode="r+",
+                    shape=(self.n_max_token, self.n_vocab),
+                )
 
     def write_memmaps(
         self,
@@ -100,3 +130,5 @@ class GenLogger:
     def close(self):
         if self.save_tokens:
             self.gen_bin.flush()
+            if self.save_logits:
+                self.logits_bin.flush()
