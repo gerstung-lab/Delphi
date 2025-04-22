@@ -27,6 +27,7 @@ class Disease:
 @dataclass
 class TokenizerSchema:
     version: str = "0.0"
+    lifestyle: list = field(default_factory=list)
     mapping: dict[str, Disease] = field(default_factory=dict)
 
 
@@ -61,6 +62,8 @@ class Tokenizer:
         ), "padding token must be the same as the padding key"
 
         self.vocab_size = len(self.disease_ids)
+
+        self.lifestyle_tokens = tokenizer_schema.lifestyle
 
     def __getitem__(self, key: str) -> int:
         if key not in self.mapping:

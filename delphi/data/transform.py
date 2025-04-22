@@ -17,7 +17,7 @@ class AddNoEvent:
 
     def __init__(
         self,
-        tokenizer,
+        tokenizer: Tokenizer,
         interval_in_years: int = 5,
         mode: Literal["regular", "random"] = "random",
         max_age_in_years: Optional[float] = None,
@@ -73,13 +73,27 @@ class AddNoEvent:
 
 class AugmentLifestyle:
 
-    def __init__(self):
+    def __init__(
+        self,
+        tokenizer: Tokenizer,
+        min_time: float = -20 * DAYS_PER_YEAR,
+        max_time: float = 40 * DAYS_PER_YEAR,
+    ):
 
-        pass
+        self.lifestyle_tokens = np.array(tokenizer.lifestyle_tokens)
+        self.min_time = min_time
+        self.max_time = max_time
 
-    def __call__(self):
+    def __call__(self, X: np.ndarray, T: np.ndarray):
 
-        pass
+        is_lifestyle = np.isin(X, self.lifestyle_tokens)
+        if is_lifestyle.sum() > 0:
+            augment = np.random.randint(
+                int(self.min_time), int(self.max_time), (is_lifestyle.sum(),)
+            )
+            T[is_lifestyle] += augment
+
+        return X, T
 
 
 transform_registry = {
