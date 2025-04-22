@@ -20,10 +20,10 @@ class AddNoEvent:
         tokenizer,
         interval_in_years: int = 5,
         mode: Literal["regular", "random"] = "random",
-        max_age: Optional[float] = None,
+        max_age_in_years: Optional[float] = None,
     ):
 
-        self.max_age = max_age
+        self.max_age_in_years = max_age_in_years
         self.no_event_interval = interval_in_years * DAYS_PER_YEAR
 
         assert mode in [
@@ -39,24 +39,27 @@ class AddNoEvent:
     def __call__(self, X, T):
 
         n_participants = X.shape[0]
-        min_T = np.min(T, axis=1, keepdims=True)
-        max_T = np.max(T, axis=1, keepdims=True)
-        max_age = np.max(max_T) if self.max_age is None else self.max_age
+        if self.max_age_in_years is None:
+            max_age = np.max(T)
+        else:
+            max_age = self.max_age_in_years * DAYS_PER_YEAR
 
         n_no_events = int(max_age // self.no_event_interval)
         if self.mode == "random":
             no_event_timesteps = np.random.randint(
-                1, int(max_age * DAYS_PER_YEAR), (n_participants, n_no_events)
+                1, int(max_age - self.no_event_interval), (n_participants, n_no_events)
             )
         elif self.mode == "regular":
             no_event_timesteps = np.linspace(
-                1, int(max_age * DAYS_PER_YEAR), num=n_no_events
+                1, int(max_age) - self.no_event_interval, num=n_no_events
             ) * np.ones((n_participants, 1))
         no_event_tokens = np.full(no_event_timesteps.shape, self.tokenizer["no_event"])
 
-        min_T = np.min(T, axis=1, keepdims=True)
+        T_cp = T.copy()
+        T_cp[T_cp < 0] = 0
+        min_T = np.min(T_cp, axis=1, keepdims=True)
         max_T = np.max(T, axis=1, keepdims=True)
-        out_of_time_range = (no_event_timesteps <= min_T) * (
+        out_of_time_range = (no_event_timesteps <= min_T) | (
             no_event_timesteps >= max_T
         )
         no_event_tokens[out_of_time_range] = 0
