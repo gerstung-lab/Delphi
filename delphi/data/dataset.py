@@ -61,7 +61,7 @@ def eval_iter(total_size: int, batch_size: int) -> Iterator[np.ndarray]:
 def train_iter(total_size: int, batch_size: int) -> Iterator[np.ndarray]:
 
     while True:
-        yield np.random.randint(total_size, (batch_size,))
+        yield np.random.randint(total_size, size=(batch_size,))
 
 
 def load_sequences(

@@ -1,46 +1,47 @@
 import math
 import os
-import time
-from datetime import datetime
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 
-import numpy as np
 import torch
 from omegaconf import OmegaConf
 
+from delphi.data.dataset import Dataset, UKBDataConfig, load_sequences, train_iter
+from delphi.log import TrainLogConfig, TrainLogger
 from delphi.model.transformer import Delphi, DelphiConfig
-from delphi.utils import get_batch, get_p2i
 
 
 @dataclass
 class TrainConfig:
     run_name: str = datetime.now().strftime("%Y-%m-%d-%H%M%S")
     ckpt_dir: str = "./checkpoints"
-    
+
     eval_interval: int = 2000
-    log_interval: int = 1
     eval_iters: int = 200
     eval_only: bool = False  # if True, script exits right after the first eval
-    always_save_checkpoint: bool = False
-    # if True, always save a checkpoint after each eval
     init_from: str = "scratch"  # 'scratch' or 'resume' or 'gpt2*'
     seed: int = 42
 
-    # wandb logging
-    wandb_log: bool = False  # disabled by default
-    wandb_project: str = "delphi"
-    wandb_run_name: str = "run" + str(time.time())
-
-    # data
-    data_dir: str = "./data"
-    dataset: str = "ukb_data"
     gradient_accumulation_steps: int = 1  # used to simulate larger batch sizes
     batch_size: int = 128
     # if gradient_accumulation_steps > 1, this is the micro-batch size
 
-    # model
+    # system
+    device: str = "cpu"
+    # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
+    dtype: str = "float32"
+    # 'bfloat16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
+    compile: bool = False  # use PyTorch 2.0 to compile the model to be faster
+
+    # data
+    data_fraction: float = 1.0
+    train_data: UKBDataConfig = field(default_factory=UKBDataConfig)
+    val_data: UKBDataConfig = field(default_factory=UKBDataConfig)
+
     model: DelphiConfig = field(default_factory=DelphiConfig)
+
+    log: TrainLogConfig = field(default_factory=TrainLogConfig)
 
     # adamw optimizer
     learning_rate: float = 6e-4  # max learning rate
@@ -58,24 +59,11 @@ class TrainConfig:
         6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
     )
 
-    # system
-    device: str = "cpu"
-    # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
-    dtype: str = "float32"
-    # 'bfloat16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
-    compile: bool = False  # use PyTorch 2.0 to compile the model to be faster
-
-    # delphi training
-    data_fraction: float = 1.0
-    no_event_token_rate: int = 5
-
 
 def train(cfg: TrainConfig):
 
     run_dir = os.path.join(cfg.ckpt_dir, cfg.run_name)
-    os.makedirs(run_dir, exist_ok=True)
-    with open(os.path.join(run_dir, "config.yaml"), "w") as f:
-        OmegaConf.save(config=cfg, f=f)
+    logger = TrainLogger(cfg=cfg.log, exp_cfg=asdict(cfg), dump_dir=run_dir)
 
     torch.manual_seed(cfg.seed)
     torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
@@ -98,25 +86,16 @@ def train(cfg: TrainConfig):
 
     torch.set_default_dtype(ptdtype)
 
-    dataset_dir = os.path.join(cfg.data_dir, cfg.dataset)
-    assert os.path.exists(dataset_dir), f"dataset_dir {dataset_dir} does not exist"
-    train_data = np.memmap(
-        os.path.join(dataset_dir, "train.bin"), dtype=np.uint32, mode="r"
-    ).reshape(-1, 3)
-    val_data = np.memmap(
-        os.path.join(dataset_dir, "val.bin"), dtype=np.uint32, mode="r"
-    ).reshape(-1, 3)
-
-    train_p2i = get_p2i(train_data)
-    val_p2i = get_p2i(val_data)
-
-    # downsample the data to requested fraction
+    train_ds = Dataset(cfg.train_data)
+    total_train_size = len(train_ds)
     if cfg.data_fraction < 1.0:
-        train_p2i = train_p2i[: int(cfg.data_fraction * len(train_p2i))]
+        total_train_size = int(cfg.data_fraction * len(train_ds))
+    train_it = train_iter(total_size=total_train_size, batch_size=cfg.batch_size)
+    train_loader = load_sequences(it=train_it, dataset=train_ds)
 
-    # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
+    val_ds = Dataset(cfg.val_data)
+
     iter_num = 0
-    best_val_loss = 1e9
 
     print(f"found vocab_size = {cfg.model.vocab_size}")
 
@@ -148,7 +127,7 @@ def train(cfg: TrainConfig):
                 state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
         model.load_state_dict(state_dict)
         iter_num = checkpoint["iter_num"]
-        best_val_loss = checkpoint["best_val_loss"]
+        # best_val_loss = checkpoint["best_val_loss"]
 
     model.to(cfg.device)
 
@@ -165,33 +144,33 @@ def train(cfg: TrainConfig):
     # compile the model
     if cfg.compile:
         print("compiling the model... (takes a ~minute)")
-        unoptimized_model = model
         model = torch.compile(model)  # requires PyTorch 2.0
 
     # helps estimate an arbitrarily accurate loss over either split using many batches
-
     @torch.no_grad()
     def estimate_loss():
         out = {}
         model.eval()
         for split in ["train", "val"]:
             losses = torch.zeros(cfg.eval_iters, 2)
-            data = train_data if split == "train" else val_data
-            p2i = train_p2i if split == "train" else val_p2i
+            ds = train_ds if split == "train" else val_ds
+            it = train_iter(
+                total_size=len(ds),
+                batch_size=cfg.batch_size,
+            )
+            loader = load_sequences(it=it, dataset=ds)
             for k in range(cfg.eval_iters):
-                ix = torch.randint(len(p2i), (cfg.batch_size,))
-                X, A, Y, B = get_batch(
-                    ix,
-                    data,
-                    p2i,
-                    block_size=cfg.model.block_size,
-                    device=cfg.device,
-                    select="left",
-                    no_event_token_rate=cfg.no_event_token_rate,
-                    cut_batch=True,
-                )
+
+                _, X, T = next(loader)
+                X_t0 = X[:, :-1]
+                T_t0 = T[:, :-1]
+                X_t1 = X[:, 1:]
+                T_t1 = T[:, 1:]
+
                 with ctx:
-                    logits, loss, _ = model(X, A, Y, B, validation_loss_mode=True)
+                    logits, loss, _ = model(
+                        X_t0, T_t0, X_t1, T_t1, validation_loss_mode=True
+                    )
                 losses[k] = torch.stack([loss["loss_ce"], loss["loss_dt"]])
             out[split] = losses.mean(0)
         model.train()
@@ -211,30 +190,6 @@ def train(cfg: TrainConfig):
         coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
         return cfg.min_lr + coeff * (cfg.learning_rate - cfg.min_lr)
 
-    # logging
-    if cfg.wandb_log:
-        import wandb
-
-        wandb.init(
-            project=cfg.wandb_project, name=cfg.wandb_run_name, config=asdict(cfg)
-        )
-
-    # training loop
-    ix = torch.randint(len(train_p2i), (cfg.batch_size,))
-    X, A, Y, B = get_batch(
-        ix,
-        train_data,
-        train_p2i,
-        block_size=cfg.model.block_size,
-        device=cfg.device,
-        padding="random",
-        lifestyle_augmentations=True,
-        select="left",
-        no_event_token_rate=cfg.no_event_token_rate,
-    )
-    t0 = time.time()
-    local_iter_num = 0  # number of iterations in the lifetime of this process
-
     val_loss = None
     while True:
 
@@ -246,114 +201,56 @@ def train(cfg: TrainConfig):
         # evaluate the loss on train/val sets and write checkpoints
         if iter_num % cfg.eval_interval == 0 and iter_num > 0:
             losses = estimate_loss()
-            if val_loss is None:
-                val_loss_unpooled = losses["val"]
-            val_loss_unpooled = (
-                0.1 * losses["val"] + 0.9 * val_loss_unpooled
-            )  # ie exponential decay
-            val_loss = val_loss_unpooled.sum().item()
-            print(
-                f"step {iter_num}: train loss {losses['train'].sum().item():.4f}, val loss {losses['val'].sum().item():.4f} ({val_loss:.4f})"
+            val_loss = losses["val"].sum().item()
+
+            logger.eval_step(
+                iter_num=iter_num,
+                model=model,
+                optimizer=optimizer,
+                val_loss=val_loss,
+                addons={
+                    "train/loss": losses["train"].sum().item(),
+                    "train/loss_ce": losses["train"][0].item(),
+                    "train/loss_dt": losses["train"][1].item(),
+                },
             )
-            if cfg.wandb_log:
-                wandb.log(
-                    {
-                        "iter": iter_num,
-                        "train/agg_loss": losses["train"].sum().item(),
-                        "val/loss": val_loss,
-                        "val/loss_ce": val_loss_unpooled[0].item(),
-                        "val/loss_dt": val_loss_unpooled[1].item(),
-                    }
-                )
-
-            if cfg.always_save_checkpoint or val_loss < best_val_loss:
-                best_val_loss = val_loss
-                if iter_num > 0:
-                    checkpoint = {
-                        "model": model.state_dict(),
-                        "optimizer": optimizer.state_dict(),
-                        "model_args": asdict(cfg.model),
-                        "iter_num": iter_num,
-                        "best_val_loss": val_loss,
-                        "config": asdict(cfg),
-                    }
-                    print(f"saving checkpoint to {run_dir}")
-                    torch.save(checkpoint, os.path.join(run_dir, "ckpt.pt"))
-
-            if iter_num % 10_000 == 0:
-                checkpoint = {
-                    "model": model.state_dict(),
-                    "optimizer": optimizer.state_dict(),
-                    "model_args": asdict(cfg.model),
-                    "iter_num": iter_num,
-                    "best_val_loss": best_val_loss,
-                    "config": asdict(cfg),
-                }
-                print(f"saving checkpoint to {run_dir}")
-                torch.save(checkpoint, os.path.join(run_dir, f"ckpt_{iter_num}.pt"))
 
         if iter_num == 0 and cfg.eval_only:
             break
 
         # forward backward update, with optional gradient accumulation to simulate larger batch size
-        # and using the GradScaler if data type is float16
+        # and using the GradScaler if data type is float16``
         for micro_step in range(cfg.gradient_accumulation_steps):
+
+            _, X, T = next(train_loader)
+
+            X_t0 = X[:, :-1]
+            T_t0 = T[:, :-1]
+            X_t1 = X[:, 1:]
+            T_t1 = T[:, 1:]
+
             with ctx:
-                logits, loss, att = model(X, A, Y, B)
-            # immediately async prefetch next batch while model is doing the forward pass on the GPU
-            ix = torch.randint(len(train_p2i), (cfg.batch_size,))
-            # print(ix)
-            X, A, Y, B = get_batch(
-                ix,
-                train_data,
-                train_p2i,
-                block_size=cfg.model.block_size,
-                device=cfg.device,
-                padding="random",
-                lifestyle_augmentations=True,
-                select="left",
-                no_event_token_rate=cfg.no_event_token_rate,
-                cut_batch=True,
-            )
+                logits, loss, att = model(X_t0, T_t0, X_t1, T_t1)
 
             # backward pass, with gradient scaling if training in fp16
             loss = loss["loss_ce"] + loss["loss_dt"]
             scaler.scale(loss).backward()
+
         # clip the gradient
         if cfg.grad_clip != 0.0:
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
+
         # step the optimizer and scaler if training in fp16
         scaler.step(optimizer)
         scaler.update()
         # flush the gradients as soon as we can, no need for this memory anymore
         optimizer.zero_grad(set_to_none=True)
 
-        # timing and logging
-        t1 = time.time()
-        dt = t1 - t0
-        t0 = t1
-        if iter_num % cfg.log_interval == 0:
-            lossf = loss.item()  # loss as float. note: this is a CPU-GPU sync point
-            print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms")
-
-            if cfg.wandb_log:
-                wandb.log(
-                    {
-                        "iter": iter_num,
-                        "train/loss": loss,
-                        "lr": lr,
-                        "weights": wandb.Histogram(
-                            model.transformer.embed.token_embedding.weight.cpu()
-                            .detach()
-                            .numpy()
-                        ),
-                        "logits": wandb.Histogram(logits.cpu().detach().numpy()),
-                    }
-                )
+        logger.train_step(iter_num=iter_num, train_loss=loss, addons={"lr": lr})
+        logger.ckpt_step(iter_num=iter_num, model=model, optimizer=optimizer)
 
         iter_num += 1
-        local_iter_num += 1
 
         # termination conditions
         if iter_num > cfg.max_iters:
@@ -372,7 +269,7 @@ def main():
     # convert structured config back to underlying dataclass
     cfg = OmegaConf.to_object(cfg)
 
-    train(cfg)
+    train(cfg)  # type: ignore
 
 
 if __name__ == "__main__":
