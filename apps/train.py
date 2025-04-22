@@ -162,8 +162,8 @@ def train(cfg: TrainConfig):
             for k in range(cfg.eval_iters):
 
                 _, X, T = next(loader)
-                X.to(cfg.device)
-                T.to(cfg.device)
+                X = X.to(cfg.device)
+                T = T.to(cfg.device)
 
                 X_t0 = X[:, :-1]
                 T_t0 = T[:, :-1]
@@ -226,8 +226,8 @@ def train(cfg: TrainConfig):
         for micro_step in range(cfg.gradient_accumulation_steps):
 
             _, X, T = next(train_loader)
-            X.to(cfg.device)
-            T.to(cfg.device)
+            X = X.to(cfg.device)
+            T = T.to(cfg.device)
 
             X_t0 = X[:, :-1]
             T_t0 = T[:, :-1]
