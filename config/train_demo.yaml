@@ -1,22 +1,32 @@
-ckpt_dir: ${oc.env:DELPHI_CKPT_DIR}
+ckpt_dir: ${oc.env:DELPHI_CKPT_DIR,checkpoints}
 eval_interval: 250 # keep frequent because we'll overfit
 eval_iters: 25
-log_interval: 25 # don't print too too often
 eval_only: false
-# we expect to overfit on this small dataset, so only save when val improves
-always_save_checkpoint: false
 init_from: scratch
 seed: 42
-
-wandb_log: true # override via command line if you like
-wandb_project: delphi
-wandb_run_name: delphi_demo
-
-data_dir: ${oc.env:DELPHI_DATA_DIR}
-dataset: ukb_simulated_data
 gradient_accumulation_steps: 1
 batch_size: 256
+device: cpu
 
+data_fraction: 1.0
+train_data:
+  data_dir: data/ukb_simulated_data
+  memmap_fname: train.bin
+  tokenizer_fname: tokenizer.yaml
+  transforms:
+    - name: no-event
+      args:
+        interval_in_years: 5
+        mode: random
+val_data:
+  data_dir: data/ukb_simulated_data
+  memmap_fname: val.bin
+  tokenizer_fname: tokenizer.yaml
+  transforms:
+    - name: no-event
+      args:
+        interval_in_years: 5
+        mode: random
 model:
   block_size: 48
   vocab_size: 1271
@@ -30,6 +40,13 @@ model:
   mask_ties: true
   ignore_tokens: [0, 2 ,3, 4, 5, 6, 7, 8, 9, 10, 11, 12] # ignore padding and lifestyle tokens
   zero_time_inflation: false
+log:
+  wandb_log: true
+  wandb_project: delphi
+  wandb_run_name: delphi_demo
+  log_interval: 25
+  always_ckpt_after_eval: true
+  ckpt_interval: 1000
 
 learning_rate: 2e-3 # with baby networks can afford to go a bit higher
 max_iters: 5000
@@ -39,8 +56,3 @@ min_lr: 2e-4 # learning_rate / 10 usually
 beta2: 0.99 # make a bit bigger because number of tokens per iter is small
 
 warmup_iters: 500 # not super necessary potentially
-
-device: cpu
-
-data_fraction: 1.0
-no_event_token_rate: 5
