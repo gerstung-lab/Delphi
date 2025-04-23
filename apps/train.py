@@ -1,8 +1,6 @@
-import math
 import os
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
 
 import torch
 from omegaconf import OmegaConf
@@ -10,19 +8,17 @@ from omegaconf import OmegaConf
 from delphi.data.dataset import Dataset, UKBDataConfig, load_sequences, train_iter
 from delphi.log import TrainLogConfig, TrainLogger
 from delphi.model.transformer import Delphi, DelphiConfig
+from delphi.optim import OptimConfig, configure_optimizers
 
 
 @dataclass
 class TrainConfig:
-    run_name: str = datetime.now().strftime("%Y-%m-%d-%H%M%S")
     ckpt_dir: str = "./checkpoints"
-
     eval_interval: int = 2000
     eval_iters: int = 200
     eval_only: bool = False  # if True, script exits right after the first eval
     init_from: str = "scratch"  # 'scratch' or 'resume' or 'gpt2*'
     seed: int = 42
-
     gradient_accumulation_steps: int = 1  # used to simulate larger batch sizes
     batch_size: int = 128
     # if gradient_accumulation_steps > 1, this is the micro-batch size
@@ -41,28 +37,14 @@ class TrainConfig:
 
     model: DelphiConfig = field(default_factory=DelphiConfig)
 
+    optim: OptimConfig = field(default_factory=OptimConfig)
+
     log: TrainLogConfig = field(default_factory=TrainLogConfig)
-
-    # adamw optimizer
-    learning_rate: float = 6e-4  # max learning rate
-    max_iters: int = 10000  # total number of training iterations
-    weight_decay: float = 1e-1
-    beta1: float = 0.9
-    beta2: float = 0.95
-    grad_clip: float = 1.0  # clip gradients at this value, or disable if == 0.0
-
-    # learning rate decay settings
-    decay_lr: bool = True  # whether to decay the learning rate
-    warmup_iters: int = 2000  # how many steps to warm up for
-    lr_decay_iters: int = 10000  # should be ~= max_iters per Chinchilla
-    min_lr: float = (
-        6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
-    )
 
 
 def train(cfg: TrainConfig):
 
-    run_dir = os.path.join(cfg.ckpt_dir, cfg.run_name)
+    run_dir = os.path.join(cfg.ckpt_dir, cfg.log.run_name)
     logger = TrainLogger(cfg=cfg.log, exp_cfg=asdict(cfg), dump_dir=run_dir)
 
     torch.manual_seed(cfg.seed)
@@ -81,7 +63,7 @@ def train(cfg: TrainConfig):
     ctx = (
         nullcontext()
         if device_type == "cpu"
-        else torch.amp.autocast(device_type=device_type, dtype=ptdtype)
+        else torch.autocast(device_type=device_type, dtype=ptdtype)
     )
 
     torch.set_default_dtype(ptdtype)
@@ -132,11 +114,10 @@ def train(cfg: TrainConfig):
     model.to(cfg.device)
 
     # initialize a GradScaler. If enabled=False scaler is a no-op
-    scaler = torch.cuda.amp.GradScaler(enabled=(cfg.dtype == "float16"))
+    scaler = torch.GradScaler(device=device_type, enabled=(cfg.dtype == "float16"))
 
-    # optimizer
-    optimizer = model.configure_optimizers(
-        cfg.weight_decay, cfg.learning_rate, (cfg.beta1, cfg.beta2), device_type
+    optimizer, scheduler = configure_optimizers(
+        model=model, cfg=cfg.optim, device_type=device_type
     )
     if cfg.init_from == "resume":
         optimizer.load_state_dict(checkpoint["optimizer"])
@@ -179,27 +160,8 @@ def train(cfg: TrainConfig):
         model.train()
         return out
 
-    # learning rate decay scheduler (cosine with warmup)
-    def get_lr(it):
-        # 1) linear warmup for warmup_iters steps
-        if it < cfg.warmup_iters:
-            return cfg.learning_rate * it / cfg.warmup_iters
-        # 2) if it > lr_decay_iters, return min learning rate
-        if it > cfg.lr_decay_iters:
-            return cfg.min_lr
-        # 3) in between, use cosine decay down to min learning rate
-        decay_ratio = (it - cfg.warmup_iters) / (cfg.lr_decay_iters - cfg.warmup_iters)
-        assert 0 <= decay_ratio <= 1
-        coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
-        return cfg.min_lr + coeff * (cfg.learning_rate - cfg.min_lr)
-
     val_loss = None
     while True:
-
-        # determine and set the learning rate for this iteration
-        lr = get_lr(iter_num) if cfg.decay_lr else cfg.learning_rate
-        for param_group in optimizer.param_groups:
-            param_group["lr"] = lr
 
         # evaluate the loss on train/val sets and write checkpoints
         if iter_num % cfg.eval_interval == 0 and iter_num > 0:
@@ -208,7 +170,7 @@ def train(cfg: TrainConfig):
 
             logger.eval_step(
                 iter_num=iter_num,
-                model=model,
+                model=model,  # type: ignore
                 optimizer=optimizer,
                 val_loss=val_loss,
                 addons={
@@ -223,7 +185,7 @@ def train(cfg: TrainConfig):
 
         # forward backward update, with optional gradient accumulation to simulate larger batch size
         # and using the GradScaler if data type is float16``
-        for micro_step in range(cfg.gradient_accumulation_steps):
+        for _ in range(cfg.gradient_accumulation_steps):
 
             _, X, T = next(train_loader)
             X = X.to(cfg.device)
@@ -235,30 +197,39 @@ def train(cfg: TrainConfig):
             T_t1 = T[:, 1:]
 
             with ctx:
-                logits, loss, att = model(X_t0, T_t0, X_t1, T_t1)
+                _, loss, _ = model(X_t0, T_t0, X_t1, T_t1)
 
             # backward pass, with gradient scaling if training in fp16
             loss = loss["loss_ce"] + loss["loss_dt"]
             scaler.scale(loss).backward()
 
         # clip the gradient
-        if cfg.grad_clip != 0.0:
+        if cfg.optim.grad_clip != 0.0:
             scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.grad_clip)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.optim.grad_clip)
 
         # step the optimizer and scaler if training in fp16
         scaler.step(optimizer)
         scaler.update()
         # flush the gradients as soon as we can, no need for this memory anymore
         optimizer.zero_grad(set_to_none=True)
+        scheduler.step()
 
-        logger.train_step(iter_num=iter_num, train_loss=loss, addons={"lr": lr})
-        logger.ckpt_step(iter_num=iter_num, model=model, optimizer=optimizer)
+        logger.train_step(
+            iter_num=iter_num,
+            train_loss=loss,
+            addons={"lr": scheduler.get_last_lr()[0]},
+        )
+        logger.ckpt_step(
+            iter_num=iter_num,
+            optimizer=optimizer,
+            model=model,  # type: ignore
+        )
 
         iter_num += 1
 
         # termination conditions
-        if iter_num > cfg.max_iters:
+        if iter_num > cfg.optim.max_iters:
             break
 
 

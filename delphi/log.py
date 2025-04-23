@@ -1,6 +1,6 @@
 import gc
 import os
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
 
@@ -153,7 +153,7 @@ class GenLogger:
 class TrainLogConfig:
     wandb_log: bool = True
     wandb_project: str = "delphi"
-    wandb_run_name: str = "gen" + str(datetime.now().strftime("%Y-%m-%d-%H%M%S"))
+    run_name: str = "gen" + str(datetime.now().strftime("%Y-%m-%d-%H%M%S"))
     always_ckpt_after_eval: bool = False
     ckpt_interval: int = 1000
     log_interval: int = 1
@@ -171,7 +171,7 @@ class TrainLogger:
         if self.wandb:
             wandb.init(
                 project=self.cfg.wandb_project,
-                name=self.cfg.wandb_run_name,
+                name=self.cfg.run_name,
                 config=exp_cfg,
             )
 
@@ -242,8 +242,8 @@ class TrainLogger:
 
     def ckpt_step(
         self,
-        model,
-        optimizer,
+        model: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
         iter_num: int,
     ):
         if self.cfg.ckpt_interval is None:

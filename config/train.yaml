@@ -1,16 +1,16 @@
-ckpt_dir: ${oc.env:DELPHI_CKPT_DIR,checkpoints}
+ckpt_dir: ${oc.env:DELPHI_CKPT_DIR}
 eval_interval: 250 # keep frequent because we'll overfit
 eval_iters: 25
 eval_only: false
 init_from: scratch
 seed: 42
 gradient_accumulation_steps: 1
-batch_size: 256
+batch_size: 128
 device: mps
 
 data_fraction: 1.0
 train_data:
-  data_dir: data/ukb_simulated_data
+  data_dir: data/ukb_real_data
   memmap_fname: train.bin
   tokenizer_fname: tokenizer.yaml
   transforms:
@@ -19,7 +19,7 @@ train_data:
         interval_in_years: 5
         mode: random
 val_data:
-  data_dir: data/ukb_simulated_data
+  data_dir: data/ukb_real_data
   memmap_fname: val.bin
   tokenizer_fname: tokenizer.yaml
   transforms:
@@ -37,24 +37,21 @@ model:
   token_dropout: 0.0
   t_min: 0.1
   bias: true
-  mask_ties: true
+  mask_ties: false
   ignore_tokens: [0, 2 ,3, 4, 5, 6, 7, 8, 9, 10, 11, 12] # ignore padding and lifestyle tokens
-  loss:
-    ce_beta: 1.0
-    dt_beta: 1.0
-    zero_inflate: true
+  zero_time_inflation: false
 log:
   wandb_log: true
   wandb_project: delphi
-  run_name: delphi_demo
+  run_name: delphi
   log_interval: 25
   always_ckpt_after_eval: true
   ckpt_interval: 1000
 optim:
-  learning_rate: 2e-3 # with baby networks can afford to go a bit higher
-  max_iters: 5000
+  learning_rate: 6e-4 # with baby networks can afford to go a bit higher
+  max_iters: 100000
   weight_decay: 2e-1
-  lr_decay_iters: 5000 # make equal to max_iters usually
-  min_lr: 2e-4 # learning_rate / 10 usually
+  lr_decay_iters: 100000 # make equal to max_iters usually
+  min_lr: 6e-5 # learning_rate / 10 usually
   beta2: 0.99 # make a bit bigger because number of tokens per iter is small
-  warmup_iters: 500 # not super necessary potentially
+  warmup_iters: 1000 # not super necessary potentially

@@ -1,15 +1,5 @@
-"""
-Full definition of a GPT Language Model, all of it in this single file.
-References:
-1) the official GPT-2 TensorFlow implementation released by OpenAI:
-https://github.com/openai/gpt-2/blob/master/src/model.py
-2) huggingface/transformers PyTorch implementation:
-https://github.com/huggingface/transformers/blob/main/src/transformers/models/gpt2/modeling_gpt2.py
-"""
-
 import inspect
 import math
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -19,30 +9,8 @@ from omegaconf import OmegaConf
 from torch.nn import functional as F
 
 from delphi.config import dataclass_from_dict
-from delphi.model.components import (
-    AgeEncoding,
-    DelphiEmbedding,
-    ZeroTimeInflationPiProjector,
-)
-
-
-@dataclass
-class DelphiConfig:
-    block_size: int = 1024
-    vocab_size: int = 50304
-    # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
-    n_layer: int = 12
-    n_head: int = 12
-    n_embd: int = 768
-    dropout: float = 0.0
-    token_dropout: float = 0.0
-    t_min: float = 1.0
-    bias: bool = True
-    # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
-    mask_ties: bool = False
-    ignore_tokens: list = field(default_factory=lambda: [0])
-    zero_time_inflation: bool = False
-    pi_projector: str = "linear"  # 'linear' or 'mlp'
+from delphi.model.components import DelphiEmbedding, build_zero_inflate_projector
+from delphi.model.config import DelphiConfig
 
 
 class LayerNorm(nn.Module):
@@ -179,13 +147,8 @@ class Delphi(nn.Module):
         self.transformer.embed.token_embedding.weight = self.lm_head.weight
 
         # zero time inflation
-        if config.zero_time_inflation:
-            if config.pi_projector == "linear":
-                self.pi_head = nn.Linear(config.vocab_size, 1, bias=False)
-            elif config.pi_projector == "mlp":
-                self.pi_head = ZeroTimeInflationPiProjector(config)
-            else:
-                raise ValueError(f"Unknown pi_projector: {config.pi_projector}")
+        if config.loss.zero_inflate:
+            self.pi_head = build_zero_inflate_projector(config)
 
         # init all weights
         self.apply(self._init_weights)
@@ -228,50 +191,12 @@ class Delphi(nn.Module):
         validation_loss_mode: bool = False,
     ) -> tuple[torch.Tensor, Optional[dict[str, torch.Tensor]], torch.Tensor]:
 
-        device = idx.device
-        # forward the GPT model itself
-        # tok_emb = self.transformer.wte(idx)  # token embeddings of shape (b, t, n_embd)
-        # age_emb = self.transformer.wae(
-        #     age.unsqueeze(-1)
-        # )  # age embeddings of shape (b, t, n_embd)
-        # x = self.transformer.token_drop(tok_emb) * (1 - self.config.token_dropout)
-        # x = x + age_emb
-
         x = self.transformer.embed(idx, age)  # (b, t, n_embd)
         x = self.transformer.drop(x)
 
         attn_mask = self.transformer.embed.attention_mask(
             idx, age, targets, targets_age
         )
-
-        # attn_mask = (idx > 0).view(idx.size(0), 1, 1, idx.size(1)) * (idx > 0).view(
-        #     idx.size(0), 1, idx.size(1), 1
-        # )  # Do not attend to padded positions
-        # attn_mask *= (
-        #     torch.tril(torch.ones(idx.size(1), idx.size(1), device=device))[
-        #         None, None, :, :
-        #     ]
-        #     > 0
-        # )  # self.transformer.h[0].attn.bias[:,:,:idx.size(1),:idx.size(1)] > 0
-        # if targets is not None and self.config.mask_ties:
-        #     attn_mask *= age.view(idx.size(0), 1, 1, idx.size(1)) != targets_age.view(
-        #         idx.size(0), 1, idx.size(1), 1
-        #     )  # Mask co-occuring tokens
-        #     attn_mask += (attn_mask.sum(-1, keepdim=True) == 0) * torch.diag(
-        #         torch.ones(idx.size(1), device=device)
-        #     ) > 0 # todo: find out what this does
-        # attn_mask = (
-        #     attn_mask
-        #     + (idx == 0).view(idx.size(0), 1, 1, idx.size(1))
-        #     * torch.diag(torch.ones(idx.size(1), device=device))
-        #     > 0
-        # )  # Except for padding
-        # attn_mask *= (
-        #     torch.tril(torch.ones(idx.size(1), idx.size(1), device=device))[
-        #         None, None, :, :
-        #     ]
-        #     > 0
-        # )  # self.transformer.h[0].attn.bias[:,:,:idx.size(1),:idx.size(1)] > 0
 
         att = []
         for block in self.transformer.h:
@@ -281,64 +206,47 @@ class Delphi(nn.Module):
         att = torch.stack(att)
 
         if targets is not None:
-            # next token cross entropy loss, padding masked
             logits = self.lm_head(x)
-            if self.config.zero_time_inflation:
-                pi = self.pi_head(logits).squeeze()
 
-            # if we are given some desired targets also calculate the loss
             ignored_tokens = self.config.ignore_tokens.copy()
             if validation_loss_mode:
                 ignored_tokens += [1]
                 logits[..., ignored_tokens] = -torch.inf
-            targets = targets.reshape(-1)
-            pass_tokens = targets != -1
-            for k in ignored_tokens:  # and gender
-                pass_tokens *= targets != k
 
-            loss_ce = F.cross_entropy(
-                logits.reshape(-1, logits.size(-1))[pass_tokens],
-                targets[pass_tokens],
-                ignore_index=-1,
+            is_valid_target = self.transformer.embed.target_mask(targets)
+
+            loss_ce = self.ce_loss(logits, targets)
+            loss_ce = torch.mean(loss_ce[is_valid_target])
+            # # time to next event loss, padding masked
+            # lse = torch.logsumexp(
+            #     logits, -1
+            # )  ## More forgiving than using torch.max() for the most likely next event
+            # lse = -torch.log(torch.exp(-lse) + self.config.t_min)
+            dt = self.transformer.embed.ties_adjusted_delta_t(
+                age, targets_age, attn_mask
             )
+            loss_dt = self.dt_loss(
+                logits, dt, zero_inflate=self.config.loss.zero_inflate
+            )
+            # ldt = -torch.log(dt + torch.tensor(self.config.t_min))
 
-            # time to next event loss, padding masked
-            lse = torch.logsumexp(
-                logits, -1
-            )  ## More forgiving than using torch.max() for the most likely next event
-            lse = -torch.log(torch.exp(-lse) + self.config.t_min)
-            dt = targets_age - age
-            if not self.config.zero_time_inflation:
-                dt = torch.clamp(dt, min=1.0)
-            if self.config.mask_ties:
-                dt = torch.gather(
-                    dt,
-                    -1,
-                    (
-                        attn_mask
-                        * torch.arange(
-                            0, idx.size(1), device=device, dtype=torch.float32
-                        ).view(1, 1, 1, -1)
-                    )
-                    .max(-1)
-                    .indices.squeeze((1, 2)),
-                )  # Use time from last untied token
-            ldt = -torch.log(dt + torch.tensor(self.config.t_min))
-
-            exp_log_likelihood = lse - torch.exp(lse - ldt)
-            if not self.config.zero_time_inflation:
-                loss_dt = -exp_log_likelihood.reshape(
-                    -1
-                )  ## Exponential log-likelihood (real statistics, TM)
-            else:
-                zero_case = -(F.softplus(-pi + lse) - F.softplus(-pi))
-                nonzero_case = -(exp_log_likelihood - pi - F.softplus(-pi))
-                loss_dt = (zero_case * (dt == 0) + nonzero_case * (dt > 0)).reshape(-1)
-            loss_dt = torch.mean(loss_dt[pass_tokens])
+            # exp_log_likelihood = lse - torch.exp(lse - ldt)
+            # if not self.config.zero_time_inflation:
+            #     loss_dt = -exp_log_likelihood.reshape(
+            #         -1
+            #     )  ## Exponential log-likelihood (real statistics, TM)
+            # else:
+            #     zero_case = -(F.softplus(-pi + lse) - F.softplus(-pi))
+            #     nonzero_case = -(exp_log_likelihood - pi - F.softplus(-pi))
+            #     loss_dt = (zero_case * (dt == 0) + nonzero_case * (dt > 0)).reshape(-1)
+            loss_dt = torch.mean(loss_dt[is_valid_target])
 
             # Both losses combined
             # loss = loss_ce + loss_dt
-            loss = {"loss_ce": loss_ce, "loss_dt": loss_dt}
+            loss = {
+                "loss_ce": loss_ce * self.config.loss.ce_beta,
+                "loss_dt": loss_dt * self.config.loss.dt_beta,
+            }
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position
             logits = self.lm_head(
@@ -348,214 +256,36 @@ class Delphi(nn.Module):
 
         return logits, loss, att
 
-    def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
-        """
-        This long function is unfortunately doing something very simple and is being very defensive:
-        We are separating out all parameters of the model into two buckets: those that will experience
-        weight decay for regularization and those that won't (biases, and layernorm/embedding weights).
-        We are then returning the PyTorch optimizer object.
-        """
-
-        # separate out all parameters to those that will and won't experience regularizing weight decay
-        decay = set()
-        no_decay = set()
-        whitelist_weight_modules = (torch.nn.Linear,)
-        blacklist_weight_modules = (torch.nn.LayerNorm, LayerNorm, torch.nn.Embedding)
-        for mn, m in self.named_modules():
-            for pn, p in m.named_parameters():
-                fpn = "%s.%s" % (mn, pn) if mn else pn  # full param name
-                # random note: because named_modules and named_parameters are recursive
-                # we will see the same tensors p many many times. but doing it this way
-                # allows us to know which parent module any tensor p belongs to...
-                if pn.endswith("bias"):
-                    # all biases will not be decayed
-                    no_decay.add(fpn)
-                elif pn.endswith("weight") and isinstance(m, whitelist_weight_modules):
-                    # weights of whitelist modules will be weight decayed
-                    decay.add(fpn)
-                elif pn.endswith("weight") and isinstance(m, blacklist_weight_modules):
-                    # weights of blacklist modules will NOT be weight decayed
-                    no_decay.add(fpn)
-
-        # subtle: 'transformer.wte.weight' and 'lm_head.weight' are tied, so they
-        # will appear in the no_decay and decay sets respectively after the above.
-        # In addition, because named_parameters() doesn't return duplicates, it
-        # will only return the first occurrence, key'd by 'transformer.wte.weight', below.
-        # so let's manually remove 'lm_head.weight' from decay set. This will include
-        # this tensor into optimization via transformer.wte.weight only, and not decayed.
-        decay.remove("lm_head.weight")
-
-        # validate that we considered every parameter
-        param_dict = {pn: p for pn, p in self.named_parameters()}
-        inter_params = decay & no_decay
-        union_params = decay | no_decay
-        assert (
-            len(inter_params) == 0
-        ), "parameters %s made it into both decay/no_decay sets!" % (str(inter_params),)
-        assert (
-            len(param_dict.keys() - union_params) == 0
-        ), "parameters %s were not separated into either decay/no_decay set!" % (
-            str(param_dict.keys() - union_params),
-        )
-
-        # create the pytorch optimizer object
-        optim_groups = [
-            {
-                "params": [param_dict[pn] for pn in sorted(list(decay))],
-                "weight_decay": weight_decay,
-            },
-            {
-                "params": [param_dict[pn] for pn in sorted(list(no_decay))],
-                "weight_decay": 0.0,
-            },
-        ]
-        # new PyTorch nightly has a new 'fused' option for AdamW that is much faster
-        use_fused = (device_type == "cuda") and (
-            "fused" in inspect.signature(torch.optim.AdamW).parameters
-        )
-        print(f"using fused AdamW: {use_fused}")
-        extra_args = dict(fused=True) if use_fused else dict()
-        optimizer = torch.optim.AdamW(
-            optim_groups, lr=learning_rate, betas=betas, **extra_args
-        )
-
-        return optimizer
-
-    def loss(self):
-        pass
-
     def ce_loss(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
 
-        loss_ce = F.cross_entropy(
-            logits,
-            targets,
-            ignore_index=-1,
-        )
+        logits = logits.permute(0, 2, 1)  # (b, l, n_vocab) -> (b, n_vocab, l)
+        loss_ce = F.cross_entropy(logits, targets, ignore_index=-1, reduction="none")
 
         return loss_ce
 
-    def time_loss(
+    def dt_loss(
         self,
         logits: torch.Tensor,
-        age: torch.Tensor,
-        targets_age: torch.Tensor,
+        delta_t: torch.Tensor,
+        zero_inflate: bool = False,
     ) -> torch.Tensor:
 
         # time to next event loss, padding masked
-        lse = torch.logsumexp(
-            logits, -1
-        )  ## More forgiving than using torch.max() for the most likely next event
-        lse = -torch.log(torch.exp(-lse) + self.config.t_min)
-        dt = targets_age - age
-        dt = torch.clamp(dt, min=1.0)
-        ldt = -torch.log(dt + torch.tensor(self.config.t_min))
-        exp_log_likelihood = lse - torch.exp(lse - ldt)
-        loss_dt = -exp_log_likelihood.reshape(-1)
-
-        return loss_dt
-
-    def zero_inflated_time_loss(
-        self,
-        logits: torch.Tensor,
-        age: torch.Tensor,
-        targets_age: torch.Tensor,
-    ) -> torch.Tensor:
-
-        pi = self.pi_head(logits).squeeze()
-
         lse = torch.logsumexp(logits, -1)
+        # More forgiving than using torch.max() for the most likely next event
         lse = -torch.log(torch.exp(-lse) + self.config.t_min)
-        dt = targets_age - age
-
-        ldt = -torch.log(dt + torch.tensor(self.config.t_min))
+        ldt = -torch.log(delta_t + torch.tensor(self.config.t_min))
         exp_log_likelihood = lse - torch.exp(lse - ldt)
-        loss_dt = -exp_log_likelihood.reshape(-1)
 
-        zero_case = -(F.softplus(-pi + lse) - F.softplus(-pi))
-        nonzero_case = -(exp_log_likelihood - pi - F.softplus(-pi))
-        loss_dt = (zero_case * (dt == 0) + nonzero_case * (dt > 0)).reshape(-1)
+        if zero_inflate:
+            pi = self.pi_head(logits).squeeze()
+            zero_case = -(F.softplus(-pi + lse) - F.softplus(-pi))
+            nonzero_case = -(exp_log_likelihood - pi - F.softplus(-pi))
+            loss_dt = zero_case * (delta_t == 0) + nonzero_case * (delta_t > 0)
+        else:
+            loss_dt = -exp_log_likelihood
 
         return loss_dt
-
-    @torch.no_grad()
-    def generate(
-        self,
-        idx: torch.Tensor,
-        age: torch.Tensor,
-        max_new_tokens: int = 100,
-        max_age: float = 85 * 365.25,
-        temperature: float = 1.0,
-        top_k: Optional[int] = None,
-        no_repeat: bool = True,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
-        the sequence max_new_tokens times, feeding the predictions back into the model each time.
-        Most likely you'll want to make sure to be in model.eval() mode of operation for this.
-        """
-        if max_new_tokens == -1:
-            max_new_tokens = 10000
-        for _ in range(max_new_tokens):
-            # if the sequence context is growing too long we must crop it at block_size
-            idx_cond = idx  # if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
-            age_cond = age  # if age.size(1) <= self.config.block_size else age[:, -self.config.block_size:]
-
-            # forward the model to get the logits for the index in the sequence
-            logits, _, _ = self(idx_cond, age_cond)
-            # pluck the logits at the final step and scale by desired temperature
-            logits = logits[:, -1, :] / temperature
-            logits[:, self.config.ignore_tokens] = -float("Inf")
-            # optionally crop the logits to only the top k options
-            if top_k is not None:
-                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < v[:, [-1]]] = -float("Inf")
-
-            if no_repeat:
-                fill = idx + 0
-                fill[fill == 1] = 0
-                logits = logits.scatter_(1, fill, -float("Inf"))
-
-            # apply softmax to convert logits to (normalized) probabilities
-            # probs = F.softmax(logits, dim=-1)
-            # sample from the distribution
-            # idx_next = torch.multinomial(probs, num_samples=1)
-            # lse = torch.logsumexp(logits, -1)[:,None]
-            t_next = torch.clamp(
-                -torch.exp(-logits) * torch.rand(logits.shape, device=idx.device).log(),
-                min=0,
-                max=365 * 80.0,
-            ).min(1)
-            # age_next = age[...,[-1]] + torch.clamp(-torch.exp(-lse) * torch.rand(lse.shape, device=idx.device).log(), min=self.config.t_min, max=365*80.) #torch.normal(torch.zeros((1,1), device=idx.device),1.)
-            idx_next = t_next[1][:, None]
-            age_next = age[..., [-1]] + t_next[0][:, None]
-
-            # append sampled index to the running sequence and continue
-            idx = torch.cat((idx, idx_next), dim=1)
-            age = torch.cat((age, age_next), dim=1)
-
-            if torch.all(idx_next == self.config.vocab_size - 1) or torch.all(
-                age_next > max_age
-            ):
-                break
-
-        pad = (
-            torch.cumsum(torch.cumsum(idx == self.config.vocab_size - 1, 1).int(), 1)
-            > 1
-        ) + (age > max_age)
-        logits, _, _ = self(idx, age)
-        idx[pad] = 0
-        age[pad] = float("NaN")
-        if no_repeat:
-            fill = idx + 0
-            fill[fill == 1] = 0
-            logits = torch.stack(
-                [
-                    logits[:, j].scatter_(1, fill[:, : j + 1], float("NaN"))
-                    for j in range(fill.shape[1])
-                ]
-            ).transpose(0, 1)
-
-        return idx, age, logits
 
 
 def load_model(

@@ -4,6 +4,8 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
+from delphi.model.config import DelphiConfig
+
 
 class AgeEncoding(nn.Module):
 
@@ -32,7 +34,7 @@ class AgeEncoding(nn.Module):
 
 class DelphiEmbedding(nn.Module):
 
-    def __init__(self, config) -> None:
+    def __init__(self, config: DelphiConfig) -> None:
         super().__init__()
         self.config = config
         self.token_embedding = nn.Embedding(
@@ -40,6 +42,8 @@ class DelphiEmbedding(nn.Module):
         )
         self.age_encoding = AgeEncoding(config)
         self.token_drop = nn.Dropout(config.token_dropout)
+
+        self.ignore_tokens = self.config.ignore_tokens.copy()
 
     def attention_mask(
         self,
@@ -63,12 +67,46 @@ class DelphiEmbedding(nn.Module):
                 ).to(torch.int)
                 attn_mask *= ties_mask
 
-        attn_mask = torch.logical_or(
-            attn_mask.to(torch.bool),
-            torch.eye(seq_len, device=x0.device).unsqueeze(0).to(torch.bool),
-        )
+        attn_mask += (attn_mask.sum(-1, keepdim=True) == 0) * torch.diag(
+            torch.ones(x0.size(1), device=x0.device)
+        ) > 0
 
         return attn_mask.unsqueeze(1)
+
+    def target_mask(
+        self,
+        x1: torch.Tensor,
+    ) -> torch.Tensor:
+
+        is_valid_target = x1 != -1
+        for k in self.ignore_tokens:
+            is_valid_target *= x1 != k
+
+        return is_valid_target
+
+    def ties_adjusted_delta_t(
+        self, t0: torch.Tensor, t1: torch.Tensor, attn_mask: torch.Tensor
+    ) -> torch.Tensor:
+
+        delta_t = t1 - t0
+        if not self.config.loss.zero_inflate:
+            delta_t = torch.clamp(delta_t, min=1.0)
+
+        if self.config.mask_ties:
+            delta_t = torch.gather(
+                delta_t,
+                -1,
+                (
+                    attn_mask
+                    * torch.arange(
+                        0, t0.size(1), device=t0.device, dtype=torch.float32
+                    ).view(1, 1, 1, -1)
+                )
+                .max(-1)
+                .indices.squeeze((1, 2)),
+            )
+
+        return delta_t
 
     def forward(
         self,
@@ -84,8 +122,8 @@ class DelphiEmbedding(nn.Module):
         return x
 
 
-class ZeroTimeInflationPiProjector(nn.Module):
-    def __init__(self, config) -> None:
+class ZeroInflateProjector(nn.Module):
+    def __init__(self, config: DelphiConfig) -> None:
         super().__init__()
         self.linears = nn.ModuleList(
             [
@@ -100,3 +138,13 @@ class ZeroTimeInflationPiProjector(nn.Module):
         for i, l in enumerate(self.linears):
             x = l(x)
         return x
+
+
+def build_zero_inflate_projector(config: DelphiConfig):
+
+    if config.loss.zero_inflate_projector == "linear":
+        return nn.Linear(config.vocab_size, 1, bias=False)
+    elif config.loss.zero_inflate_projector == "mlp":
+        return ZeroInflateProjector(config)
+    else:
+        raise ValueError(f"Unknown pi_projector: {config.loss.zero_inflate_projector}")
