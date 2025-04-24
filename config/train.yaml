@@ -39,7 +39,10 @@ model:
   bias: true
   mask_ties: false
   ignore_tokens: [0, 2 ,3, 4, 5, 6, 7, 8, 9, 10, 11, 12] # ignore padding and lifestyle tokens
-  zero_time_inflation: false
+  loss:
+    ce_beta: 1.0
+    dt_beta: 1.0
+    zero_inflate: true
 log:
   wandb_log: true
   wandb_project: delphi
