@@ -42,10 +42,10 @@ model:
   loss:
     ce_beta: 1.0
     dt_beta: 1.0
-    zero_inflate: true
+    zero_inflate: false
 log:
   wandb_log: true
-  wandb_project: delphi
+  wandb_project: delphi_debug
   run_name: delphi_demo
   log_interval: 25
   always_ckpt_after_eval: true
