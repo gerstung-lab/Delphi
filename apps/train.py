@@ -7,7 +7,8 @@ from omegaconf import OmegaConf
 
 from delphi.data.dataset import Dataset, UKBDataConfig, load_sequences, train_iter
 from delphi.log import TrainLogConfig, TrainLogger
-from delphi.model.transformer import Delphi, DelphiConfig
+from delphi.model.config import DelphiConfig, validate_config
+from delphi.model.transformer import Delphi
 from delphi.optim import OptimConfig, configure_optimizers
 
 
@@ -44,12 +45,10 @@ class TrainConfig:
 
 def train(cfg: TrainConfig):
 
-    run_dir = os.path.join(cfg.ckpt_dir, cfg.log.run_name)
-    logger = TrainLogger(cfg=cfg.log, exp_cfg=asdict(cfg), dump_dir=run_dir)
+    validate_config(cfg.model)
 
-    torch.manual_seed(cfg.seed)
-    torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
-    torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
+    run_dir = os.path.join(cfg.ckpt_dir, cfg.log.run_name)
+
     device_type = (
         "cuda" if "cuda" in cfg.device else "cpu"
     )  # for later use in torch.autocast
@@ -66,6 +65,10 @@ def train(cfg: TrainConfig):
         else torch.autocast(device_type=device_type, dtype=ptdtype)
     )
 
+    torch.manual_seed(cfg.seed)
+    torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
+    torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
+    # https://pytorch.org/docs/stable/generated/torch.set_default_dtype.html
     torch.set_default_dtype(ptdtype)
 
     train_ds = Dataset(cfg.train_data)
@@ -130,17 +133,18 @@ def train(cfg: TrainConfig):
     # helps estimate an arbitrarily accurate loss over either split using many batches
     @torch.no_grad()
     def estimate_loss():
-        out = {}
         model.eval()
+        eval_loss = {}
         for split in ["train", "val"]:
-            losses = torch.zeros(cfg.eval_iters, 2)
             ds = train_ds if split == "train" else val_ds
             it = train_iter(
                 total_size=len(ds),
                 batch_size=cfg.batch_size,
             )
             loader = load_sequences(it=it, dataset=ds)
-            for k in range(cfg.eval_iters):
+
+            eval_loss[split] = {"loss_ce": 0, "loss_dt": 0}
+            for _ in range(cfg.eval_iters):
 
                 _, X, T = next(loader)
                 X = X.to(cfg.device)
@@ -152,33 +156,35 @@ def train(cfg: TrainConfig):
                 T_t1 = T[:, 1:]
 
                 with ctx:
-                    logits, loss, _ = model(
+                    _, loss, _ = model(
                         X_t0, T_t0, X_t1, T_t1, validation_loss_mode=True
                     )
-                losses[k] = torch.stack([loss["loss_ce"], loss["loss_dt"]])
-            out[split] = losses.mean(0)
-        model.train()
-        return out
 
-    val_loss = None
+                eval_loss[split]["loss_ce"] += loss["loss_ce"].detach().cpu()
+                eval_loss[split]["loss_dt"] += loss["loss_dt"].detach().cpu()
+
+            eval_loss[split]["loss_ce"] /= cfg.eval_iters
+            eval_loss[split]["loss_dt"] /= cfg.eval_iters
+
+        model.train()
+
+        return eval_loss["train"], eval_loss["val"]
+
+    logger = TrainLogger(
+        cfg=cfg.log,
+        exp_cfg=asdict(cfg),
+        dump_dir=run_dir,
+        model=model,  # type: ignore
+        optimizer=optimizer,
+        scheduler=scheduler,
+    )
+
     while True:
 
         # evaluate the loss on train/val sets and write checkpoints
         if iter_num % cfg.eval_interval == 0 and iter_num > 0:
-            losses = estimate_loss()
-            val_loss = losses["val"].sum().item()
-
-            logger.eval_step(
-                iter_num=iter_num,
-                model=model,  # type: ignore
-                optimizer=optimizer,
-                val_loss=val_loss,
-                addons={
-                    "train/loss": losses["train"].sum().item(),
-                    "train/loss_ce": losses["train"][0].item(),
-                    "train/loss_dt": losses["train"][1].item(),
-                },
-            )
+            _, val_loss = estimate_loss()
+            logger.eval_step(step=iter_num, loss=val_loss)
 
         if iter_num == 0 and cfg.eval_only:
             break
@@ -200,8 +206,8 @@ def train(cfg: TrainConfig):
                 _, loss, _ = model(X_t0, T_t0, X_t1, T_t1)
 
             # backward pass, with gradient scaling if training in fp16
-            loss = loss["loss_ce"] + loss["loss_dt"]
-            scaler.scale(loss).backward()
+            loss_agg = loss["loss_ce"] + loss["loss_dt"]
+            scaler.scale(loss_agg).backward()
 
         # clip the gradient
         if cfg.optim.grad_clip != 0.0:
@@ -215,16 +221,8 @@ def train(cfg: TrainConfig):
         optimizer.zero_grad(set_to_none=True)
         scheduler.step()
 
-        logger.train_step(
-            iter_num=iter_num,
-            train_loss=loss,
-            addons={"lr": scheduler.get_last_lr()[0]},
-        )
-        logger.ckpt_step(
-            iter_num=iter_num,
-            optimizer=optimizer,
-            model=model,  # type: ignore
-        )
+        logger.train_step(step=iter_num, loss=loss)
+        logger.ckpt_step(step=iter_num)
 
         iter_num += 1
 

@@ -30,15 +30,15 @@ class OptimConfig:
 def get_lr(it: int, cfg: OptimConfig) -> float:
     # 1) linear warmup for warmup_iters steps
     if it < cfg.warmup_iters:
-        return cfg.learning_rate * it / cfg.warmup_iters
+        return it / cfg.warmup_iters
     # 2) if it > lr_decay_iters, return min learning rate
     if it > cfg.lr_decay_iters:
-        return cfg.min_lr
+        return cfg.min_lr / cfg.learning_rate
     # 3) in between, use cosine decay down to min learning rate
     decay_ratio = (it - cfg.warmup_iters) / (cfg.lr_decay_iters - cfg.warmup_iters)
     assert 0 <= decay_ratio <= 1
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))  # coeff ranges 0..1
-    return cfg.min_lr + coeff * (cfg.learning_rate - cfg.min_lr)
+    return (cfg.min_lr + coeff * (cfg.learning_rate - cfg.min_lr)) / cfg.learning_rate
 
 
 def configure_optimizers(

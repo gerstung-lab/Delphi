@@ -9,7 +9,11 @@ from omegaconf import OmegaConf
 from torch.nn import functional as F
 
 from delphi.config import dataclass_from_dict
-from delphi.model.components import DelphiEmbedding, build_zero_inflate_projector
+from delphi.model.components import (
+    DelphiEmbedding,
+    build_zero_inflate_projector,
+    target_mask,
+)
 from delphi.model.config import DelphiConfig
 
 
@@ -208,41 +212,24 @@ class Delphi(nn.Module):
         if targets is not None:
             logits = self.lm_head(x)
 
+            logits_cp = logits.clone()
             ignored_tokens = self.config.ignore_tokens.copy()
             if validation_loss_mode:
                 ignored_tokens += [1]
-                logits[..., ignored_tokens] = -torch.inf
+                logits_cp[..., ignored_tokens] = -torch.inf
+            loss_ce = self.ce_loss(logits=logits_cp, targets=targets)
 
-            is_valid_target = self.transformer.embed.target_mask(targets)
-
-            loss_ce = self.ce_loss(logits, targets)
-            loss_ce = torch.mean(loss_ce[is_valid_target])
-            # # time to next event loss, padding masked
-            # lse = torch.logsumexp(
-            #     logits, -1
-            # )  ## More forgiving than using torch.max() for the most likely next event
-            # lse = -torch.log(torch.exp(-lse) + self.config.t_min)
             dt = self.transformer.embed.ties_adjusted_delta_t(
                 age, targets_age, attn_mask
             )
             loss_dt = self.dt_loss(
                 logits, dt, zero_inflate=self.config.loss.zero_inflate
             )
-            # ldt = -torch.log(dt + torch.tensor(self.config.t_min))
 
-            # exp_log_likelihood = lse - torch.exp(lse - ldt)
-            # if not self.config.zero_time_inflation:
-            #     loss_dt = -exp_log_likelihood.reshape(
-            #         -1
-            #     )  ## Exponential log-likelihood (real statistics, TM)
-            # else:
-            #     zero_case = -(F.softplus(-pi + lse) - F.softplus(-pi))
-            #     nonzero_case = -(exp_log_likelihood - pi - F.softplus(-pi))
-            #     loss_dt = (zero_case * (dt == 0) + nonzero_case * (dt > 0)).reshape(-1)
+            is_valid_target = target_mask(targets, ignore_tokens=ignored_tokens)
+            loss_ce = torch.mean(loss_ce[is_valid_target])
             loss_dt = torch.mean(loss_dt[is_valid_target])
 
-            # Both losses combined
-            # loss = loss_ce + loss_dt
             loss = {
                 "loss_ce": loss_ce * self.config.loss.ce_beta,
                 "loss_dt": loss_dt * self.config.loss.dt_beta,

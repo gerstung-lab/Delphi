@@ -43,8 +43,6 @@ class DelphiEmbedding(nn.Module):
         self.age_encoding = AgeEncoding(config)
         self.token_drop = nn.Dropout(config.token_dropout)
 
-        self.ignore_tokens = self.config.ignore_tokens.copy()
-
     def attention_mask(
         self,
         x0: torch.Tensor,
@@ -72,17 +70,6 @@ class DelphiEmbedding(nn.Module):
         ) > 0
 
         return attn_mask.unsqueeze(1)
-
-    def target_mask(
-        self,
-        x1: torch.Tensor,
-    ) -> torch.Tensor:
-
-        is_valid_target = x1 != -1
-        for k in self.ignore_tokens:
-            is_valid_target *= x1 != k
-
-        return is_valid_target
 
     def ties_adjusted_delta_t(
         self, t0: torch.Tensor, t1: torch.Tensor, attn_mask: torch.Tensor
@@ -148,3 +135,15 @@ def build_zero_inflate_projector(config: DelphiConfig):
         return ZeroInflateProjector(config)
     else:
         raise ValueError(f"Unknown pi_projector: {config.loss.zero_inflate_projector}")
+
+
+def target_mask(
+    x1: torch.Tensor,
+    ignore_tokens: list[int],
+) -> torch.Tensor:
+
+    is_valid_target = x1 != -1
+    for k in ignore_tokens:
+        is_valid_target *= x1 != k
+
+    return is_valid_target

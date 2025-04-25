@@ -2,7 +2,6 @@ import gc
 import os
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
 
 import numpy as np
 import torch
@@ -165,15 +164,31 @@ class TrainLogger:
         cfg: TrainLogConfig,
         exp_cfg: dict,
         dump_dir: str,
+        model: torch.nn.Module,
+        optimizer: torch.optim.Optimizer,
+        scheduler: torch.optim.lr_scheduler.LambdaLR,
     ):
         self.cfg = cfg
         self.wandb = self.cfg.wandb_log
+        self.model = model
+        self.optimizer = optimizer
+        self.scheduler = scheduler
+
         if self.wandb:
             wandb.init(
                 project=self.cfg.wandb_project,
                 name=self.cfg.run_name,
                 config=exp_cfg,
             )
+
+            wandb.define_metric("step")
+            wandb.define_metric("lr", step_metric="step")
+            wandb.define_metric("val/loss_ce", step_metric="step")
+            wandb.define_metric("val/loss_dt", step_metric="step")
+            wandb.define_metric("val/loss", step_metric="step")
+            wandb.define_metric("train/loss_ce", step_metric="step")
+            wandb.define_metric("train/loss_dt", step_metric="step")
+            wandb.define_metric("train/loss", step_metric="step")
 
         self.exp_cfg = exp_cfg
 
@@ -186,17 +201,15 @@ class TrainLogger:
 
     def save_ckpt(
         self,
-        iter_num: int,
-        model: torch.nn.Module,
-        optimizer: torch.optim.Optimizer,
+        step: int,
         ckpt_fname: str = "ckpt.pt",
     ):
 
         checkpoint = {
-            "model": model.state_dict(),
-            "optimizer": optimizer.state_dict(),
+            "model": self.model.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
             "model_args": self.exp_cfg["model"],
-            "iter_num": iter_num,
+            "iter_num": step,
             "best_val_loss": self.best_val_loss,
             "config": self.exp_cfg,
         }
@@ -204,49 +217,50 @@ class TrainLogger:
         print(f"saving checkpoint to {ckpt_path}")
         torch.save(checkpoint, ckpt_path)
 
-    def eval_step(
-        self,
-        iter_num: int,
-        model: torch.nn.Module,
-        optimizer: torch.optim.Optimizer,
-        val_loss: float,
-        addons: Optional[dict] = None,
-    ):
-
-        print(f"step {iter_num}: val loss {val_loss:.4f}")
-        if self.cfg.always_ckpt_after_eval or val_loss < self.best_val_loss:
-            self.save_ckpt(iter_num, model, optimizer, ckpt_fname="ckpt.pt")
+    def eval_step(self, step: int, loss: dict[str, torch.Tensor]):
+        loss_ce = loss["loss_ce"].item()
+        loss_dt = loss["loss_dt"].item()
+        lossf = loss_ce + loss_dt
+        print(f"iter {step}: val loss {lossf:.4f}")
+        if self.cfg.always_ckpt_after_eval or lossf < self.best_val_loss:
+            self.save_ckpt(step, ckpt_fname="ckpt.pt")
 
         if self.wandb:
-            log_dict = {"iter": iter_num, "val/loss": val_loss}
-            if addons is not None:
-                log_dict.update(addons)
+            log_dict = {
+                "step": step,
+                "val/loss": lossf,
+                "val/loss_ce": loss_ce,
+                "val/loss_dt": loss_dt,
+            }
             wandb.log(log_dict)
 
-        self.best_val_loss = min(val_loss, self.best_val_loss)
+        self.best_val_loss = min(lossf, self.best_val_loss)
 
     def train_step(
         self,
-        iter_num: int,
-        train_loss: torch.Tensor,
-        addons: Optional[dict] = None,
+        step: int,
+        loss: dict[str, torch.Tensor],
     ):
-        if iter_num % self.cfg.log_interval == 0:
-            lossf = train_loss.item()
-            print(f"iter {iter_num}: loss {lossf:.4f}")
+        if step % self.cfg.log_interval == 0:
+            loss_ce = loss["loss_ce"].item()
+            loss_dt = loss["loss_dt"].item()
+            lossf = loss_ce + loss_dt
+            print(f"iter {step}: loss {lossf:.4f}")
             if self.wandb:
-                log_dict = {"iter": iter_num, "train/loss": lossf}
-                if addons is not None:
-                    log_dict.update(addons)
+                log_dict = {
+                    "step": step,
+                    "train/loss_ce": loss_ce,
+                    "train/loss_dt": loss_dt,
+                    "train/loss": lossf,
+                    "lr": self.scheduler.get_last_lr()[0],
+                }
                 wandb.log(log_dict)
 
     def ckpt_step(
         self,
-        model: torch.nn.Module,
-        optimizer: torch.optim.Optimizer,
-        iter_num: int,
+        step: int,
     ):
         if self.cfg.ckpt_interval is None:
             return
-        if iter_num % self.cfg.ckpt_interval == 0:
-            self.save_ckpt(iter_num, model, optimizer, ckpt_fname=f"ckpt_{iter_num}.pt")
+        if step % self.cfg.ckpt_interval == 0 and step > 0:
+            self.save_ckpt(step, ckpt_fname=f"ckpt_{step}.pt")
