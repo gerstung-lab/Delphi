@@ -32,6 +32,19 @@ def sample_competing_exponentials(
     return next_token, time_til_next
 
 
+def sample_zero_inflated_exponentials(
+    logits: torch.Tensor, pi: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+
+    next_token, time_til_next = sample_competing_exponentials(logits)
+
+    pi = torch.sigmoid(pi)
+    is_comorbid = torch.bernoulli(pi).to(torch.bool)
+    time_til_next[is_comorbid] = 0.0
+
+    return next_token, time_til_next
+
+
 def sample_comorbid_based_on_cutoff(
     logits: torch.Tensor,
     comorbid_cutoff: float,
@@ -40,8 +53,9 @@ def sample_comorbid_based_on_cutoff(
 
     single_token, time_til_single_token = sample_competing_exponentials(logits)
 
-    logits[..., always_single_tokens] = -torch.inf
+    # logits[..., always_single_tokens] = -torch.inf
     probs = F.softmax(logits, dim=-1)
+    probs[..., always_single_tokens] = 0.0
     n_abv_cutoff = (probs >= comorbid_cutoff).sum(-1)
     max_comorbid = max(int(n_abv_cutoff.max().item()), 1)
     if max_comorbid == 1:
@@ -76,6 +90,7 @@ class CausalSamplerConfig:
     max_new_tokens: int = 64
     max_total_tokens: int = 128
     termination_tokens: list[str] = field(default_factory=list)
+    zero_inflate: bool = False
     simulate_comorbid: bool = True
     comorbid_cutoff: float = 0.2
     always_single_tokens: list[str] = field(default_factory=list)
@@ -89,8 +104,21 @@ class CausalSampler:
         self.model = model
         self.tokenizer = tokenizer
 
+        self.validate_config()
+
         torch.manual_seed(cfg.seed)
         torch.cuda.manual_seed(cfg.seed)
+
+    def validate_config(self):
+        assert not (
+            self.cfg.simulate_comorbid & self.cfg.zero_inflate
+        ), "simulate_comorbid and zero_inflate cannot be both True"
+
+        if self.cfg.zero_inflate:
+            assert (
+                self.model.config.loss.zero_inflate
+            ), "zero_inflate is set to True in the config, \
+                    but the model was not trained with zero inflation"
 
     @torch.no_grad()
     def next_token(
@@ -100,6 +128,7 @@ class CausalSampler:
     ) -> tuple[torch.Tensor, torch.Tensor]:
 
         logits, _, _ = self.model(idx, age)
+        logits_og = logits.clone()
 
         logits = logits[:, -1, :] / self.cfg.temperature
 
@@ -121,6 +150,12 @@ class CausalSampler:
                 logits=logits,
                 comorbid_cutoff=self.cfg.comorbid_cutoff,
                 always_single_tokens=always_single_tokens,
+            )
+        elif self.cfg.zero_inflate:
+            pi = self.model.pi_head(logits_og[:, -1, :])
+            idx_next, time_til_next = sample_zero_inflated_exponentials(
+                logits=logits,
+                pi=pi,
             )
         else:
             idx_next, time_til_next = sample_competing_exponentials(logits)
