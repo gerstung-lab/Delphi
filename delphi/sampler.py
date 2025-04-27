@@ -33,14 +33,19 @@ def sample_competing_exponentials(
 
 
 def sample_zero_inflated_exponentials(
-    logits: torch.Tensor, pi: torch.Tensor
+    logits: torch.Tensor,
+    pi: torch.Tensor,
+    always_single_tokens: list,
 ) -> tuple[torch.Tensor, torch.Tensor]:
 
     next_token, time_til_next = sample_competing_exponentials(logits)
 
     pi = torch.sigmoid(pi)
     is_comorbid = torch.bernoulli(pi).to(torch.bool)
-    time_til_next[is_comorbid] = 0.0
+    should_be_single = torch.isin(
+        next_token, torch.tensor(always_single_tokens, device=logits.device)
+    )
+    time_til_next[is_comorbid & ~should_be_single] = 0.0
 
     return next_token, time_til_next
 
@@ -103,6 +108,9 @@ class CausalSampler:
         self.cfg = cfg
         self.model = model
         self.tokenizer = tokenizer
+        self.always_single_tokens = [
+            self.tokenizer[disease] for disease in self.cfg.always_single_tokens
+        ]
 
         self.validate_config()
 
@@ -143,19 +151,17 @@ class CausalSampler:
             logits = logits.scatter_(1, fill, -torch.inf)
 
         if self.cfg.simulate_comorbid:
-            always_single_tokens = [
-                self.tokenizer[disease] for disease in self.cfg.always_single_tokens
-            ]
             idx_next, time_til_next = sample_comorbid_based_on_cutoff(
                 logits=logits,
                 comorbid_cutoff=self.cfg.comorbid_cutoff,
-                always_single_tokens=always_single_tokens,
+                always_single_tokens=self.always_single_tokens,
             )
         elif self.cfg.zero_inflate:
             pi = self.model.pi_head(logits_og[:, -1, :])
             idx_next, time_til_next = sample_zero_inflated_exponentials(
                 logits=logits,
                 pi=pi,
+                always_single_tokens=self.always_single_tokens,
             )
         else:
             idx_next, time_til_next = sample_competing_exponentials(logits)
