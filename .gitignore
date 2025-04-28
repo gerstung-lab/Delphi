@@ -5,7 +5,8 @@ log
 checkpoints
 wandb
 common_commands.txt
-data/synthetic
+data/ukb_real_data
+data/ukb_simulated_data_large
 .ipynb_checkpoints
 logs
 submit/dkfz/exp/*.yaml

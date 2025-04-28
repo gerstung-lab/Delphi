@@ -11,7 +11,9 @@ from matplotlib.figure import Figure
 from tqdm import tqdm
 
 from delphi import DAYS_PER_YEAR
-from delphi.data import DelphiTrajectories, cohort_from_ukb_data, get_p2i
+from delphi.data.cohort import cohort_from_ukb_data
+from delphi.data.dataset import get_p2i
+from delphi.data.trajectory import DelphiTrajectories
 from delphi.eval import eval_task
 from delphi.model.transformer import Delphi
 from delphi.tokenizer import Gender, Tokenizer
