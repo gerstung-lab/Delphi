@@ -1,62 +1,67 @@
 import os
-import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional, Union
+from typing import Any, List, Optional
 
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import torch
-from generate import GeneratorConfig, load_model, load_tokenizer
 from omegaconf import OmegaConf
-from tqdm import tqdm
 
-from delphi.eval.auc import AUCConfig, run_auc_eval
-from delphi.utils import get_batch, get_p2i
+from delphi.eval import clock, eval_task
+from delphi.eval.auc import AUCArgs
+from delphi.eval.burden import BurdenArgs
+from delphi.model.transformer import load_model
+from delphi.tokenizer import load_tokenizer_from_ckpt
+from delphi.visualize.incidence import IncidencePlotConfig
 
 
 class TaskType(Enum):
     AUC = "auc"
     CALIBRATION = "calibration"
+    INCIDENCE = "incidence"
+    BURDEN = "burden"
+
+
+task_type_to_args_type = {
+    TaskType.AUC: AUCArgs,
+    TaskType.INCIDENCE: IncidencePlotConfig,
+    TaskType.BURDEN: BurdenArgs,
+}
 
 
 @dataclass
 class TaskConfig:
     task_name: str
     task_type: str
-    task_config: AUCConfig
+    task_input: str
+    task_args: Any
 
 
 @dataclass
 class EvalConfig:
-    name: str = "debug"
-    ckpt_path: str = "checkpoints/Delphi-demo"
-    tasks: Optional[List[TaskConfig]] = None
+    tasks: List[TaskConfig] = field(default_factory=list)
 
 
-def eval(cfg: EvalConfig):
+@clock
+def eval(cfg: EvalConfig, ckpt: str):
 
-    model, _ = load_model(cfg.ckpt_path)
-    tokenizer = load_tokenizer(cfg.ckpt_path)
-
-    eval_dump_dir = os.path.join(cfg.ckpt_path, cfg.name)
+    model, _ = load_model(ckpt)
+    tokenizer = load_tokenizer_from_ckpt(ckpt)
 
     for task in cfg.tasks:
 
         task_type = TaskType(task.task_type)
+        args_type = task_type_to_args_type[task_type]
+        default_args = OmegaConf.structured(args_type())
+        task_args = OmegaConf.merge(default_args, task.task_args)
+        task_args = OmegaConf.to_object(task_args)
 
-        if task_type == TaskType.AUC:
-            task_dump_dir = os.path.join(eval_dump_dir, task.task_name)
-            os.makedirs(task_dump_dir, exist_ok=True)
-            run_auc_eval(
-                model=model,
-                tokenizer=tokenizer,
-                task_cfg=task.task_config,
-                dump_dir=os.path.join(task_dump_dir),
-            )
-        else:
-            raise ValueError(f"Unknown task type: {task_type}")
+        eval_task(
+            task_args,
+            task_name=task.task_name,
+            task_input=task.task_input,
+            ckpt=ckpt,
+            model=model,
+            tokenizer=tokenizer,
+        )
 
 
 def main():
@@ -65,12 +70,14 @@ def main():
     file_cfg = OmegaConf.load(cli_args.config)
     # We remove 'config' attribute from config as the underlying DataClass does not have it
     del cli_args.config
+    ckpt = cli_args.ckpt
+    del cli_args.ckpt
 
     default_cfg = OmegaConf.structured(EvalConfig)
     cfg = OmegaConf.merge(default_cfg, file_cfg, cli_args)
     cfg = OmegaConf.to_object(cfg)
 
-    eval(cfg)
+    eval(cfg=cfg, ckpt=ckpt)  # type: ignore
 
     pass
 
