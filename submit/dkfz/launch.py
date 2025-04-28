@@ -20,6 +20,8 @@ class RunConfig:
     queue: str = "gpu-debian"
     stdout: Optional[str] = None
     stderr: Optional[str] = None
+    blacklist: list = field(default_factory=list)
+    whitelist: list = field(default_factory=list)
 
 
 @dataclass
@@ -34,6 +36,22 @@ def validate_run_config(run_config: RunConfig):
 
 def parse_memory_config(run_cfg: RunConfig) -> str:
     return f"rusage[mem={run_cfg.memory}GB]"
+
+
+def parse_blacklist_config(run_cfg: RunConfig) -> str:
+    blacklist = ""
+    for node in run_cfg.blacklist:
+        blacklist += f"hname!='{node}'"
+        blacklist += " && "
+    return blacklist[:-4]
+
+
+def parse_whitelist_config(run_cfg: RunConfig) -> str:
+    whitelist = ""
+    for node in run_cfg.whitelist:
+        whitelist += f"hname='{node}'"
+        whitelist += " || "
+    return whitelist[:-4]
 
 
 def parse_gpu_config(run_cfg: RunConfig) -> str:
@@ -56,8 +74,6 @@ def main():
 
     default_cfg = OmegaConf.structured(ExperimentConfig)
     cfg = OmegaConf.merge(default_cfg, file_cfg, cli_cfg)
-    cfg = OmegaConf.to_object(cfg)
-    print(cfg)
 
     submit_script = cfg.submit_script
 
@@ -65,10 +81,23 @@ def main():
         validate_run_config(run_cfg)
 
         command = "bsub"
-
+        
+        command += f" -R "
+        command += "\""
+        
         memory_args = parse_memory_config(run_cfg)
-        command += f" -R {memory_args}"
-
+        command += memory_args
+            
+        blacklist = parse_blacklist_config(run_cfg)
+        if blacklist != "":
+            command += f" select[{blacklist}]"
+        
+        whitelist = parse_whitelist_config(run_cfg)
+        if whitelist != "":
+            command += f" select[{whitelist}]"
+        
+        command += "\""
+        
         if run_cfg.gpu:
             gpu_args = parse_gpu_config(run_cfg)
             command += f" -gpu {gpu_args}"
@@ -90,8 +119,7 @@ def main():
         print(f"{command}")
 
         try:
-            result = subprocess.run(command, check=True, shell=True)
-            sys.exit(result.returncode)
+            subprocess.run(command, check=True, shell=True)
         except subprocess.CalledProcessError as e:
             print(f"Script exited with error: {e.returncode}")
             sys.exit(e.returncode)
