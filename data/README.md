@@ -32,6 +32,17 @@ The labels file should be a CSV with only one column:
 
 Place this file into the `data/%your_name%` folder.
 
+
+## Conversion of UK Biobank records to delphi format
+
+We provide an example notebook to illustrate how to convert UK Biobank first occurances data into the format needed for Delphi:
+- data/ukb_simulated_data/example_ukb_to_bin.ipynb
+
+This involves using a mapping file between UK Biobank field IDs, the ICD10 code scheme and the delphi index file.
+This process results in the splitting of the full dataset into training and validation .bin files.
+It will also require a UK biobank basket download file which needs to be in ".tab" format.
+See UK Biobank documentation for further details.
+
 ## Preparing the model
 
 Either by defining in the `config/%my_config%.py` file or by passing as a command line argument.
