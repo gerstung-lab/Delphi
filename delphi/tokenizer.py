@@ -1,7 +1,7 @@
 import os
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
+from typing import Union
 
 import yaml
 from dacite import from_dict
@@ -71,14 +71,31 @@ class Tokenizer:
 
         return self.mapping[key].id
 
+    def encode(self, token: Union[str, list]) -> Union[int, list]:
+        if isinstance(token, list):
+            for t in token:
+                if t not in self.mapping:
+                    raise KeyError(f"disease key {t} not found in tokenizer.")
+            return [self[t] for t in token]
+        else:
+            if token not in self.mapping:
+                raise KeyError(f"disease key {token} not found in tokenizer.")
+            return self[token]
+
     def name_for_plot(self, key: str) -> str:
 
         return self.mapping[key].ukb_name
 
-    def decode(self, token: int) -> str:
-        if token not in self.disease_ids:
-            raise KeyError(f"disease ID {token} not found in tokenizer.")
-        return self.id2disease[token]
+    def decode(self, token: Union[int, list]) -> Union[str, list]:
+        if isinstance(token, list):
+            for t in token:
+                if t not in self.disease_ids:
+                    raise KeyError(f"disease ID {t} not found in tokenizer.")
+            return [self.id2disease[t] for t in token]
+        else:
+            if token not in self.disease_ids:
+                raise KeyError(f"disease ID {token} not found in tokenizer.")
+            return self.id2disease[token]
 
 
 def load_tokenizer_from_yaml(

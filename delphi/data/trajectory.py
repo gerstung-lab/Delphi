@@ -1,12 +1,13 @@
 from typing import Literal, Optional, Tuple
 
 import numpy as np
+from scipy.sparse import coo_array
 
 OptionalSearchSpace = Optional[Literal["input", "target"]]
 OptionalTimeRange = Tuple[Optional[float], Optional[float]]
 
 
-class DelphiTrajectories:
+class DiseaseRateTrajectory:
 
     def __init__(
         self,
@@ -17,7 +18,7 @@ class DelphiTrajectories:
         Y_t1: np.ndarray,
     ):
 
-        assert X_t0.shape == T_t0.shape == X_t1.shape == T_t1.shape
+        assert X_t0.shape == T_t0.shape == X_t1.shape == T_t1.shape == Y_t1.shape
 
         X0_pad_mask = X_t0 == 0
         assert (T_t0[X0_pad_mask] == -10000).all()
@@ -28,12 +29,10 @@ class DelphiTrajectories:
         self.T0 = T_t0
         self.X1 = X_t1
         self.T1 = T_t1
+        self.Y_t1 = Y_t1
 
         self.n_participants = X_t0.shape[0]
         self.max_seq_len = X_t0.shape[1]
-
-        assert Y_t1.shape[:-1] == X_t0.shape
-        self.Y_t1 = Y_t1
 
     def __getitem__(self, key):
 
@@ -42,7 +41,7 @@ class DelphiTrajectories:
                 "DelphiTrajectories only supports slicing by participant index"
             )
         else:
-            return DelphiTrajectories(
+            return DiseaseRateTrajectory(
                 X_t0=self.X0[key],
                 T_t0=self.T0[key],
                 X_t1=self.X1[key],
@@ -150,9 +149,8 @@ class DelphiTrajectories:
 
         return np.logical_and(has_token, in_time).sum(axis=1) >= min_count
 
-    def token_rates(
+    def disease_rate(
         self,
-        token: int,
         t0_range: OptionalTimeRange = (None, None),
         t1_range: OptionalTimeRange = (None, None),
         keep: Literal["first", "average", "last", "random"] = "average",
@@ -171,26 +169,20 @@ class DelphiTrajectories:
         token rates: token rates array of shape (n_participants,)
         """
 
-        assert (
-            token < self.Y_t1.shape[-1]
-        ), "token ID out of range; check that correct tokenizer is used"
-
         assert self.has_any_token(
             t0_range=t0_range, t1_range=t1_range
         ).all(), "no tokens in the specified time range"
-
-        token_rates = self.Y_t1[:, :, token]
 
         in_time_range = self._in_time_range(t0_range=t0_range, t1_range=t1_range)
         in_time_range = in_time_range.astype(float)
         in_time_range = self._sample_token_mask(in_time_range, keep=keep)
 
         t0 = np.sum(self.T0 * in_time_range, axis=1)
-        y1 = np.sum(token_rates * in_time_range, axis=1)
+        y1 = np.sum(self.Y_t1 * in_time_range, axis=1)
 
         return t0, y1
 
-    def penultimate_token_rates(
+    def penultimate_disease_rate(
         self,
         token: int,
     ) -> Tuple[np.ndarray, np.ndarray]:
@@ -199,15 +191,10 @@ class DelphiTrajectories:
             token, token_type="target"
         ).all(), f"all participants must have token {token} in their target sequence"
 
-        assert (
-            token < self.Y_t1.shape[-1]
-        ), "token ID out of range; check that correct tokenizer is used"
-        token_rates = self.Y_t1[:, :, token]
-
         token_mask = self.X1 == token
         token_mask = self._sample_token_mask(token_mask, keep="first")
 
         t0 = np.sum(self.T0 * token_mask, axis=1)
-        y1 = np.sum(token_rates * token_mask, axis=1)
+        y1 = np.sum(self.Y_t1 * token_mask, axis=1)
 
         return t0, y1

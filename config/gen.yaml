@@ -1,8 +1,8 @@
-name: debug_gen
+name: gen_from_${start_age_in_years}
 device: mps
 batch_size: 128
-subsample: 256
-start_age_in_years: 60
+subsample: null
+start_age_in_years: 40
 data:
   data_dir: data/ukb_real_data
   memmap_fname: val.bin
@@ -22,7 +22,7 @@ sampler:
   max_total_tokens: 128
   termination_tokens:
     - death
-  zero_inflate: true
+  zero_inflate: false
   simulate_comorbid: false
   comorbid_cutoff: 0.08
   always_single_tokens:

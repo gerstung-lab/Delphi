@@ -30,6 +30,26 @@ def get_p2i(data):
     return np.array(p2i)
 
 
+def tricolumnar_to_2d(data):
+    """
+    Convert a tricolumnar array to a 2D array.
+    The first column is the participant index, the second column is the time step,
+    and the third column is the token.
+    """
+    p2i = get_p2i(data)
+    sub_idx = np.repeat(np.arange(p2i.shape[0]), p2i[:, 1])
+    pos_idx = np.concatenate([np.arange(p2i[i, 1]) for i in range(p2i.shape[0])])
+
+    X = coo_array(
+        (data[:, 2], (sub_idx, pos_idx)), shape=(p2i.shape[0], p2i[:, 1].max())
+    ).toarray()
+
+    T = np.full(X.shape, -10000, dtype=np.float32)
+    T[sub_idx, pos_idx] = data[:, 1]
+
+    return X, T
+
+
 def sort_by_time(X: np.ndarray, T: np.ndarray):
 
     s = np.argsort(T, axis=1)

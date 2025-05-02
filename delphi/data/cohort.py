@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from scipy.sparse import coo_array
 
-from delphi.data.dataset import get_p2i
+from delphi.data.dataset import Dataset, UKBDataConfig, get_p2i
 
 OptionalTimeRange = Tuple[Optional[float], Optional[float]]
 
@@ -113,28 +113,20 @@ class Cohort:
         return np.sum(has_token * self.time_steps, axis=1)
 
 
-def cohort_from_ukb_data(
-    data: Optional[np.ndarray] = None, data_path: Optional[str] = None
-):
+def build_ukb_cohort(cfg: UKBDataConfig) -> Cohort:
 
-    if data is None:  # if raw data is not provided, load from file
-        assert data_path is not None, "Either data_path or data must be provided"
-        assert data_path.endswith(".bin"), "Cohort data must be a .bin NumPy memory bin"
-        data = np.fromfile(data_path, dtype=np.uint32).reshape(-1, 3)
-    else:
-        data = data  # allow direct data injection
+    ds = Dataset(cfg=cfg)
 
-    participants = pd.unique(data[:, 0])
+    participants = ds.participants
+    seq_len = ds.seq_len
 
-    p2i = get_p2i(data)
-    lengths = p2i[:, 1]
-    row_idx = np.repeat(np.arange(participants.size), lengths)
-    col_idx = np.concatenate([np.arange(length) for length in lengths])
+    row_idx = np.repeat(np.arange(participants.size), seq_len)
+    col_idx = np.concatenate([np.arange(length) for length in seq_len])
     tokens = coo_array(
-        (data[:, 2] + 1, (row_idx, col_idx)), shape=(participants.size, lengths.max())
+        (ds.tokens, (row_idx, col_idx)), shape=(participants.size, seq_len.max())
     ).toarray()
     time_steps = coo_array(
-        (data[:, 1], (row_idx, col_idx)), shape=(participants.size, lengths.max())
+        (ds.time_steps, (row_idx, col_idx)), shape=(participants.size, seq_len.max())
     ).toarray()
 
     return Cohort(participants=participants, tokens=tokens, time_steps=time_steps)

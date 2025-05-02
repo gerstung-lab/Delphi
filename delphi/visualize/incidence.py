@@ -1,18 +1,20 @@
+import os
 from dataclasses import dataclass, field
 from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
-from tqdm import tqdm
+import yaml
+from dacite import from_dict
 
+from apps.generate import GenConfig
 from delphi import DAYS_PER_YEAR
-from delphi.data.cohort import Cohort, cohort_from_ukb_data
-from delphi.data.trajectory import DelphiTrajectories
+from delphi.data.cohort import Cohort, build_ukb_cohort
+from delphi.data.dataset import UKBDataConfig, tricolumnar_to_2d
+from delphi.data.trajectory import DiseaseRateTrajectory
 from delphi.eval import eval_task
 from delphi.model.transformer import Delphi
 from delphi.tokenizer import Gender, Tokenizer
-from delphi.utils import get_batch, get_p2i
 
 OptionalPath = Optional[str]
 
@@ -20,16 +22,13 @@ OptionalPath = Optional[str]
 @dataclass
 class IncidencePlotConfig:
     diseases: list[str] = field(default_factory=list)
-    train_data_memmap: str = "data/ukb_simulated_data/train.bin"
-    val_data_memmap: str = "data/ukb_simulated_data/val.bin"
-    sample_size: int = 1000
-    device: str = "cpu"
+    train_data: UKBDataConfig = field(default_factory=UKBDataConfig)
 
 
 def plot_age_gender_incidence(
     train_cohort: Cohort,
     val_cohort: Cohort,
-    val_trajectories: DelphiTrajectories,
+    val_trajectories: DiseaseRateTrajectory,
     disease: str,
     tokenizer: Tokenizer,
     savefig: OptionalPath,
@@ -66,7 +65,7 @@ def plot_age_gender_incidence(
         label="all other tokens",
     )
 
-    t, y = dis_paths.penultimate_token_rates(tokenizer[disease])
+    t, y = dis_paths.penultimate_disease_rate(tokenizer[disease])
     t /= DAYS_PER_YEAR
     ax.scatter(
         t.ravel(),
@@ -145,55 +144,65 @@ def plot_age_gender_incidence(
 
 @eval_task.register
 def run_incidence_plot(
-    task_args: IncidencePlotConfig, model: Delphi, tokenizer: Tokenizer, dump_dir: str
+    task_args: IncidencePlotConfig,
+    task_name: str,
+    task_input: str,
+    ckpt: str,
+    model: Delphi,
+    tokenizer: Tokenizer,
 ) -> None:
 
-    val = np.fromfile(task_args.val_data_memmap, dtype=np.uint32).reshape(-1, 3)
-    val_p2i = get_p2i(val)
-    train = np.fromfile(task_args.train_data_memmap, dtype=np.uint32).reshape(-1, 3)
-    train_cohort = cohort_from_ukb_data(data=train)
-    val_cohort = cohort_from_ukb_data(data=val)
-    sample_cohort = val_cohort[range(task_args.sample_size)]
+    with open(os.path.join(ckpt, task_input, "config.yaml"), "r") as file:
+        gen_cfg = yaml.safe_load(file)
+    gen_cfg = from_dict(GenConfig, gen_cfg)
 
-    d = get_batch(
-        range(task_args.sample_size),
-        val,
-        val_p2i,
-        select="left",
-        block_size=64,
-        device=task_args.device,
-        padding="random",
+    task_dump_dir = os.path.join(ckpt, gen_cfg.name, task_name)
+    os.makedirs(task_dump_dir, exist_ok=True)
+
+    train_cohort = build_ukb_cohort(cfg=task_args.train_data)
+    val_cohort = build_ukb_cohort(cfg=gen_cfg.data)
+    val_cohort = val_cohort[np.arange(0, gen_cfg.subsample)]
+
+    gen_logits_path = os.path.join(ckpt, gen_cfg.name, "logits.bin")
+    assert os.path.exists(gen_logits_path)
+    "logits.bin not found in the checkpoint directory"
+    gen_path = os.path.join(ckpt, gen_cfg.name, "gen.bin")
+    assert os.path.exists(gen_path)
+    "gen.bin not found in the checkpoint directory"
+
+    logits = np.fromfile(gen_logits_path, dtype=np.float16).reshape(
+        -1, tokenizer.vocab_size + 1
     )
+    XT = np.fromfile(gen_path, dtype=np.uint32).reshape(-1, 3)
 
-    p = []
-    model.to(task_args.device)
-    batch_size = 512
-    with torch.no_grad():
-        for d_batch in tqdm(
-            zip(*map(lambda x: torch.split(x.to(task_args.device), batch_size), d)),
-            total=d[0].shape[0] // batch_size + 1,
-        ):
-            p.append(model(*d_batch)[0].cpu().detach())
-    p = torch.vstack(p)
-
-    d = [d_.cpu() for d_ in d]
-
-    y = np.exp(p.detach().numpy()) * DAYS_PER_YEAR
-    y = 1 - np.exp(-y)  # y/(1+y)
-    sample_paths = DelphiTrajectories(
-        X_t0=d[0].detach().numpy(),
-        T_t0=d[1].detach().numpy(),
-        X_t1=d[2].detach().numpy(),
-        T_t1=d[3].detach().numpy(),
-        Y_t1=y,
-    )
+    X, T = tricolumnar_to_2d(XT)
+    X_t0, X_t1 = X[:, :-1], X[:, 1:]
+    T_t0, T_t1 = T[:, :-1], T[:, 1:]
 
     for disease in task_args.diseases:
+
+        dis_token = tokenizer[disease]
+
+        Y = np.zeros_like(X, dtype=np.float16)
+        sub_idx, pos_idx = np.nonzero(X)
+        Y[sub_idx, pos_idx] = logits[:, dis_token]
+        Y = np.exp(Y) * DAYS_PER_YEAR
+        Y = 1 - np.exp(-Y)
+
+        Y_t1 = Y[:, :-1]
+        traj = DiseaseRateTrajectory(
+            X_t0=X_t0,
+            T_t0=T_t0,
+            X_t1=X_t1,
+            T_t1=T_t1,
+            Y_t1=Y_t1,
+        )
+
         plot_age_gender_incidence(
             train_cohort=train_cohort,
-            val_cohort=sample_cohort,
-            val_trajectories=sample_paths,
+            val_cohort=val_cohort,
+            val_trajectories=traj,
             disease=disease,
             tokenizer=tokenizer,
-            savefig=f"{dump_dir}/incidence_plot_{disease}.png",
+            savefig=f"{task_dump_dir}/incidence_plot_{disease}.png",
         )

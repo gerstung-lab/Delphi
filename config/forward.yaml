@@ -1,10 +1,10 @@
 name: debug_forward
-device: cpu
+device: mps
 batch_size: 128
-subsample: 1280
+subsample: null
 data:
-  data_dir: data/ukb_simulated_data_large
-  memmap_fname: train.bin
+  data_dir: data/ukb_real_data
+  memmap_fname: val.bin
   tokenizer_fname: tokenizer.yaml
   transforms:
     - name: no-event
