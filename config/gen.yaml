@@ -4,7 +4,7 @@ batch_size: 128
 subsample: null
 start_age_in_years: 40
 data:
-  data_dir: data/ukb_real_data
+  data_dir: ${oc.env:DELPHI_DATA_DIR,data}/ukb_real_data
   memmap_fname: val.bin
   tokenizer_fname: tokenizer.yaml
   transforms:

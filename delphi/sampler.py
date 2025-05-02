@@ -233,14 +233,4 @@ class CausalSampler:
 
         logits, _, _ = self.model(idx, age)
 
-        if self.cfg.no_repeat:
-            fill = idx + 0
-            fill[fill == 1] = 0
-            logits = torch.stack(
-                [
-                    logits[:, j].scatter_(1, fill[:, : j + 1], float("NaN"))
-                    for j in range(fill.shape[1])
-                ]
-            ).transpose(0, 1)
-
         return idx, age, logits
