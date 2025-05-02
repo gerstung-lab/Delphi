@@ -182,7 +182,7 @@ def calibrate_auc(
         gen_cfg = yaml.safe_load(file)
     gen_cfg = from_dict(GenConfig, gen_cfg)
 
-    task_dump_dir = os.path.join(ckpt, gen_cfg.name, task_name)
+    task_dump_dir = os.path.join(ckpt, task_input, task_name)
     os.makedirs(task_dump_dir, exist_ok=True)
 
     val_cohort = build_ukb_cohort(cfg=gen_cfg.data)
@@ -196,10 +196,10 @@ def calibrate_auc(
         "either": is_female | is_male,
     }
 
-    gen_logits_path = os.path.join(ckpt, gen_cfg.name, "logits.bin")
+    gen_logits_path = os.path.join(ckpt, task_input, "logits.bin")
     assert os.path.exists(gen_logits_path)
     "logits.bin not found in the checkpoint directory"
-    gen_path = os.path.join(ckpt, gen_cfg.name, "gen.bin")
+    gen_path = os.path.join(ckpt, task_input, "gen.bin")
     assert os.path.exists(gen_path)
     "gen.bin not found in the checkpoint directory"
 
