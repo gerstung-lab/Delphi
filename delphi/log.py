@@ -116,8 +116,8 @@ class GenLogger:
             packed_batch = np.stack(
                 (
                     participants[sub_idx],
-                    tokens[sub_idx, pos_idx],
                     timesteps[sub_idx, pos_idx],
+                    tokens[sub_idx, pos_idx],
                 ),
                 axis=-1,
             )
