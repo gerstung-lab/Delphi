@@ -12,7 +12,6 @@ from matplotlib.figure import Figure
 
 from apps.generate import GenConfig
 from delphi import DAYS_PER_YEAR
-from delphi.data.cohort import build_ukb_cohort
 from delphi.data.dataset import tricolumnar_to_2d
 from delphi.data.trajectory import DiseaseRateTrajectory
 from delphi.eval import eval_task
@@ -185,17 +184,6 @@ def calibrate_auc(
     task_dump_dir = os.path.join(ckpt, task_input, task_name)
     os.makedirs(task_dump_dir, exist_ok=True)
 
-    val_cohort = build_ukb_cohort(cfg=gen_cfg.data)
-    val_cohort = val_cohort[np.arange(0, gen_cfg.subsample)]
-
-    is_female = val_cohort.has_token(tokenizer[Gender.FEMALE.value])
-    is_male = val_cohort.has_token(tokenizer[Gender.MALE.value])
-    is_gender_dict = {
-        "female": is_female,
-        "male": is_male,
-        "either": is_female | is_male,
-    }
-
     gen_logits_path = os.path.join(ckpt, task_input, "logits.bin")
     assert os.path.exists(gen_logits_path)
     "logits.bin not found in the checkpoint directory"
@@ -230,6 +218,14 @@ def calibrate_auc(
             T_t1=T_t1,
             Y_t1=Y_t1,
         )
+
+        is_female = traj.has_token(tokenizer[Gender.FEMALE.value], token_type="input")
+        is_male = traj.has_token(tokenizer[Gender.MALE.value], token_type="input")
+        is_gender_dict = {
+            "female": is_female,
+            "male": is_male,
+            "either": is_female | is_male,
+        }
 
         time_offsets = parse_age_groups(task_args.time_offset)
 
