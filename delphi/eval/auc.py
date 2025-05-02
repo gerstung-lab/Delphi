@@ -244,6 +244,12 @@ def calibrate_auc(
                         task_args=task_args,
                     )
 
+                    column_types = {
+                        "age_group": "string",
+                        "auc": "float32",
+                        "ctl_counts": "uint32",
+                        "dis_counts": "uint32",
+                    }
                     df = pd.DataFrame(
                         {
                             "age_group": [f"{i}-{j}" for i, j in age_buckets],
@@ -251,12 +257,13 @@ def calibrate_auc(
                             "ctl_counts": ctl_counts,
                             "dis_counts": dis_counts,
                         }
-                    )
+                    ).astype(column_types)
                     df.to_csv(
                         os.path.join(
                             task_dump_dir, f"{disease}_{gender}_{time_offset}.csv"
                         ),
                         index=False,
+                        float_format="%.3f",
                     )
                     # fig, ax = box_plot_disease_rates(
                     #     age_buckets=age_buckets,
