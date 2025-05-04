@@ -192,6 +192,8 @@ def calibrate_auc(
 
     task_dump_dir = os.path.join(ckpt, task_input, task_name)
     os.makedirs(task_dump_dir, exist_ok=True)
+    with open(os.path.join(task_dump_dir, "config.yaml"), "w") as file:
+        yaml.dump(task_args, file)
 
     gen_logits_path = os.path.join(ckpt, task_input, "logits.bin")
     assert os.path.exists(gen_logits_path)
