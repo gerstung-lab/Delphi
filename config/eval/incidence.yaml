@@ -1,0 +1,9 @@
+task_name: debug_incidence
+task_type: incidence
+task_args:
+  diseases:
+    - a41_(other_septicaemia)
+  train_data_memmap: data/ukb_simulated_data/train.bin
+  val_data_memmap: data/ukb_simulated_data/val.bin
+  sample_size: 1000
+  device: cpu

@@ -1,0 +1,6 @@
+task_name: debug_burden
+task_type: burden
+task_input: debug_gen
+task_args:
+  box_plot: true
+  gen_name: debug_gen

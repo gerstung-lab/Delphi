@@ -1,6 +1,6 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, List
+from typing import Any
 
 from omegaconf import OmegaConf
 
@@ -36,33 +36,26 @@ class TaskConfig:
     task_args: Any
 
 
-@dataclass
-class EvalConfig:
-    tasks: List[TaskConfig] = field(default_factory=list)
-
-
 @clock
-def eval(cfg: EvalConfig, ckpt: str):
+def eval(cfg: TaskConfig, ckpt: str):
 
     model, _ = load_model(ckpt)
     tokenizer = load_tokenizer_from_ckpt(ckpt)
 
-    for task in cfg.tasks:
+    task_type = TaskType(cfg.task_type)
+    args_type = task_type_to_args_type[task_type]
+    default_args = OmegaConf.structured(args_type())
+    task_args = OmegaConf.merge(default_args, cfg.task_args)
+    task_args = OmegaConf.to_object(task_args)
 
-        task_type = TaskType(task.task_type)
-        args_type = task_type_to_args_type[task_type]
-        default_args = OmegaConf.structured(args_type())
-        task_args = OmegaConf.merge(default_args, task.task_args)
-        task_args = OmegaConf.to_object(task_args)
-
-        eval_task(
-            task_args,
-            task_name=task.task_name,
-            task_input=task.task_input,
-            ckpt=ckpt,
-            model=model,
-            tokenizer=tokenizer,
-        )
+    eval_task(
+        task_args,
+        task_name=cfg.task_name,
+        task_input=cfg.task_input,
+        ckpt=ckpt,
+        model=model,
+        tokenizer=tokenizer,
+    )
 
 
 def main():
@@ -74,7 +67,7 @@ def main():
     ckpt = cli_args.ckpt
     del cli_args.ckpt
 
-    default_cfg = OmegaConf.structured(EvalConfig)
+    default_cfg = OmegaConf.structured(TaskConfig)
     cfg = OmegaConf.merge(default_cfg, file_cfg, cli_args)
     cfg = OmegaConf.to_object(cfg)
 

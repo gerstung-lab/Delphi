@@ -1,0 +1,7 @@
+task_name: debug_calibration
+task_type: calibration
+task_input: debug_forward
+task_args:
+  diseases:
+    - a41_(other_septicaemia)
+  min_time_gap: 0.1

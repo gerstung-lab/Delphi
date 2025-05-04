@@ -28,11 +28,20 @@ class AgeGroups:
 
 @dataclass
 class CalibrateAUCArgs:
-    diseases: list[str] = field(default_factory=list)
+    disease_lst: str = ""
     time_offset: AgeGroups = field(default_factory=AgeGroups)
     age_groups: AgeGroups = field(default_factory=AgeGroups)
     min_time_gap: float = 0.1
     box_plot: bool = True
+
+
+def parse_diseases(diseases: str):
+
+    assert os.path.exists(diseases)
+    with open(diseases, "r") as file:
+        diseases = yaml.safe_load(file)
+
+    return diseases
 
 
 def parse_age_groups(age_groups: AgeGroups) -> np.ndarray:
@@ -200,7 +209,10 @@ def calibrate_auc(
     X_t0, X_t1 = X[:, :-1], X[:, 1:]
     T_t0, T_t1 = T[:, :-1], T[:, 1:]
 
-    for disease in task_args.diseases:
+    diseases = parse_diseases(task_args.disease_lst)
+    time_offsets = parse_age_groups(task_args.time_offset)
+
+    for disease in diseases:
 
         dis_token = tokenizer[disease]
 
@@ -227,48 +239,42 @@ def calibrate_auc(
             "either": is_female | is_male,
         }
 
-        time_offsets = parse_age_groups(task_args.time_offset)
-
         for time_offset in time_offsets:
 
             for gender, is_gender in is_gender_dict.items():
 
-                for disease in task_args.diseases:
+                age_buckets, auc_vals, ctl_counts, dis_counts = auc_by_age_group(
+                    disease_token=dis_token,
+                    val_trajectories=traj[is_gender],
+                    offset=time_offset,
+                    task_args=task_args,
+                )
 
-                    disease_token = tokenizer[disease]
-
-                    age_buckets, auc_vals, ctl_counts, dis_counts = auc_by_age_group(
-                        disease_token=disease_token,
-                        val_trajectories=traj[is_gender],
-                        offset=time_offset,
-                        task_args=task_args,
-                    )
-
-                    column_types = {
-                        "age_group": "string",
-                        "auc": "float32",
-                        "ctl_counts": "uint32",
-                        "dis_counts": "uint32",
+                column_types = {
+                    "age_group": "string",
+                    "auc": "float32",
+                    "ctl_counts": "uint32",
+                    "dis_counts": "uint32",
+                }
+                df = pd.DataFrame(
+                    {
+                        "age_group": [f"{i}-{j}" for i, j in age_buckets],
+                        "auc": auc_vals,
+                        "ctl_counts": ctl_counts,
+                        "dis_counts": dis_counts,
                     }
-                    df = pd.DataFrame(
-                        {
-                            "age_group": [f"{i}-{j}" for i, j in age_buckets],
-                            "auc": auc_vals,
-                            "ctl_counts": ctl_counts,
-                            "dis_counts": dis_counts,
-                        }
-                    ).astype(column_types)
-                    df.to_csv(
-                        os.path.join(
-                            task_dump_dir, f"{disease}_{gender}_{time_offset}.csv"
-                        ),
-                        index=False,
-                        float_format="%.3f",
-                    )
-                    # fig, ax = box_plot_disease_rates(
-                    #     age_buckets=age_buckets,
-                    #     disease_rates=token_rates,
-                    #     auc_vals=list(auc_vals)
-                    # )
+                ).astype(column_types)
+                df.to_csv(
+                    os.path.join(
+                        task_dump_dir, f"{disease}_{gender}_{time_offset}.csv"
+                    ),
+                    index=False,
+                    float_format="%.3f",
+                )
+                # fig, ax = box_plot_disease_rates(
+                #     age_buckets=age_buckets,
+                #     disease_rates=token_rates,
+                #     auc_vals=list(auc_vals)
+                # )
 
-                    # fig.savefig(os.path.join(task_dump_dir, f"{disease}_{gender}_{time_offset}.png"))
+                # fig.savefig(os.path.join(task_dump_dir, f"{disease}_{gender}_{time_offset}.png"))
