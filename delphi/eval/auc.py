@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
@@ -186,14 +186,14 @@ def calibrate_auc(
     **kwargs,
 ) -> None:
 
-    with open(os.path.join(ckpt, task_input, "config.yaml"), "r") as file:
-        gen_cfg = yaml.safe_load(file)
+    with open(os.path.join(ckpt, task_input, "config.yaml"), "r") as f:
+        gen_cfg = yaml.safe_load(f)
     gen_cfg = from_dict(GenConfig, gen_cfg)
 
     task_dump_dir = os.path.join(ckpt, task_input, task_name)
     os.makedirs(task_dump_dir, exist_ok=True)
-    with open(os.path.join(task_dump_dir, "config.yaml"), "w") as file:
-        yaml.dump(task_args, file)
+    with open(os.path.join(task_dump_dir, "config.yaml"), "w") as f:
+        yaml.dump(asdict(task_args), f, default_flow_style=False, sort_keys=False)
 
     gen_logits_path = os.path.join(ckpt, task_input, "logits.bin")
     assert os.path.exists(gen_logits_path)
@@ -241,9 +241,15 @@ def calibrate_auc(
             "either": is_female | is_male,
         }
 
-        for time_offset in time_offsets:
+        dis_dump_dir = os.path.join(task_dump_dir, disease)
+        os.makedirs(dis_dump_dir, exist_ok=True)
 
-            for gender, is_gender in is_gender_dict.items():
+        for gender, is_gender in is_gender_dict.items():
+
+            dis_gender_dump_dir = os.path.join(dis_dump_dir, gender)
+            os.makedirs(dis_gender_dump_dir, exist_ok=True)
+
+            for time_offset in time_offsets:
 
                 age_buckets, auc_vals, ctl_counts, dis_counts = auc_by_age_group(
                     disease_token=dis_token,
@@ -266,10 +272,15 @@ def calibrate_auc(
                         "dis_counts": dis_counts,
                     }
                 ).astype(column_types)
+                total_row = {
+                    "age_group": "total",
+                    "auc": np.nanmean(auc_vals),
+                    "ctl_counts": int(np.sum(ctl_counts)),
+                    "dis_counts": int(np.sum(dis_counts)),
+                }
+                df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
                 df.to_csv(
-                    os.path.join(
-                        task_dump_dir, f"{disease}_{gender}_{time_offset}.csv"
-                    ),
+                    os.path.join(dis_gender_dump_dir, f"{time_offset}.csv"),
                     index=False,
                     float_format="%.3f",
                 )
