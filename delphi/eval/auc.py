@@ -12,6 +12,7 @@ from matplotlib.figure import Figure
 
 from apps.generate import GenConfig
 from delphi import DAYS_PER_YEAR
+from delphi.data.cohort import Cohort, build_ukb_cohort
 from delphi.data.dataset import tricolumnar_to_2d
 from delphi.data.trajectory import DiseaseRateTrajectory
 from delphi.eval import eval_task
@@ -20,7 +21,7 @@ from delphi.tokenizer import Gender, Tokenizer
 
 @dataclass
 class AgeGroups:
-    groups: Optional[list[int]] = None
+    custom_groups: Optional[list[int]] = None
     start: int = 40
     end: int = 85
     step: int = 5
@@ -45,14 +46,14 @@ def parse_diseases(diseases: str):
 
 
 def parse_age_groups(age_groups: AgeGroups) -> np.ndarray:
-    if age_groups.groups is None:
+    if age_groups.custom_groups is None:
         return np.arange(
             age_groups.start,
             age_groups.end,
             age_groups.step,
         )
     else:
-        return np.array(age_groups.groups)
+        return np.array(age_groups.custom_groups)
 
 
 def mann_whitney_auc(x1: np.ndarray, x2: np.ndarray) -> float:
@@ -129,7 +130,8 @@ def box_plot_disease_rates(
 
 def auc_by_age_group(
     disease_token: int,
-    val_trajectories: DiseaseRateTrajectory,
+    trajectory: DiseaseRateTrajectory,
+    cohort: Cohort,
     offset: float,
     task_args: CalibrateAUCArgs,
 ) -> tuple:
@@ -149,22 +151,18 @@ def auc_by_age_group(
         offset_tw = (age_start + offset) * DAYS_PER_YEAR, (
             age_end + offset
         ) * DAYS_PER_YEAR
-        has_valid_pred_in_tw = val_trajectories.has_any_valid_predictions(
+        has_valid_pred_in_tw = trajectory.has_any_valid_predictions(
             min_time_gap=task_args.min_time_gap,
             t0_range=tw,
         )
-        has_dis_in_offset_tw = val_trajectories.has_token(
+        has_dis_in_offset_tw = cohort.has_token(
             disease_token,
-            token_type="target",
-            t0_range=offset_tw,
+            time_range=offset_tw,
         )
-        disease_free = ~val_trajectories.has_token(
-            disease_token,
-            token_type="target",
-        )
+        disease_free = ~cohort.has_token(disease_token)
 
-        ctl_paths = val_trajectories[disease_free & has_valid_pred_in_tw]
-        dis_paths = val_trajectories[has_dis_in_offset_tw & has_valid_pred_in_tw]
+        ctl_paths = trajectory[disease_free & has_valid_pred_in_tw]
+        dis_paths = trajectory[has_dis_in_offset_tw & has_valid_pred_in_tw]
         ctl_counts[i] = ctl_paths.n_participants
         dis_counts[i] = dis_paths.n_participants
 
@@ -214,6 +212,8 @@ def calibrate_auc(
     diseases = parse_diseases(task_args.disease_lst)
     time_offsets = parse_age_groups(task_args.time_offset)
 
+    cohort = build_ukb_cohort(gen_cfg.data)
+
     for disease in diseases:
 
         dis_token = tokenizer[disease]
@@ -233,8 +233,8 @@ def calibrate_auc(
             Y_t1=Y_t1,
         )
 
-        is_female = traj.has_token(tokenizer[Gender.FEMALE.value], token_type="input")
-        is_male = traj.has_token(tokenizer[Gender.MALE.value], token_type="input")
+        is_female = cohort.has_token(tokenizer[Gender.FEMALE.value])
+        is_male = cohort.has_token(tokenizer[Gender.MALE.value])
         is_gender_dict = {
             "female": is_female,
             "male": is_male,
@@ -253,7 +253,8 @@ def calibrate_auc(
 
                 age_buckets, auc_vals, ctl_counts, dis_counts = auc_by_age_group(
                     disease_token=dis_token,
-                    val_trajectories=traj[is_gender],
+                    trajectory=traj[is_gender],
+                    cohort=cohort[is_gender],
                     offset=time_offset,
                     task_args=task_args,
                 )

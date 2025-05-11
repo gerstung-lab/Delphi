@@ -1,6 +1,6 @@
 task_name: auc
 task_type: auc
-task_input: gen_from_40.0
+task_input: forward
 task_args:
   disease_lst: config/disease_list/doi.yaml
   min_time_gap: 0.1
@@ -10,7 +10,6 @@ task_args:
     end: 85
     step: 5
   time_offset:
-    # groups: [0, 1]
     start: 0
     end: 10
     step: 1

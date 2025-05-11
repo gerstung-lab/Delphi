@@ -2,10 +2,9 @@ import os
 from typing import Optional, Tuple
 
 import numpy as np
-import pandas as pd
 from scipy.sparse import coo_array
 
-from delphi.data.dataset import Dataset, UKBDataConfig, get_p2i
+from delphi.data.dataset import Dataset, UKBDataConfig
 
 OptionalTimeRange = Tuple[Optional[float], Optional[float]]
 
@@ -111,6 +110,35 @@ class Cohort:
         # todo: sampling here
 
         return np.sum(has_token * self.time_steps, axis=1)
+
+    def sample_trajectory(
+        self,
+        n_samples: int = 1,
+        time_range: OptionalTimeRange = (None, None),
+    ) -> list[Tuple[np.ndarray, np.ndarray]]:
+
+        sampled_participants = np.random.choice(
+            self.n_participants, size=n_samples, replace=False
+        )
+
+        sampled_tokens = self.tokens[sampled_participants]
+        sampled_time_steps = self.time_steps[sampled_participants]
+
+        sample_trajectories = []
+        for i in range(sampled_participants.size):
+            tokens = sampled_tokens[i]
+            tokens = tokens[tokens != 0]
+            timesteps = sampled_time_steps[i]
+            timesteps = timesteps[sampled_tokens[i] != 0]
+            if time_range[0] is not None:
+                tokens = tokens[timesteps >= time_range[0]]
+                timesteps = timesteps[timesteps >= time_range[0]]
+            if time_range[1] is not None:
+                tokens = tokens[timesteps < time_range[1]]
+                timesteps = timesteps[timesteps < time_range[1]]
+            sample_trajectories.append((tokens, timesteps))
+
+        return sample_trajectories
 
 
 def build_ukb_cohort(cfg: UKBDataConfig) -> Cohort:
