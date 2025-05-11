@@ -10,13 +10,15 @@ from dacite import from_dict
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
-from apps.generate import GenConfig
 from delphi import DAYS_PER_YEAR
 from delphi.data.cohort import Cohort, build_ukb_cohort
-from delphi.data.dataset import tricolumnar_to_2d
+from delphi.data.dataset import tricolumnar_to_2d, PromptDataset
 from delphi.data.trajectory import DiseaseRateTrajectory
 from delphi.eval import eval_task
 from delphi.tokenizer import Gender, Tokenizer
+
+from apps.forward import FeedForwardConfig
+from apps.generate import GenConfig
 
 
 @dataclass
@@ -186,7 +188,10 @@ def calibrate_auc(
 
     with open(os.path.join(ckpt, task_input, "config.yaml"), "r") as f:
         gen_cfg = yaml.safe_load(f)
-    gen_cfg = from_dict(GenConfig, gen_cfg)
+    if "sampler" in gen_cfg.keys():
+        gen_cfg = from_dict(GenConfig, gen_cfg)
+    else:
+        gen_cfg = from_dict(FeedForwardConfig, gen_cfg)
 
     task_dump_dir = os.path.join(ckpt, task_input, task_name)
     os.makedirs(task_dump_dir, exist_ok=True)
@@ -213,6 +218,14 @@ def calibrate_auc(
     time_offsets = parse_age_groups(task_args.time_offset)
 
     cohort = build_ukb_cohort(gen_cfg.data)
+    if isinstance(gen_cfg, GenConfig):
+        prompt_ds = PromptDataset(
+            gen_cfg.data, 
+            start_age_in_years=gen_cfg.start_age_in_years
+            )
+        cohort = cohort[
+            np.isin(cohort.participants, prompt_ds.participants)
+        ]
 
     for disease in diseases:
 
