@@ -1,10 +1,33 @@
 from typing import Literal, Optional, Tuple
 
 import numpy as np
-from scipy.sparse import coo_array
 
 OptionalSearchSpace = Optional[Literal["input", "target"]]
 OptionalTimeRange = Tuple[Optional[float], Optional[float]]
+
+
+def corrective_indices(T0: np.ndarray, T1: np.ndarray, offset: float):
+
+    # Get shapes
+    m, n = T0.shape
+    _, p = T1.shape
+
+    # Initialize result array
+    C = np.zeros((m, p), dtype=int)
+
+    for i in range(m):
+        t0_row = T0[i]
+        t1_row = T1[i]
+
+        c_idx = (
+            np.broadcast_to(t0_row, (t1_row.size, t0_row.size))
+            <= (t1_row - offset).reshape(-1, 1)
+        ).sum(axis=1) - 1
+        c_idx = np.clip(c_idx, 0, t0_row.size - 1)
+
+        C[i] = c_idx
+
+    return C
 
 
 class DiseaseRateTrajectory:
@@ -63,11 +86,11 @@ class DiseaseRateTrajectory:
             in_t0_range &= self.T0 < t0_end
 
         in_t1_range = np.ones_like(self.T1, dtype=bool)
-        t0_start, t0_end = t1_range
-        if t0_start is not None:
-            in_t1_range &= self.T1 >= t0_start
-        if t0_end is not None:
-            in_t1_range &= self.T1 < t0_end
+        t1_start, t1_end = t1_range
+        if t1_start is not None:
+            in_t1_range &= self.T1 >= t1_start
+        if t1_end is not None:
+            in_t1_range &= self.T1 < t1_end
 
         return in_t0_range & in_t1_range
 
@@ -82,6 +105,12 @@ class DiseaseRateTrajectory:
             token_mask /= np.sum(token_mask, axis=1, keepdims=True)
         elif keep == "first":
             token_mask = token_mask * (np.cumsum(token_mask, axis=1) == 1).astype(float)
+        elif keep == "random":
+            keep_idx = np.zeros((token_mask.shape[0],), dtype=int)
+            for i in range(token_mask.shape[0]):
+                keep_idx[i] = np.random.choice(np.nonzero(token_mask[i])[0])
+            token_mask = np.zeros_like(token_mask)
+            token_mask[np.arange(token_mask.shape[0]), keep_idx] = 1
         else:
             raise ValueError("keep must be either 'first' or 'average'")
 
@@ -104,18 +133,6 @@ class DiseaseRateTrajectory:
         in_time_range = self._in_time_range(t0_range=t0_range, t1_range=t1_range)
 
         return in_time_range.any(axis=1)
-
-    def has_any_valid_predictions(
-        self,
-        min_time_gap: float,
-        t0_range: OptionalTimeRange = (None, None),
-        t1_range: OptionalTimeRange = (None, None),
-    ):
-
-        is_valid = np.cumsum(self.T0 <= (self.T1 - min_time_gap), axis=1) > 0
-        in_time = self._in_time_range(t0_range=t0_range, t1_range=t1_range)
-
-        return np.logical_and(in_time, is_valid).any(axis=1)
 
     def has_token(
         self,
@@ -148,6 +165,20 @@ class DiseaseRateTrajectory:
         in_time = self._in_time_range(t0_range=t0_range, t1_range=t1_range)
 
         return np.logical_and(has_token, in_time).sum(axis=1) >= min_count
+
+    def token_timestamps(self, token: int):
+
+        assert self.has_token(
+            token, token_type="target"
+        ).all(), f"all participants must have token {token} in their target sequence"
+
+        token_mask = self.X1 == token
+        token_mask = self._sample_token_mask(token_mask, keep="first")
+
+        t0 = np.sum(self.T0 * token_mask, axis=1)
+        t1 = np.sum(self.T1 * token_mask, axis=1)
+
+        return t0, t1
 
     def disease_rate(
         self,

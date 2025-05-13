@@ -9,7 +9,3 @@ task_args:
     start: 40
     end: 85
     step: 5
-  time_offset:
-    start: 0
-    end: 10
-    step: 1

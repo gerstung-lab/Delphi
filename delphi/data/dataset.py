@@ -47,6 +47,10 @@ def tricolumnar_to_2d(data):
     T = np.full(X.shape, -10000, dtype=np.float32)
     T[sub_idx, pos_idx] = data[:, 1]
 
+    sort_by_time = np.argsort(T, axis=1)
+    X = np.take_along_axis(X, sort_by_time, axis=1)
+    T = np.take_along_axis(T, sort_by_time, axis=1)
+
     return X, T
 
 

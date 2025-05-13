@@ -10,15 +10,12 @@ from dacite import from_dict
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
+from apps.forward import FeedForwardConfig
 from delphi import DAYS_PER_YEAR
-from delphi.data.cohort import Cohort, build_ukb_cohort
-from delphi.data.dataset import tricolumnar_to_2d, PromptDataset
-from delphi.data.trajectory import DiseaseRateTrajectory
+from delphi.data.dataset import tricolumnar_to_2d
+from delphi.data.trajectory import DiseaseRateTrajectory, corrective_indices
 from delphi.eval import eval_task
 from delphi.tokenizer import Gender, Tokenizer
-
-from apps.forward import FeedForwardConfig
-from apps.generate import GenConfig
 
 
 @dataclass
@@ -32,7 +29,6 @@ class AgeGroups:
 @dataclass
 class CalibrateAUCArgs:
     disease_lst: str = ""
-    time_offset: AgeGroups = field(default_factory=AgeGroups)
     age_groups: AgeGroups = field(default_factory=AgeGroups)
     min_time_gap: float = 0.1
     box_plot: bool = True
@@ -133,8 +129,6 @@ def box_plot_disease_rates(
 def auc_by_age_group(
     disease_token: int,
     trajectory: DiseaseRateTrajectory,
-    cohort: Cohort,
-    offset: float,
     task_args: CalibrateAUCArgs,
 ) -> tuple:
 
@@ -147,29 +141,25 @@ def auc_by_age_group(
     auc_vals = np.zeros(l)
     token_rates = []
 
+    disease_free = ~trajectory.has_token(disease_token, token_type=None)
+
     for i, (age_start, age_end) in enumerate(age_buckets):
 
         tw = (age_start * DAYS_PER_YEAR, age_end * DAYS_PER_YEAR)
-        offset_tw = (age_start + offset) * DAYS_PER_YEAR, (
-            age_end + offset
-        ) * DAYS_PER_YEAR
-        has_valid_pred_in_tw = trajectory.has_any_valid_predictions(
-            min_time_gap=task_args.min_time_gap,
-            t0_range=tw,
-        )
-        has_dis_in_offset_tw = cohort.has_token(
-            disease_token,
-            time_range=offset_tw,
-        )
-        disease_free = ~cohort.has_token(disease_token)
 
-        ctl_paths = trajectory[disease_free & has_valid_pred_in_tw]
-        dis_paths = trajectory[has_dis_in_offset_tw & has_valid_pred_in_tw]
+        any_in_tw = trajectory.has_any_token(t0_range=tw)
+        ctl_paths = trajectory[disease_free & any_in_tw]
+
+        disease_in_tw = trajectory.has_token(
+            disease_token, token_type="target", t0_range=tw
+        )
+        dis_paths = trajectory[disease_in_tw]
+
         ctl_counts[i] = ctl_paths.n_participants
         dis_counts[i] = dis_paths.n_participants
 
-        _, ctl_token_rates = ctl_paths.disease_rate(t0_range=tw, keep="average")
-        _, dis_token_rates = dis_paths.disease_rate(t0_range=tw, keep="average")
+        _, ctl_token_rates = ctl_paths.disease_rate(t0_range=tw, keep="random")
+        _, dis_token_rates = dis_paths.penultimate_disease_rate(disease_token)
         auc_vals[i] = mann_whitney_auc(ctl_token_rates.ravel(), dis_token_rates.ravel())
         token_rates.append((ctl_token_rates, dis_token_rates))
 
@@ -187,45 +177,31 @@ def calibrate_auc(
 ) -> None:
 
     with open(os.path.join(ckpt, task_input, "config.yaml"), "r") as f:
-        gen_cfg = yaml.safe_load(f)
-    if "sampler" in gen_cfg.keys():
-        gen_cfg = from_dict(GenConfig, gen_cfg)
-    else:
-        gen_cfg = from_dict(FeedForwardConfig, gen_cfg)
+        forward_cfg = yaml.safe_load(f)
+    forward_cfg = from_dict(FeedForwardConfig, forward_cfg)
 
     task_dump_dir = os.path.join(ckpt, task_input, task_name)
     os.makedirs(task_dump_dir, exist_ok=True)
     with open(os.path.join(task_dump_dir, "config.yaml"), "w") as f:
         yaml.dump(asdict(task_args), f, default_flow_style=False, sort_keys=False)
 
-    gen_logits_path = os.path.join(ckpt, task_input, "logits.bin")
-    assert os.path.exists(gen_logits_path)
+    logits_path = os.path.join(ckpt, task_input, "logits.bin")
+    assert os.path.exists(logits_path)
     "logits.bin not found in the checkpoint directory"
-    gen_path = os.path.join(ckpt, task_input, "gen.bin")
-    assert os.path.exists(gen_path)
+    xt_path = os.path.join(ckpt, task_input, "gen.bin")
+    assert os.path.exists(xt_path)
     "gen.bin not found in the checkpoint directory"
 
-    logits = np.fromfile(gen_logits_path, dtype=np.float16).reshape(
+    logits = np.fromfile(logits_path, dtype=np.float16).reshape(
         -1, tokenizer.vocab_size + 1
     )
-    XT = np.fromfile(gen_path, dtype=np.uint32).reshape(-1, 3)
+    XT = np.fromfile(xt_path, dtype=np.uint32).reshape(-1, 3)
 
     X, T = tricolumnar_to_2d(XT)
     X_t0, X_t1 = X[:, :-1], X[:, 1:]
     T_t0, T_t1 = T[:, :-1], T[:, 1:]
 
     diseases = parse_diseases(task_args.disease_lst)
-    time_offsets = parse_age_groups(task_args.time_offset)
-
-    cohort = build_ukb_cohort(gen_cfg.data)
-    if isinstance(gen_cfg, GenConfig):
-        prompt_ds = PromptDataset(
-            gen_cfg.data, 
-            start_age_in_years=gen_cfg.start_age_in_years
-            )
-        cohort = cohort[
-            np.isin(cohort.participants, prompt_ds.participants)
-        ]
 
     for disease in diseases:
 
@@ -234,20 +210,25 @@ def calibrate_auc(
         Y = np.zeros_like(X, dtype=np.float16)
         sub_idx, pos_idx = np.nonzero(X)
         Y[sub_idx, pos_idx] = logits[:, dis_token]
-        Y = np.exp(Y) * DAYS_PER_YEAR
-        Y = 1 - np.exp(-Y)
+        # Y = np.exp(Y) * DAYS_PER_YEAR
+        # Y = 1 - np.exp(-Y)
+        C = corrective_indices(
+            T0=T_t0,
+            T1=T_t1,
+            offset=task_args.min_time_gap,
+        )
 
         Y_t1 = Y[:, :-1]
         traj = DiseaseRateTrajectory(
             X_t0=X_t0,
-            T_t0=T_t0,
+            T_t0=np.take_along_axis(T_t0, C, axis=1),
             X_t1=X_t1,
             T_t1=T_t1,
             Y_t1=Y_t1,
         )
 
-        is_female = cohort.has_token(tokenizer[Gender.FEMALE.value])
-        is_male = cohort.has_token(tokenizer[Gender.MALE.value])
+        is_female = traj.has_token(tokenizer[Gender.FEMALE.value], token_type=None)
+        is_male = traj.has_token(tokenizer[Gender.MALE.value], token_type=None)
         is_gender_dict = {
             "female": is_female,
             "male": is_male,
@@ -259,49 +240,42 @@ def calibrate_auc(
 
         for gender, is_gender in is_gender_dict.items():
 
-            dis_gender_dump_dir = os.path.join(dis_dump_dir, gender)
-            os.makedirs(dis_gender_dump_dir, exist_ok=True)
+            age_buckets, auc_vals, ctl_counts, dis_counts = auc_by_age_group(
+                disease_token=dis_token,
+                trajectory=traj[is_gender],
+                task_args=task_args,
+            )
 
-            for time_offset in time_offsets:
-
-                age_buckets, auc_vals, ctl_counts, dis_counts = auc_by_age_group(
-                    disease_token=dis_token,
-                    trajectory=traj[is_gender],
-                    cohort=cohort[is_gender],
-                    offset=time_offset,
-                    task_args=task_args,
-                )
-
-                column_types = {
-                    "age_group": "string",
-                    "auc": "float32",
-                    "ctl_counts": "uint32",
-                    "dis_counts": "uint32",
+            column_types = {
+                "age_group": "string",
+                "auc": "float32",
+                "ctl_counts": "uint32",
+                "dis_counts": "uint32",
+            }
+            df = pd.DataFrame(
+                {
+                    "age_group": [f"{i}-{j}" for i, j in age_buckets],
+                    "auc": auc_vals,
+                    "ctl_counts": ctl_counts,
+                    "dis_counts": dis_counts,
                 }
-                df = pd.DataFrame(
-                    {
-                        "age_group": [f"{i}-{j}" for i, j in age_buckets],
-                        "auc": auc_vals,
-                        "ctl_counts": ctl_counts,
-                        "dis_counts": dis_counts,
-                    }
-                ).astype(column_types)
-                total_row = {
-                    "age_group": "total",
-                    "auc": np.nanmean(auc_vals),
-                    "ctl_counts": int(np.sum(ctl_counts)),
-                    "dis_counts": int(np.sum(dis_counts)),
-                }
-                df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
-                df.to_csv(
-                    os.path.join(dis_gender_dump_dir, f"{time_offset}.csv"),
-                    index=False,
-                    float_format="%.3f",
-                )
-                # fig, ax = box_plot_disease_rates(
-                #     age_buckets=age_buckets,
-                #     disease_rates=token_rates,
-                #     auc_vals=list(auc_vals)
-                # )
+            ).astype(column_types)
+            total_row = {
+                "age_group": "total",
+                "auc": np.nanmean(auc_vals),
+                "ctl_counts": int(np.sum(ctl_counts)),
+                "dis_counts": int(np.sum(dis_counts)),
+            }
+            df = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+            df.to_csv(
+                os.path.join(dis_dump_dir, f"{gender}_{task_args.min_time_gap}.csv"),
+                index=False,
+                float_format="%.3f",
+            )
+            # fig, ax = box_plot_disease_rates(
+            #     age_buckets=age_buckets,
+            #     disease_rates=token_rates,
+            #     auc_vals=list(auc_vals)
+            # )
 
-                # fig.savefig(os.path.join(task_dump_dir, f"{disease}_{gender}_{time_offset}.png"))
+            # fig.savefig(os.path.join(task_dump_dir, f"{disease}_{gender}_{time_offset}.png"))
