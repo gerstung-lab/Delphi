@@ -190,6 +190,10 @@ class TrainLogger:
             wandb.define_metric("train/loss_dt", step_metric="step")
             wandb.define_metric("train/loss", step_metric="step")
 
+            for name, param in self.model.named_parameters():
+                if param.requires_grad:
+                    wandb.define_metric(f"grad_norm/{name}", step_metric="step")
+
         self.exp_cfg = exp_cfg
 
         self.dump_dir = dump_dir
@@ -236,6 +240,17 @@ class TrainLogger:
 
         self.best_val_loss = min(lossf, self.best_val_loss)
 
+    def log_grad(self):
+        if self.cfg.wandb_log:
+            for name, param in self.model.named_parameters():
+                if param.grad is not None:
+                    wandb.log(
+                        {
+                            f"grad_norm/{name}": param.grad.norm().item(),
+                        },
+                        commit=False,
+                    )
+
     def train_step(
         self,
         step: int,
@@ -255,6 +270,7 @@ class TrainLogger:
                     "lr": self.scheduler.get_last_lr()[0],
                 }
                 wandb.log(log_dict)
+                self.log_grad()
 
     def ckpt_step(
         self,

@@ -174,8 +174,7 @@ def train(cfg: TrainConfig):
                         modality=M_t0,
                         targets=X_t1,
                         targets_age=T_t1,
-                        targets_modality=M_t1,
-                        modality_data=biomarker_X,
+                        biomarker=biomarker_X,
                         validation_loss_mode=True,
                     )
 
@@ -241,6 +240,7 @@ def train(cfg: TrainConfig):
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.optim.grad_clip)
 
+        logger.train_step(step=iter_num, loss=loss)
         # step the optimizer and scaler if training in fp16
         scaler.step(optimizer)
         scaler.update()
@@ -248,7 +248,6 @@ def train(cfg: TrainConfig):
         optimizer.zero_grad(set_to_none=True)
         scheduler.step()
 
-        logger.train_step(step=iter_num, loss=loss)
         logger.ckpt_step(step=iter_num)
 
         iter_num += 1
