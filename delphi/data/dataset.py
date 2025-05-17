@@ -234,19 +234,22 @@ class Dataset:
         assert self.tokens.size == self.time_steps.size
 
         self.mod_ds = {}
-        if cfg.prs.include:
+        if cfg.prs.include or cfg.prs.must:
             prs_path = os.path.join(cfg.data_dir, cfg.prs.lmdb_fname)
-            print(f" – loading prs lmdb dataset from {cfg.data_dir}")
-            self.mod_ds["prs"] = PRSDataset(db_path=prs_path)
-            prs_participants = self.mod_ds["prs"].get_all_pids()
-        if cfg.prs.must:
-            keep_participants = np.isin(self.participants, prs_participants)
-            print(
-                f"keeping {np.sum(keep_participants)}/{self.participants.size} participants with prs"
-            )
-            self.participants = self.participants[keep_participants]
-            self.seq_len = self.seq_len[keep_participants]
-            self.start_pos = self.start_pos[keep_participants]
+            assert os.path.exists(prs_path)
+            print(f" – found prs lmdb dataset at {prs_path}")
+            prs_dataset = PRSDataset(db_path=prs_path)
+            prs_participants = prs_dataset.get_all_pids()
+            if cfg.prs.include:
+                self.mod_ds["prs"] = prs_dataset
+            if cfg.prs.must:
+                keep_participants = np.isin(self.participants, prs_participants)
+                print(
+                    f"keeping {np.sum(keep_participants)}/{self.participants.size} participants with prs"
+                )
+                self.participants = self.participants[keep_participants]
+                self.seq_len = self.seq_len[keep_participants]
+                self.start_pos = self.start_pos[keep_participants]
 
         self.transforms = []
         if cfg.transforms is not None:
