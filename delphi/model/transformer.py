@@ -13,7 +13,6 @@ from delphi.model.components import (
     DelphiEmbedding,
     attention_mask,
     build_zero_inflate_projector,
-    mask_biomarker_only_predicate,
     target_mask,
 )
 from delphi.model.config import DelphiConfig
@@ -231,13 +230,6 @@ class Delphi(nn.Module):
             )
 
             is_valid_target = target_mask(targets, ignore_tokens=ignored_tokens)
-            if validation_loss_mode:
-                is_not_biomarker_only = mask_biomarker_only_predicate(
-                    targets, m0=modality
-                )
-                is_valid_target = torch.logical_and(
-                    is_valid_target, is_not_biomarker_only
-                )
             loss_ce = torch.mean(loss_ce[is_valid_target])
             loss_dt = torch.mean(loss_dt[is_valid_target])
 
