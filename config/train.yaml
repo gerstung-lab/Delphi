@@ -1,4 +1,4 @@
-ckpt_dir: ${oc.env:DELPHI_CKPT_DIR}
+ckpt_dir: ${oc.env:DELPHI_CKPT_DIR,checkpoints}
 eval_interval: 250 # keep frequent because we'll overfit
 eval_iters: 25
 eval_only: false

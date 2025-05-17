@@ -11,7 +11,9 @@ from torch.nn import functional as F
 from delphi.config import dataclass_from_dict
 from delphi.model.components import (
     DelphiEmbedding,
+    attention_mask,
     build_zero_inflate_projector,
+    mask_biomarker_only_predicate,
     target_mask,
 )
 from delphi.model.config import DelphiConfig
@@ -190,16 +192,18 @@ class Delphi(nn.Module):
         self,
         idx: torch.Tensor,
         age: torch.Tensor,
+        modality: torch.Tensor,
+        biomarker: Optional[dict[str, torch.Tensor]] = None,
         targets: Optional[torch.Tensor] = None,
         targets_age: Optional[torch.Tensor] = None,
         validation_loss_mode: bool = False,
     ) -> tuple[torch.Tensor, Optional[dict[str, torch.Tensor]], torch.Tensor]:
 
-        x = self.transformer.embed(idx, age)  # (b, t, n_embd)
+        x = self.transformer.embed(x0=idx, t0=age, M=modality, biomarker_x=biomarker)
         x = self.transformer.drop(x)
 
-        attn_mask = self.transformer.embed.attention_mask(
-            idx, age, targets, targets_age
+        attn_mask = attention_mask(
+            t0=age, m0=modality, t1=targets_age, mask_ties=self.config.mask_ties
         )
 
         att = []
@@ -227,6 +231,13 @@ class Delphi(nn.Module):
             )
 
             is_valid_target = target_mask(targets, ignore_tokens=ignored_tokens)
+            if validation_loss_mode:
+                is_not_biomarker_only = mask_biomarker_only_predicate(
+                    targets, m0=modality
+                )
+                is_valid_target = torch.logical_and(
+                    is_valid_target, is_not_biomarker_only
+                )
             loss_ce = torch.mean(loss_ce[is_valid_target])
             loss_dt = torch.mean(loss_dt[is_valid_target])
 

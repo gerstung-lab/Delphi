@@ -2,10 +2,17 @@ import os
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 
+import numpy as np
 import torch
 from omegaconf import OmegaConf
 
-from delphi.data.dataset import Dataset, UKBDataConfig, load_sequences, train_iter
+from delphi.data.dataset import (
+    Dataset,
+    UKBDataConfig,
+    load_sequences,
+    remove_trailing_biomarkers,
+    train_iter,
+)
 from delphi.log import TrainLogConfig, TrainLogger
 from delphi.model.config import DelphiConfig, validate_config
 from delphi.model.transformer import Delphi
@@ -65,6 +72,7 @@ def train(cfg: TrainConfig):
         else torch.autocast(device_type=device_type, dtype=ptdtype)
     )
 
+    rng = np.random.default_rng(cfg.seed)
     torch.manual_seed(cfg.seed)
     torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
     torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
@@ -75,7 +83,9 @@ def train(cfg: TrainConfig):
     total_train_size = len(train_ds)
     if cfg.data_fraction < 1.0:
         total_train_size = int(cfg.data_fraction * len(train_ds))
-    train_it = train_iter(total_size=total_train_size, batch_size=cfg.batch_size)
+    train_it = train_iter(
+        rng=rng, total_size=total_train_size, batch_size=cfg.batch_size
+    )
     train_loader = load_sequences(it=train_it, dataset=train_ds)
 
     val_ds = Dataset(cfg.val_data)
@@ -138,6 +148,7 @@ def train(cfg: TrainConfig):
         for split in ["train", "val"]:
             ds = train_ds if split == "train" else val_ds
             it = train_iter(
+                rng=rng,
                 total_size=len(ds),
                 batch_size=cfg.batch_size,
             )
@@ -146,18 +157,26 @@ def train(cfg: TrainConfig):
             eval_loss[split] = {"loss_ce": 0, "loss_dt": 0}
             for _ in range(cfg.eval_iters):
 
-                _, X, T = next(loader)
-                X = X.to(cfg.device)
-                T = T.to(cfg.device)
+                _, X, T, M, biomarker_X = next(loader)
+                X, T, M = X.to(cfg.device), T.to(cfg.device), M.to(cfg.device)
+                biomarker_X = {k: v.to(cfg.device) for k, v in biomarker_X.items()}
 
-                X_t0 = X[:, :-1]
-                T_t0 = T[:, :-1]
-                X_t1 = X[:, 1:]
-                T_t1 = T[:, 1:]
+                X_t0, X_t1 = X[:, :-1], X[:, 1:]
+                T_t0, T_t1 = T[:, :-1], T[:, 1:]
+
+                biomarker_X = remove_trailing_biomarkers(M=M, biomarker_X=biomarker_X)
+                M_t0, M_t1 = M[:, :-1], M[:, 1:]
 
                 with ctx:
                     _, loss, _ = model(
-                        X_t0, T_t0, X_t1, T_t1, validation_loss_mode=True
+                        idx=X_t0,
+                        age=T_t0,
+                        modality=M_t0,
+                        targets=X_t1,
+                        targets_age=T_t1,
+                        targets_modality=M_t1,
+                        modality_data=biomarker_X,
+                        validation_loss_mode=True,
                     )
 
                 eval_loss[split]["loss_ce"] += loss["loss_ce"].detach().cpu()
@@ -193,17 +212,25 @@ def train(cfg: TrainConfig):
         # and using the GradScaler if data type is float16``
         for _ in range(cfg.gradient_accumulation_steps):
 
-            _, X, T = next(train_loader)
-            X = X.to(cfg.device)
-            T = T.to(cfg.device)
+            _, X, T, M, biomarker_X = next(train_loader)
+            X, T, M = X.to(cfg.device), T.to(cfg.device), M.to(cfg.device)
+            biomarker_X = {k: v.to(cfg.device) for k, v in biomarker_X.items()}
 
-            X_t0 = X[:, :-1]
-            T_t0 = T[:, :-1]
-            X_t1 = X[:, 1:]
-            T_t1 = T[:, 1:]
+            X_t0, X_t1 = X[:, :-1], X[:, 1:]
+            T_t0, T_t1 = T[:, :-1], T[:, 1:]
+
+            biomarker_X = remove_trailing_biomarkers(M=M, biomarker_X=biomarker_X)
+            M_t0, M_t1 = M[:, :-1], M[:, 1:]
 
             with ctx:
-                _, loss, _ = model(X_t0, T_t0, X_t1, T_t1)
+                _, loss, _ = model(
+                    idx=X_t0,
+                    targets=X_t1,
+                    modality=M_t0,
+                    age=T_t0,
+                    targets_age=T_t1,
+                    biomarker=biomarker_X,
+                )
 
             # backward pass, with gradient scaling if training in fp16
             loss_agg = loss["loss_ce"] + loss["loss_dt"]

@@ -1,13 +1,16 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterator, List, Optional
 
 import numpy as np
 import torch
 from scipy.sparse import coo_array
 
+from delphi.data.prs import PRSConfig, PRSDataset
 from delphi.data.transform import TransformArgs, parse_transform
 from delphi.tokenizer import load_tokenizer_from_yaml
+
+modality2idx = {"prs": 2}
 
 
 def get_p2i(data):
@@ -72,6 +75,63 @@ def squeeze(X: np.ndarray, T: np.ndarray):
     return X, T
 
 
+def biomarker_to_tensor(
+    biomarker_X: dict[str, np.ndarray],
+    biomarker_T: dict[str, np.ndarray],
+):
+
+    for modality in biomarker_X.keys():
+        m_X = biomarker_X[modality]
+        m_T = biomarker_T[modality]
+        biomarker_X[modality] = torch.tensor(m_X, dtype=torch.float)  # type: ignore
+        biomarker_T[modality] = torch.tensor(m_T, dtype=torch.float)  # type: ignore
+
+    return biomarker_X, biomarker_T
+
+
+def remove_trailing_biomarkers(
+    M: np.ndarray,
+    biomarker_X: dict[str, np.ndarray] = {},
+):
+
+    l = M.shape[1]
+
+    for modality in biomarker_X.keys():
+
+        biomarker_idx = torch.nonzero(M == modality2idx[modality])
+        is_trailing = biomarker_idx[:, 1] == l - 1
+        biomarker_X[modality] = biomarker_X[modality][~is_trailing]
+
+        assert biomarker_X[modality].shape[0] == (~is_trailing).sum()
+
+    return biomarker_X
+
+
+def multimodal_T_and_X(
+    X: np.ndarray,
+    T: np.ndarray,
+    biomarker_T: dict[str, np.ndarray] = {},
+):
+
+    M = np.zeros_like(X, dtype=np.int8)
+    M[X > 0] = 1
+
+    for modality in biomarker_T.keys():
+
+        m_T = biomarker_T[modality]
+
+        m_M = np.zeros_like(m_T, dtype=np.int8)
+        m_M[m_T != -1e4] = modality2idx[modality]
+
+        m_X = np.zeros_like(m_T, dtype=np.int8)
+
+        T = np.concatenate((T, m_T), axis=1)
+        M = np.concatenate((M, m_M), axis=1)
+        X = np.concatenate((X, m_X), axis=1)
+
+    return M, T, X
+
+
 def eval_iter(total_size: int, batch_size: int) -> Iterator[np.ndarray]:
 
     batch_start_pos = np.arange(0, total_size, batch_size)
@@ -82,10 +142,12 @@ def eval_iter(total_size: int, batch_size: int) -> Iterator[np.ndarray]:
         yield np.arange(start, end)
 
 
-def train_iter(total_size: int, batch_size: int) -> Iterator[np.ndarray]:
+def train_iter(
+    rng: np.random.Generator, total_size: int, batch_size: int
+) -> Iterator[np.ndarray]:
 
     while True:
-        yield np.random.randint(total_size, size=(batch_size,))
+        yield rng.integers(total_size, size=(batch_size,))
 
 
 def load_sequences(
@@ -95,17 +157,29 @@ def load_sequences(
 
     for idx in it:
 
-        P, X, T = dataset.get_batch(idx)
+        P, X, T, biomarker_X, biomarker_T = dataset.get_batch(idx)
 
-        X, T = sort_by_time(X=X, T=T)
+        M, multi_T, multi_X = multimodal_T_and_X(X=X, T=T, biomarker_T=biomarker_T)
 
-        X, T = squeeze(X=X, T=T)
+        s = np.argsort(multi_T, axis=1)
+        M = np.take_along_axis(M, s, axis=1)
+        multi_T = np.take_along_axis(multi_T, s, axis=1)
+        multi_X = np.take_along_axis(multi_X, s, axis=1)
+
+        squeeze_margin = np.min(np.sum(M == 0, axis=1))
+        M = M[:, squeeze_margin:]
+        multi_X = multi_X[:, squeeze_margin:]
+        multi_T = multi_T[:, squeeze_margin:]
 
         P = torch.tensor(P, dtype=torch.long)
-        X = torch.tensor(X, dtype=torch.long)
-        T = torch.tensor(T, dtype=torch.float)
+        multi_X = torch.tensor(multi_X, dtype=torch.long)
+        multi_T = torch.tensor(multi_T, dtype=torch.float)
+        M = torch.tensor(M, dtype=torch.long)
+        biomarker_X, biomarker_T = biomarker_to_tensor(
+            biomarker_X=biomarker_X, biomarker_T=biomarker_T
+        )
 
-        yield P, X, T
+        yield P, multi_X, multi_T, M, biomarker_X
 
 
 def build_prefetch_loader(loader: Iterator) -> Iterator:
@@ -125,6 +199,7 @@ class UKBDataConfig:
     data_dir: str = "data/ukb_simulated_data"
     memmap_fname: str = "train.bin"
     tokenizer_fname: str = "tokenizer.yaml"
+    prs: PRSConfig = field(default_factory=PRSConfig)
     transforms: Optional[List[TransformArgs]] = None
 
 
@@ -141,7 +216,9 @@ class Dataset:
         data = np.fromfile(memmap_path, dtype=np.uint32).reshape(-1, 3)
 
         p2i = get_p2i(data)
-        self.participants = p2i[:, 0]
+        self.participants = data[:, 0][
+            p2i[:, 0]
+        ]  # todo: investigate duplicate participants
 
         self.seq_len = p2i[:, 1]
         assert self.seq_len.size == self.participants.size
@@ -152,6 +229,13 @@ class Dataset:
         self.tokens = data[:, 2] + 1
         self.time_steps = data[:, 1]
         assert self.tokens.size == self.time_steps.size
+
+        self.mod_ds = {}
+        if cfg.prs.include:
+            self.mod_ds["prs"] = PRSDataset(
+                db_path=os.path.join(cfg.data_dir, cfg.prs.lmdb_fname)
+            )
+            prs_participants = self.mod_ds["prs"].get_all_pids()
 
         self.transforms = []
         if cfg.transforms is not None:
@@ -186,16 +270,23 @@ class Dataset:
         T = np.full(X.shape, -10000, dtype=np.float32)
         T[row_idx, col_idx] = batch_time_steps
 
-        return P, X, T
+        biomarker_X = {}
+        biomarker_T = {}
+        for modality, dataset in self.mod_ds.items():
+            m_X, m_T = dataset.get_raw_batch([str(P_i) for P_i in P])
+            biomarker_X[modality] = m_X
+            biomarker_T[modality] = m_T
+
+        return P, X, T, biomarker_X, biomarker_T
 
     def get_batch(self, batch_idx):
 
-        P, X, T = self.get_raw_batch(batch_idx)
+        P, X, T, biomarker_X, biomarker_T = self.get_raw_batch(batch_idx)
 
         for transform in self.transforms:
             X, T = transform(X, T)
 
-        return P, X, T
+        return P, X, T, biomarker_X, biomarker_T
 
 
 class PromptDataset(Dataset):
@@ -219,7 +310,7 @@ class PromptDataset(Dataset):
 
     def get_batch(self, batch_idx):
 
-        P, X, T = super().get_raw_batch(batch_idx)
+        P, X, T, biomarker_X, biomarker_T = super().get_raw_batch(batch_idx)
 
         X[T > self.start_age] = 0
         T[T > self.start_age] = -1e4
@@ -232,4 +323,5 @@ class PromptDataset(Dataset):
         )
         T = np.pad(T, ((0, 0), (0, 1)), mode="constant", constant_values=self.start_age)
 
-        return P, X, T
+        # TODO: remove biomarkers after prompt_age
+        return P, X, T, biomarker_X, biomarker_T

@@ -24,6 +24,9 @@ class DelphiConfig:
     # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     mask_ties: bool = False
     ignore_tokens: list = field(default_factory=lambda: [0])
+    prs: bool = False
+    prs_size: int = 36
+    modality_emb: bool = False
     loss: LossConfig = field(default_factory=LossConfig)
 
 

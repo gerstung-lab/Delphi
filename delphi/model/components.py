@@ -4,6 +4,7 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
+from delphi.data.dataset import modality2idx
 from delphi.model.config import DelphiConfig
 
 
@@ -43,33 +44,13 @@ class DelphiEmbedding(nn.Module):
         self.age_encoding = AgeEncoding(config)
         self.token_drop = nn.Dropout(config.token_dropout)
 
-    def attention_mask(
-        self,
-        x0: torch.Tensor,
-        t0: torch.Tensor,
-        x1: Optional[torch.Tensor] = None,
-        t1: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
+        n_modality = 2  # pad + event
+        if config.prs:
+            self.prs_embedding = nn.Linear(config.prs_size, config.n_embd, bias=False)
+            n_modality += 1
 
-        batch_size = x0.shape[0]
-        seq_len = x0.shape[1]
-        lower_tri_mask = torch.tril(torch.ones((seq_len, seq_len), device=x0.device))
-        lower_tri_mask = lower_tri_mask.view(1, seq_len, seq_len)
-        pad_mask = (x0 > 0).view(batch_size, 1, seq_len).to(torch.int)
-        attn_mask = pad_mask * lower_tri_mask
-
-        if self.config.mask_ties:
-            if x1 is not None and t1 is not None:
-                ties_mask = (
-                    t1.view(batch_size, seq_len, 1) != t0.view(batch_size, 1, seq_len)
-                ).to(torch.int)
-                attn_mask *= ties_mask
-
-        attn_mask += (attn_mask.sum(-1, keepdim=True) == 0) * torch.diag(
-            torch.ones(x0.size(1), device=x0.device)
-        ) > 0
-
-        return attn_mask.unsqueeze(1)
+        if config.modality_emb:
+            self.mod_embedding = nn.Embedding(n_modality, config.n_embd, padding_idx=0)
 
     def ties_adjusted_delta_t(
         self, t0: torch.Tensor, t1: torch.Tensor, attn_mask: torch.Tensor
@@ -99,12 +80,27 @@ class DelphiEmbedding(nn.Module):
         self,
         x0: torch.Tensor,
         t0: torch.Tensor,
+        M: torch.Tensor,
+        biomarker_x: dict[str, torch.Tensor] = {},
     ) -> torch.Tensor:
 
         token_emb = self.token_embedding(x0)
         token_emb = self.token_drop(token_emb) * (1 - self.config.token_dropout)
         age_emb = self.age_encoding(t0.unsqueeze(-1))
+
+        for modality in biomarker_x.keys():
+            m_pos = torch.nonzero(M == modality2idx[modality])  # N * 2
+            m_emb = self.prs_embedding(biomarker_x[modality])  # N * H
+            assert m_emb.shape[0] == m_pos.shape[0]
+
+            token_emb[m_pos[:, 0], m_pos[:, 1], :] *= 0
+            token_emb[m_pos[:, 0], m_pos[:, 1], :] += m_emb
+
         x = token_emb + age_emb
+
+        if self.config.modality_emb:
+            mod_emb = self.mod_embedding(M)
+            x += mod_emb
 
         return x
 
@@ -137,6 +133,32 @@ def build_zero_inflate_projector(config: DelphiConfig):
         raise ValueError(f"Unknown pi_projector: {config.loss.zero_inflate_projector}")
 
 
+def attention_mask(
+    t0: torch.Tensor,
+    m0: torch.Tensor,
+    mask_ties: bool,
+    t1: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+
+    b, l = m0.shape[0], m0.shape[1]
+
+    lower_tri_mask = torch.tril(torch.ones((l, l), device=m0.device))
+    lower_tri_mask = lower_tri_mask.view(1, l, l)
+    pad_mask = (m0 > 0).view(b, 1, l).to(torch.int)
+    attn_mask = pad_mask * lower_tri_mask
+
+    if mask_ties:
+        if t1 is not None:
+            ties_mask = (t1.view(b, l, 1) != t0.view(b, 1, l)).to(torch.int)
+            attn_mask *= ties_mask
+
+    attn_mask += (attn_mask.sum(-1, keepdim=True) == 0) * torch.diag(
+        torch.ones(m0.size(1), device=m0.device)
+    ) > 0
+
+    return attn_mask.unsqueeze(1)
+
+
 def target_mask(
     x1: torch.Tensor,
     ignore_tokens: list[int],
@@ -145,5 +167,22 @@ def target_mask(
     is_valid_target = x1 != -1
     for k in ignore_tokens:
         is_valid_target *= x1 != k
+
+    return is_valid_target
+
+
+def mask_biomarker_only_predicate(
+    x1: torch.Tensor,
+    m0: torch.Tensor,
+):
+
+    first_non_pad = torch.nonzero(m0 > 0)
+    first_biomarker = torch.nonzero(m0 > 1)
+
+    biomarker_only_predicate = first_non_pad[:, 1] == first_biomarker[:, 1]
+    mask_positions = first_biomarker[biomarker_only_predicate]
+
+    is_valid_target = torch.ones_like(x1, dtype=torch.bool)
+    is_valid_target[mask_positions[:, 0], mask_positions[:, 1]] = False
 
     return is_valid_target
