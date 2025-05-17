@@ -209,11 +209,14 @@ class Dataset:
         self,
         cfg: UKBDataConfig,
     ):
+        print(f"\nbuilding dataset at {cfg.data_dir}")
         tokenizer_path = os.path.join(cfg.data_dir, cfg.tokenizer_fname)
+        print(f" – loading tokenizer from {tokenizer_path}")
         self.tokenizer = load_tokenizer_from_yaml(tokenizer_path)
 
         memmap_path = os.path.join(cfg.data_dir, cfg.memmap_fname)
         data = np.fromfile(memmap_path, dtype=np.uint32).reshape(-1, 3)
+        print(f" – loading memmap from {memmap_path}")
 
         p2i = get_p2i(data)
         self.participants = data[:, 0][
@@ -232,16 +235,26 @@ class Dataset:
 
         self.mod_ds = {}
         if cfg.prs.include:
-            self.mod_ds["prs"] = PRSDataset(
-                db_path=os.path.join(cfg.data_dir, cfg.prs.lmdb_fname)
-            )
+            prs_path = os.path.join(cfg.data_dir, cfg.prs.lmdb_fname)
+            print(f" – loading prs lmdb dataset from {cfg.data_dir}")
+            self.mod_ds["prs"] = PRSDataset(db_path=prs_path)
             prs_participants = self.mod_ds["prs"].get_all_pids()
+        if cfg.prs.must:
+            keep_participants = np.isin(self.participants, prs_participants)
+            print(
+                f"keeping {np.sum(keep_participants)}/{self.participants.size} participants with prs"
+            )
+            self.participants = self.participants[keep_participants]
+            self.seq_len = self.seq_len[keep_participants]
+            self.start_pos = self.start_pos[keep_participants]
 
         self.transforms = []
         if cfg.transforms is not None:
             for transform in cfg.transforms:
                 transform = parse_transform(transform, tokenizer=self.tokenizer)
                 self.transforms.append(transform)
+
+        print(f"built dataset!")
 
     def __len__(self):
 
