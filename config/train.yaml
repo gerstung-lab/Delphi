@@ -13,6 +13,10 @@ train_data:
   data_dir: data/ukb_real_data
   memmap_fname: train.bin
   tokenizer_fname: tokenizer.yaml
+  prs:
+    lmdb_fname: prs.lmdb
+    include: true
+    must: false
   transforms:
     - name: no-event
       args:
@@ -22,6 +26,10 @@ val_data:
   data_dir: data/ukb_real_data
   memmap_fname: val.bin
   tokenizer_fname: tokenizer.yaml
+  prs:
+    lmdb_fname: prs.lmdb
+    include: true
+    must: false
   transforms:
     - name: no-event
       args:
@@ -39,6 +47,9 @@ model:
   bias: true
   mask_ties: false
   ignore_tokens: [0, 2 ,3, 4, 5, 6, 7, 8, 9, 10, 11, 12] # ignore padding and lifestyle tokens
+  prs: true
+  prs_size: 36
+  modality_emb: true
   loss:
     ce_beta: 1.0
     dt_beta: 1.0
