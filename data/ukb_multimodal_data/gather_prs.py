@@ -1,8 +1,9 @@
 import io
 import os
+
+import lmdb
 import numpy as np
 import pandas as pd
-import lmdb
 
 prs_txt = "/nfs/research/birney/controlled_access/ukb-cnv/data_fetch/baskets/2017133/PRS_standard_37.txt"
 
@@ -16,10 +17,14 @@ print(f"prs participants: {prs_P.shape}")
 prs_X = prs_df.values
 
 data_dir = "/hps/nobackup/birney/users/sfan/delphi-data/ukb_real_data"
-train_PTX = np.memmap(os.path.join(data_dir, "train.bin"), dtype=np.uint32, mode='r').reshape(-1, 3)
+train_PTX = np.memmap(
+    os.path.join(data_dir, "train.bin"), dtype=np.uint32, mode="r"
+).reshape(-1, 3)
 train_P = np.unique(train_PTX[:, 0])
 print(f"train participants: {train_P.shape}")
-val_PTX = np.memmap(os.path.join(data_dir, "val.bin"), dtype=np.uint32, mode='r').reshape(-1, 3)
+val_PTX = np.memmap(
+    os.path.join(data_dir, "val.bin"), dtype=np.uint32, mode="r"
+).reshape(-1, 3)
 val_P = np.unique(val_PTX[:, 0])
 print(f"val participants: {val_P.shape}")
 
@@ -38,7 +43,7 @@ print(f"prs participants after NaN removal: {prs_P.shape}")
 test_buffer = io.BytesIO()
 np.save(test_buffer, prs_X[0, :])
 array_size = len(test_buffer.getvalue())
-record_size = len(str(int(prs_P[0])).encode('utf-8')) + array_size + 16
+record_size = len(str(int(prs_P[0])).encode("utf-8")) + array_size + 16
 estimated_size = record_size * prs_P.shape[0]
 map_size = int(estimated_size * 1.5)  # 50% safety margin
 
@@ -48,27 +53,28 @@ print(f"Using map_size: {map_size / (1024**3):.2f} GB")
 db_path = "/hps/nobackup/birney/users/sfan/delphi-data/ukb_real_data/prs.lmdb"
 
 if os.path.exists(db_path):
-	import shutil
-	shutil.rmtree(db_path)
-	print(f"Deleted LMDB directory: {db_path}")
+    import shutil
+
+    shutil.rmtree(db_path)
+    print(f"Deleted LMDB directory: {db_path}")
 
 env = lmdb.open(db_path, map_size=map_size)
 
 with env.begin(write=True) as txn:
-	for i in range(prs_P.shape[0]):
-	    participant_id = str(int(prs_P[i])).encode('utf-8')  # Convert the first column to the key (as a string)
-	    prs_scores = prs_X[i, :]  # Remaining columns are the values
+    for i in range(prs_P.shape[0]):
+        participant_id = str(int(prs_P[i])).encode(
+            "utf-8"
+        )  # Convert the first column to the key (as a string)
+        prs_scores = prs_X[i, :]  # Remaining columns are the values
 
-	    # Convert values to bytes using pickle or np.save
-	    buffer = io.BytesIO()
-	    np.save(buffer, prs_scores)
-	    value_bytes = buffer.getvalue()
+        # Convert values to bytes using pickle or np.save
+        buffer = io.BytesIO()
+        np.save(buffer, prs_scores)
+        value_bytes = buffer.getvalue()
 
-	    txn.put(participant_id, value_bytes) 
+        txn.put(participant_id, value_bytes)
 
 print(participant_id)
 print(prs_scores)
 
 env.close()
-
-
