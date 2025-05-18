@@ -3,7 +3,6 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
-import numpy as np
 import torch
 from omegaconf import OmegaConf
 from tqdm import tqdm
@@ -38,7 +37,7 @@ def forward(
     ckpt: str,
     model: Optional[Delphi] = None,
     tokenizer: Optional[Tokenizer] = None,
-) -> np.ndarray:
+) -> None:
 
     if model is None:
         model, _ = load_model(ckpt)
@@ -83,9 +82,7 @@ def forward(
                 logits=batch_logits.cpu().numpy(),
             )
 
-    logits = np.vstack(batch_logits)
-
-    return logits
+    logger.close()
 
 
 def main():
