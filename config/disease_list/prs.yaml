@@ -1,0 +1,51 @@
+- f00_(dementia_in_alzheimer's_disease)
+- j45_(asthma)
+- i48_(atrial_fibrillation_and_flutter)
+- f31_(bipolar_affective_disorder)
+- c18_malignant_neoplasm_of_colon
+- c50_malignant_neoplasm_of_breast
+- i21_(acute_myocardial_infarction)
+- e78_(disorders_of_lipoprotein_metabolism_and_other_lipidaemias)
+# 26225 coeliac disease
+- k90_(intestinal_malabsorption)
+# 26248 ischemic stroke
+- i63_(cerebral_infarction)
+- i64_(stroke,_not_specified_as_haemorrhage_or_infarction)
+- i65_(occlusion_and_stenosis_of_precerebral_arteries,_not_resulting_in_cerebral_infarction)
+- i66_(occlusion_and_stenosis_of_cerebral_arteries,_not_resulting_in_cerebral_infarction)
+# 26229 crohn's disease
+- k50_(crohn's_disease_[regional_enteritis])
+# 26232 epithelial ovarian cancer
+- c56_malignant_neoplasm_of_ovary
+# 26244 hypertension
+- i10_(essential_(primary)_hypertension
+# 26252 melanoma
+- c43_malignant_melanoma_of_skin
+# 26254 multiple sclerosis
+- g35_(multiple_sclerosis)
+# 26258 osteoporosis
+- m80_(osteoporosis_with_pathological_fracture)
+- m81_(osteoporosis_without_pathological_fracture)
+# 26260 parkinson's disease
+- g20_(parkinson's_disease)
+# primary open angle glaucoma
+- h40_(glaucoma)
+# 26267 prostate cancer
+- c61_malignant_neoplasm_of_prostate
+# 26269 psoriasis
+- l40_(psoriasis)
+# 26273 rheumatoid arthritis
+- m05_(seropositive_rheumatoid_arthritis)
+# 26275 schizophrenia
+- f20_(schizophrenia)
+# 26278 systemic lupus erythematosus
+- m32_(systemic_lupus_erythematosus)
+# 26283 type 1 diabetes
+# 26285 type 2 diabetes
+- e11_(non-insulin-dependent_diabetes_mellitus)
+- e12_(malnutrition-related_diabetes_mellitus)
+# 26287 ulcerative colitis
+- k51_(ulcerative_colitis)
+# 26289 venous thromboembolitic disease
+- i81_(portal_vein_thrombosis)
+- i82_(other_venous_embolism_and_thrombosis)
