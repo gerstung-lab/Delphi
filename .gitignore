@@ -10,3 +10,4 @@ data/ukb_simulated_data_large
 .ipynb_checkpoints
 logs
 submit/dkfz/exp/*.yaml
+notebook
