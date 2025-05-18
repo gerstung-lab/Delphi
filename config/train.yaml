@@ -49,6 +49,7 @@ model:
   ignore_tokens: [0, 2 ,3, 4, 5, 6, 7, 8, 9, 10, 11, 12] # ignore padding and lifestyle tokens
   prs: true
   prs_size: 36
+  prs_projector: mlp
   modality_emb: true
   loss:
     ce_beta: 1.0

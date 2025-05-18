@@ -26,6 +26,7 @@ class DelphiConfig:
     ignore_tokens: list = field(default_factory=lambda: [0])
     prs: bool = False
     prs_size: int = 36
+    prs_projector: str = "linear"  # "linear" or "mlp"
     modality_emb: bool = False
     loss: LossConfig = field(default_factory=LossConfig)
 

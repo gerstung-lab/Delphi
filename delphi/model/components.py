@@ -46,7 +46,18 @@ class DelphiEmbedding(nn.Module):
 
         n_modality = 2  # pad + event
         if config.prs:
-            self.prs_embedding = nn.Linear(config.prs_size, config.n_embd, bias=False)
+            if config.prs_projector == "linear":
+                self.prs_embedding = nn.Linear(
+                    config.prs_size, config.n_embd, bias=False
+                )
+            elif config.prs_projector == "mlp":
+                self.prs_embedding = nn.Sequential(
+                    nn.Linear(config.prs_size, 64, bias=False),
+                    nn.ReLU(),
+                    nn.Linear(64, config.n_embd, bias=False),
+                )
+            else:
+                raise ValueError(f"unknown prs_projector: {config.prs_projector}")
             n_modality += 1
 
         if config.modality_emb:
