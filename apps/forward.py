@@ -70,11 +70,16 @@ def forward(
     )
 
     loader = tqdm(loader, total=math.ceil(n_participants / cfg.batch_size), leave=True)
-    logits = []
+
     with torch.no_grad():
-        for P, X, T in loader:
-            batch_logits, _, _ = model(X.to(cfg.device), T.to(cfg.device))
-            logits.append(batch_logits.cpu().numpy())
+        for P, X, T, M, biomarker in loader:
+            biomarker = {k: v.to(cfg.device) for k, v in biomarker.items()}
+            batch_logits, _, _ = model(
+                idx=X.to(cfg.device),
+                age=T.to(cfg.device),
+                modality=M.to(cfg.device),
+                biomarker=biomarker,
+            )
             logger.write_memmaps(
                 participants=P.cpu().numpy(),
                 tokens=X.cpu().numpy(),
