@@ -64,9 +64,8 @@ def get_batch(
     ix = torch.tensor(np.array(ix))
 
     gen = torch.Generator(device="cpu")
-    gen.manual_seed(
-        ix.sum().item()
-    )  # we want some things be random, but also deterministic
+    gen.manual_seed(int(ix.sum().item()))
+    # we want some things be random, but also deterministic
 
     if index == "patient":
         if select == "left":
@@ -103,9 +102,10 @@ def get_batch(
     if lifestyle_augmentations:
         lifestyle_idx = (tokens >= 3) * (tokens <= 11)
         if lifestyle_idx.sum():
-            ages[lifestyle_idx] += torch.randint(
-                -20 * 365, 365 * 40, (lifestyle_idx.sum(),), generator=gen
-            ).float()
+            augment = torch.randint(
+                -20 * 365, 365 * 40, (int(lifestyle_idx.sum()),), generator=gen
+            )
+            ages[lifestyle_idx] += augment.float()
 
     tokens = tokens.masked_fill(~mask, -1)
     ages = ages.masked_fill(~mask, mask_time)
