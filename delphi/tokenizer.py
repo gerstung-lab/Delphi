@@ -22,7 +22,7 @@ class CoreEvents(Enum):
 class Disease:
     id: int
     ukb_name: str
-    chapter: str
+    chapter: str = ""
 
 
 @dataclass
