@@ -6,6 +6,10 @@ data:
   data_dir: data/ukb_real_data
   memmap_fname: val.bin
   tokenizer_fname: tokenizer.yaml
+  prs:
+    lmdb_fname: prs.lmdb
+    include: true
+    must: true
   transforms:
     - name: no-event
       args:
