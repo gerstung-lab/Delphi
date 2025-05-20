@@ -1,0 +1,3 @@
+[submodule "submit/dkfz"]
+	path = submit/dkfz
+	url = https://github.com/shawnfan19/dkfz-cluster-launchpad.git
