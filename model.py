@@ -354,7 +354,7 @@ class Delphi(nn.Module):
         return optimizer
 
     @torch.no_grad()
-    def generate(self, idx, age, max_new_tokens=100, max_age=85*365.25, no_repeat=True, termination_tokens=[1269], top_k=None):
+    def generate(self, idx, age, max_new_tokens=100, max_age=85*365.25, no_repeat=True, termination_tokens=None, top_k=None):
         """
         Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
@@ -368,8 +368,9 @@ class Delphi(nn.Module):
         death reasons.
         top_k: None, does nothing
         """
-
-        warnings.warn('When using a custem dataset, consider changing the `termination_tokens` argument.')
+        if termination_tokens is None:
+            warnings.warn('When using a custem dataset, consider changing the `termination_tokens` argument.')
+            termination_tokens = [1269]
         
         termination_tokens = torch.tensor(termination_tokens, dtype=torch.int64, device=idx.device)
         mask_time = -10000

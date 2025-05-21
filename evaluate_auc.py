@@ -112,7 +112,7 @@ def compute_midrank(x):
     J = np.argsort(x)
     Z = x[J]
     N = len(x)
-    T = np.zeros(N, dtype=np.float)
+    T = np.zeros(N, dtype=np.float32)
     i = 0
     while i < N:
         j = i
@@ -120,7 +120,7 @@ def compute_midrank(x):
             j += 1
         T[i:j] = 0.5 * (i + j - 1)
         i = j
-    T2 = np.empty(N, dtype=np.float)
+    T2 = np.empty(N, dtype=np.float32)
     # Note(kazeevn) +1 is due to Python using 0-based indexing
     # instead of 1-based in the AUC formula in the paper
     T2[J] = T + 1
@@ -156,9 +156,9 @@ def fastDeLong(predictions_sorted_transposed, label_1_count):
     negative_examples = predictions_sorted_transposed[:, m:]
     k = predictions_sorted_transposed.shape[0]
 
-    tx = np.empty([k, m], dtype=np.float)
-    ty = np.empty([k, n], dtype=np.float)
-    tz = np.empty([k, m + n], dtype=np.float)
+    tx = np.empty([k, m], dtype=np.float32)
+    ty = np.empty([k, n], dtype=np.float32)
+    tz = np.empty([k, m + n], dtype=np.float32)
     for r in range(k):
         tx[r, :] = compute_midrank(positive_examples[r, :])
         ty[r, :] = compute_midrank(negative_examples[r, :])
@@ -258,18 +258,18 @@ def get_calibration_auc(j, k, d, p, offset=365.25, age_groups=range(45, 80, 5), 
         if len(control) == 0 or len(case) == 0:
             continue
 
-        aucs_bootstrapped = optimized_bootstrapped_auc_gpu(case, control, n_bootstrap)
-
         if use_delong:
             auc_value_delong, auc_variance_delong = get_auc_delong_var(control, case)
             auc_delong_dict = {"auc_delong": auc_value_delong, "auc_variance_delong": auc_variance_delong}
         else:
             auc_delong_dict = {}
 
+        if n_bootstrap > 1:
+            aucs_bootstrapped = optimized_bootstrapped_auc_gpu(case, control, n_bootstrap)
+
         for bootstrap_idx in range(n_bootstrap):
-            y = aucs_bootstrapped[bootstrap_idx]
+            y = auc_value_delong if n_bootstrap == 1 else aucs_bootstrapped[bootstrap_idx]
             out_item = {
-                "bootstrap_idx": bootstrap_idx,
                 "token": k,
                 "auc": y,
                 "age": aa,
@@ -277,6 +277,8 @@ def get_calibration_auc(j, k, d, p, offset=365.25, age_groups=range(45, 80, 5), 
                 "n_diseased": len(case),
             }
             out.append(out_item | auc_delong_dict)
+            if n_bootstrap > 1:
+                out_item["bootstrap_idx"] = bootstrap_idx
     return out
 
 
@@ -294,7 +296,7 @@ def evaluate_auc_pipeline(
     batch_size=128,
     device="cpu",
     seed=1337,
-    n_bootstrap=100,
+    n_bootstrap=1,
     meta_info={},
 ):
     """
@@ -313,10 +315,13 @@ def evaluate_auc_pipeline(
         batch_size (int): Batch size for model forwarding.
         device (str): Device identifier.
         seed (int): Random seed for reproducibility.
-
+        n_bootstrap (int): Number of bootstrap samples. (1 for no bootstrap)
     Returns:
         tuple: (df_auc_unpooled, df_auc, df_both) DataFrames.
     """
+
+    assert n_bootstrap > 0, "n_bootstrap must be greater than 0"
+
     # Set random seeds
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -333,7 +338,8 @@ def evaluate_auc_pipeline(
     pred_idx_precompute = (d100k[1][:, :, np.newaxis] < d100k[3][:, np.newaxis, :] - offset).sum(1) - 1
 
     all_aucs = []
-    for disease_chunk_idx, diseases_chunk in tqdm(enumerate(diseases_chunks), desc="Processing disease chunks"):
+    tqdm_options = {"desc": "Processing disease chunks", "total": len(diseases_chunks)}
+    for disease_chunk_idx, diseases_chunk in tqdm(enumerate(diseases_chunks), **tqdm_options):
         p100k = []
         model.to(device)
         with torch.no_grad():
@@ -378,21 +384,32 @@ def evaluate_auc_pipeline(
                     all_aucs.append(out_item)
 
     df_auc_unpooled = pd.DataFrame(all_aucs)
+
     for key, value in meta_info.items():
         df_auc_unpooled[key] = value
-    df_auc_unpooled_merged = df_auc_unpooled.merge(delphi_labels, left_on="token", right_on="index", how="inner")
 
-    def aggregate_age_brackets(group):
-        n_healthy = group["n_healthy"].sum()
-        n_diseased = group["n_diseased"].sum()
-        auc = group["auc"].mean()
-        return pd.Series({"n_healthy": n_healthy, "n_diseased": n_diseased, "auc": auc})
+    delphi_labels_subset = delphi_labels[['index', 'ICD-10 Chapter (short)', 'name', 'color', 'count']]
+    df_auc_unpooled_merged = df_auc_unpooled.merge(delphi_labels_subset, left_on="token", right_on="index", how="inner")
 
+    def aggregate_age_brackets_delong(group):
+        # For normal distributions, when averaging n of them:
+        # The variance of the sum is the sum of variances
+        # The variance of the average is the sum of variances divided by n^2
+        n = len(group)
+        mean = group['auc_delong'].mean()
+        # Since we're taking the average, divide combined variance by n^2
+        var = group['auc_variance_delong'].sum() / (n**2)
+        return pd.Series({
+            'auc': mean,
+            'auc_variance_delong': var,
+            'n_samples': n, 
+            'n_diseased': group['n_diseased'].sum(),
+            'n_healthy': group['n_healthy'].sum(),
+        })
+
+    print('Using DeLong method to calculate AUC confidence intervals..')
     
-    df_auc = df_auc_unpooled.groupby(["token", "sex"]).apply(aggregate_age_brackets).reset_index()
-    df_auc = df_auc.pivot(index=["token"], columns="sex", values="auc")
-    df_auc.columns = ["auc_female", "auc_male"]
-    df_auc.reset_index(inplace=True)
+    df_auc = df_auc_unpooled.groupby(["token"]).apply(aggregate_age_brackets_delong).reset_index()
     df_auc_merged = df_auc.merge(delphi_labels, left_on="token", right_on="index", how="inner")
     
     if output_path is not None:
@@ -400,7 +417,7 @@ def evaluate_auc_pipeline(
         df_auc_merged.to_parquet(f"{output_path}/df_both.parquet", index=False)
         df_auc_unpooled_merged.to_parquet(f"{output_path}/df_auc_unpooled.parquet", index=False)
 
-    return df_auc_unpooled, df_auc_merged
+    return df_auc_unpooled_merged, df_auc_merged
 
 
 def main():
