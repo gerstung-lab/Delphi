@@ -6,11 +6,11 @@ import numpy as np
 import torch
 from scipy.sparse import coo_array
 
+from delphi.data.family_hx import FamilyHxConfig, FamilyHxDataset
 from delphi.data.prs import PRSConfig, PRSDataset
 from delphi.data.transform import TransformArgs, parse_transform
+from delphi.multimodal import Modality, modality_X_dtype
 from delphi.tokenizer import load_tokenizer_from_yaml
-
-modality2idx = {"prs": 2}
 
 
 def get_p2i(data):
@@ -76,14 +76,14 @@ def squeeze(X: np.ndarray, T: np.ndarray):
 
 
 def biomarker_to_tensor(
-    biomarker_X: dict[str, np.ndarray],
-    biomarker_T: dict[str, np.ndarray],
+    biomarker_X: dict[Modality, np.ndarray],
+    biomarker_T: dict[Modality, np.ndarray],
 ):
 
     for modality in biomarker_X.keys():
         m_X = biomarker_X[modality]
         m_T = biomarker_T[modality]
-        biomarker_X[modality] = torch.tensor(m_X, dtype=torch.float)  # type: ignore
+        biomarker_X[modality] = torch.tensor(m_X, dtype=modality_X_dtype[modality])  # type: ignore
         biomarker_T[modality] = torch.tensor(m_T, dtype=torch.float)  # type: ignore
 
     return biomarker_X, biomarker_T
@@ -91,14 +91,14 @@ def biomarker_to_tensor(
 
 def remove_trailing_biomarkers(
     M: np.ndarray,
-    biomarker_X: dict[str, np.ndarray] = {},
+    biomarker_X: dict[Modality, np.ndarray] = {},
 ):
 
     l = M.shape[1]
 
     for modality in biomarker_X.keys():
 
-        biomarker_idx = torch.nonzero(M == modality2idx[modality])
+        biomarker_idx = torch.nonzero(M == modality.value)
         is_trailing = biomarker_idx[:, 1] == l - 1
         biomarker_X[modality] = biomarker_X[modality][~is_trailing]
 
@@ -110,7 +110,7 @@ def remove_trailing_biomarkers(
 def multimodal_T_and_X(
     X: np.ndarray,
     T: np.ndarray,
-    biomarker_T: dict[str, np.ndarray] = {},
+    biomarker_T: dict[Modality, np.ndarray] = {},
 ):
 
     M = np.zeros_like(X, dtype=np.int8)
@@ -121,7 +121,7 @@ def multimodal_T_and_X(
         m_T = biomarker_T[modality]
 
         m_M = np.zeros_like(m_T, dtype=np.int8)
-        m_M[m_T != -1e4] = modality2idx[modality]
+        m_M[m_T != -1e4] = modality.value
 
         m_X = np.zeros_like(m_T, dtype=np.int8)
 
@@ -200,6 +200,8 @@ class UKBDataConfig:
     memmap_fname: str = "train.bin"
     tokenizer_fname: str = "tokenizer.yaml"
     prs: PRSConfig = field(default_factory=PRSConfig)
+    family_hx: FamilyHxConfig = field(default_factory=FamilyHxConfig)
+    seed: int = 42
     transforms: Optional[List[TransformArgs]] = None
 
 
@@ -241,7 +243,7 @@ class Dataset:
             prs_dataset = PRSDataset(db_path=prs_path)
             prs_participants = prs_dataset.get_all_pids()
             if cfg.prs.include:
-                self.mod_ds["prs"] = prs_dataset
+                self.mod_ds[Modality.PRS] = prs_dataset
             if cfg.prs.must:
                 keep_participants = np.isin(self.participants, prs_participants)
                 print(
@@ -251,10 +253,31 @@ class Dataset:
                 self.seq_len = self.seq_len[keep_participants]
                 self.start_pos = self.start_pos[keep_participants]
 
+        if cfg.family_hx.include or cfg.family_hx.must:
+            family_hx_path = os.path.join(cfg.data_dir, cfg.family_hx.lmdb_fname)
+            assert os.path.exists(family_hx_path)
+            print(f" – found family_hx lmdb dataset at {family_hx_path}")
+            family_hx_dataset = FamilyHxDataset(
+                db_path=family_hx_path, map_yaml=cfg.family_hx.map_yaml
+            )
+            family_hx_participants = family_hx_dataset.get_all_pids()
+            if cfg.family_hx.include:
+                self.mod_ds[Modality.FAMILY_HX] = family_hx_dataset
+            if cfg.family_hx.must:
+                keep_participants = np.isin(self.participants, family_hx_participants)
+                print(
+                    f"keeping {np.sum(keep_participants)}/{self.participants.size} participants with family hx"
+                )
+                self.participants = self.participants[keep_participants]
+                self.seq_len = self.seq_len[keep_participants]
+                self.start_pos = self.start_pos[keep_participants]
+
         self.transforms = []
         if cfg.transforms is not None:
             for transform in cfg.transforms:
-                transform = parse_transform(transform, tokenizer=self.tokenizer)
+                transform = parse_transform(
+                    transform, tokenizer=self.tokenizer, seed=cfg.seed
+                )
                 self.transforms.append(transform)
 
         print(f"built dataset!")

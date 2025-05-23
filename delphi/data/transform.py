@@ -18,11 +18,13 @@ class AddNoEvent:
     def __init__(
         self,
         tokenizer: Tokenizer,
+        seed: int,
         interval_in_years: int = 5,
         mode: Literal["regular", "random"] = "random",
         max_age_in_years: Optional[float] = None,
     ):
 
+        self.rng = np.random.default_rng(seed)
         self.max_age_in_years = max_age_in_years
         self.no_event_interval = interval_in_years * DAYS_PER_YEAR
 
@@ -46,7 +48,7 @@ class AddNoEvent:
 
         n_no_events = int(max_age // self.no_event_interval)
         if self.mode == "random":
-            no_event_timesteps = np.random.randint(
+            no_event_timesteps = self.rng.integers(
                 1, int(max_age - self.no_event_interval), (n_participants, n_no_events)
             )
         elif self.mode == "regular":
@@ -76,10 +78,12 @@ class AugmentLifestyle:
     def __init__(
         self,
         tokenizer: Tokenizer,
+        seed: int,
         min_time: float = -20 * DAYS_PER_YEAR,
         max_time: float = 40 * DAYS_PER_YEAR,
     ):
 
+        self.rng = np.random.default_rng(seed)
         self.lifestyle_tokens = np.array(tokenizer.lifestyle_tokens)
         self.min_time = min_time
         self.max_time = max_time
@@ -88,7 +92,7 @@ class AugmentLifestyle:
 
         is_lifestyle = np.isin(X, self.lifestyle_tokens)
         if is_lifestyle.sum() > 0:
-            augment = np.random.randint(
+            augment = self.rng.integers(
                 int(self.min_time), int(self.max_time), (is_lifestyle.sum(),)
             )
             T[is_lifestyle] += augment
@@ -103,8 +107,10 @@ transform_registry = {
 }
 
 
-def parse_transform(transform_args: TransformArgs, tokenizer: Tokenizer) -> Any:
+def parse_transform(
+    transform_args: TransformArgs, tokenizer: Tokenizer, seed: int
+) -> Any:
 
     transform_cls = transform_registry[transform_args.name]
 
-    return transform_cls(tokenizer=tokenizer, **transform_args.args)
+    return transform_cls(seed=seed, tokenizer=tokenizer, **transform_args.args)

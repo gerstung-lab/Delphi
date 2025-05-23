@@ -3,9 +3,10 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
+import yaml
 
-from delphi.data.dataset import modality2idx
 from delphi.model.config import DelphiConfig
+from delphi.multimodal import Modality, module_name
 
 
 class AgeEncoding(nn.Module):
@@ -44,14 +45,15 @@ class DelphiEmbedding(nn.Module):
         self.age_encoding = AgeEncoding(config)
         self.token_drop = nn.Dropout(config.token_dropout)
 
+        self.biomarker_embed = nn.ModuleDict()
         n_modality = 2  # pad + event
         if config.prs:
             if config.prs_projector == "linear":
-                self.prs_embedding = nn.Linear(
+                self.biomarker_embed[module_name(Modality.PRS)] = nn.Linear(
                     config.prs_size, config.n_embd, bias=False
                 )
             elif config.prs_projector == "mlp":
-                self.prs_embedding = nn.Sequential(
+                self.biomarker_embed[module_name(Modality.PRS)] = nn.Sequential(
                     nn.Linear(config.prs_size, 64, bias=False),
                     nn.ReLU(),
                     nn.Linear(64, config.n_embd, bias=False),
@@ -59,6 +61,14 @@ class DelphiEmbedding(nn.Module):
             else:
                 raise ValueError(f"unknown prs_projector: {config.prs_projector}")
             n_modality += 1
+
+        if config.family_hx:
+            with open(config.family_hx_map_yaml, "r") as f:
+                map_config = yaml.safe_load(f)
+            family_hx_vocab_size = max(map_config.values()) + 1
+            self.biomarker_embed[module_name(Modality.FAMILY_HX)] = nn.Embedding(
+                family_hx_vocab_size, config.n_embd, padding_idx=0
+            )
 
         if config.modality_emb:
             self.mod_embedding = nn.Embedding(n_modality, config.n_embd, padding_idx=0)
@@ -92,16 +102,19 @@ class DelphiEmbedding(nn.Module):
         x0: torch.Tensor,
         t0: torch.Tensor,
         M: torch.Tensor,
-        biomarker_x: dict[str, torch.Tensor] = {},
+        biomarker_x: dict[Modality, torch.Tensor] = {},
     ) -> torch.Tensor:
 
         token_emb = self.token_embedding(x0)
+
         token_emb = self.token_drop(token_emb) * (1 - self.config.token_dropout)
         age_emb = self.age_encoding(t0.unsqueeze(-1))
 
         for modality in biomarker_x.keys():
-            m_pos = torch.nonzero(M == modality2idx[modality])  # N * 2
-            m_emb = self.prs_embedding(biomarker_x[modality])  # N * H
+            m_pos = torch.nonzero(M == modality.value)  # N * 2
+            m_emb = self.biomarker_embed[module_name(modality)](
+                biomarker_x[modality]
+            )  # N * H
             assert m_emb.shape[0] == m_pos.shape[0]
 
             token_emb[m_pos[:, 0], m_pos[:, 1], :] *= 0

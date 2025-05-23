@@ -27,6 +27,8 @@ class DelphiConfig:
     prs: bool = False
     prs_size: int = 36
     prs_projector: str = "linear"  # "linear" or "mlp"
+    family_hx: bool = False
+    family_hx_map_yaml: str = ""
     modality_emb: bool = False
     loss: LossConfig = field(default_factory=LossConfig)
 
