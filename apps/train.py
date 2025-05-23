@@ -14,7 +14,7 @@ from delphi.data.dataset import (
     train_iter,
 )
 from delphi.log import TrainLogConfig, TrainLogger
-from delphi.model.config import DelphiConfig, validate_config
+from delphi.model.config import DelphiConfig, validate_model_config
 from delphi.model.transformer import Delphi
 from delphi.optim import OptimConfig, configure_optimizers
 
@@ -50,9 +50,16 @@ class TrainConfig:
     log: TrainLogConfig = field(default_factory=TrainLogConfig)
 
 
+def validate_train_config(cfg: TrainConfig):
+
+    assert cfg.model.prs == cfg.train_data.prs.include
+    assert cfg.model.family_hx == cfg.train_data.family_hx.include
+
+
 def train(cfg: TrainConfig):
 
-    validate_config(cfg.model)
+    validate_train_config(cfg)
+    validate_model_config(cfg.model)
 
     run_dir = os.path.join(cfg.ckpt_dir, cfg.log.run_name)
 

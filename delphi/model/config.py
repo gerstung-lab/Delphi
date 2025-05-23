@@ -33,7 +33,7 @@ class DelphiConfig:
     loss: LossConfig = field(default_factory=LossConfig)
 
 
-def validate_config(config: DelphiConfig):
+def validate_model_config(config: DelphiConfig):
     assert (
         config.mask_ties != config.loss.zero_inflate
     ), "mask_ties and zero_inflate cannot be both True or both False"
