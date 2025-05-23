@@ -1,3 +1,6 @@
 [submodule "submit/dkfz"]
 	path = submit/dkfz
 	url = https://github.com/shawnfan19/dkfz-cluster-launchpad.git
+[submodule "submit/ebi"]
+	path = submit/ebi
+	url = git@github.com:shawnfan19/ebi-codon-launchpad.git
