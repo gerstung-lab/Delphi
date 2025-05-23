@@ -69,6 +69,7 @@ class DelphiEmbedding(nn.Module):
             self.biomarker_embed[module_name(Modality.FAMILY_HX)] = nn.Embedding(
                 family_hx_vocab_size, config.n_embd, padding_idx=0
             )
+            n_modality += 1
 
         if config.modality_emb:
             self.mod_embedding = nn.Embedding(n_modality, config.n_embd, padding_idx=0)
