@@ -10,26 +10,36 @@ device: mps
 
 data_fraction: 1.0
 train_data:
-  data_dir: data/ukb_real_data
+  data_dir: ${oc.env:DELPHI_DATA_DIR,data}/ukb_real_data
   memmap_fname: train.bin
   tokenizer_fname: tokenizer.yaml
   prs:
     lmdb_fname: prs.lmdb
-    include: true
-    must: false
+    include: ${model.prs}
+    must: true
+  family_hx:
+    lmdb_fname: family_hx.lmdb
+    map_yaml: config/family_hx/map.yaml
+    include: ${model.family_hx}
+    must: true
   transforms:
     - name: no-event
       args:
         interval_in_years: 5
         mode: random
 val_data:
-  data_dir: data/ukb_real_data
+  data_dir: ${oc.env:DELPHI_DATA_DIR,data}/ukb_real_data
   memmap_fname: val.bin
   tokenizer_fname: tokenizer.yaml
   prs:
-    lmdb_fname: prs.lmdb
-    include: true
-    must: false
+    lmdb_fname: ${train_data.prs.lmdb_fname}
+    include: ${train_data.prs.include}
+    must: ${train_data.prs.must}
+  family_hx:
+    lmdb_fname: ${train_data.family_hx.lmdb_fname}
+    map_yaml: ${train_data.family_hx.map_yaml}
+    include: ${train_data.family_hx.include}
+    must: ${train_data.family_hx.must}
   transforms:
     - name: no-event
       args:
@@ -50,6 +60,8 @@ model:
   prs: true
   prs_size: 36
   prs_projector: mlp
+  family_hx: true
+  family_hx_map_yaml: ${train_data.family_hx.map_yaml}
   modality_emb: true
   loss:
     ce_beta: 1.0
