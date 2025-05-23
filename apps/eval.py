@@ -10,11 +10,13 @@ from delphi.eval.burden import BurdenArgs
 from delphi.model.transformer import load_model
 from delphi.tokenizer import load_tokenizer_from_ckpt
 from delphi.visualize.calibration import CalibrationArgs
+from delphi.visualize.compare_auc import CompareAUCArgs
 from delphi.visualize.incidence import IncidencePlotConfig
 
 
 class TaskType(Enum):
     AUC = "auc"
+    COMPARE_AUC = "compare_auc"
     CALIBRATION = "calibration"
     INCIDENCE = "incidence"
     BURDEN = "burden"
@@ -22,6 +24,7 @@ class TaskType(Enum):
 
 task_type_to_args_type = {
     TaskType.AUC: CalibrateAUCArgs,
+    TaskType.COMPARE_AUC: CompareAUCArgs,
     TaskType.INCIDENCE: IncidencePlotConfig,
     TaskType.BURDEN: BurdenArgs,
     TaskType.CALIBRATION: CalibrationArgs,
