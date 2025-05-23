@@ -1,16 +1,25 @@
+# # 26202 age at menopause
+# - n95_(menopausal_and_other_perimenopausal_disorders)
+# 26206 alzheimer's disease
 - f00_(dementia_in_alzheimer's_disease)
+# 26210 asthma
 - j45_(asthma)
+# 26212 atrial fibrillation
 - i48_(atrial_fibrillation_and_flutter)
+# 26214 bipolar disorder
 - f31_(bipolar_affective_disorder)
+# 26218 bowel cancer
 - c18_malignant_neoplasm_of_colon
+# 26220 breast cancer
 - c50_malignant_neoplasm_of_breast
+# 26227 coronary artery disease
 - i21_(acute_myocardial_infarction)
+# 26250 low density lipoprotein cholesterol
 - e78_(disorders_of_lipoprotein_metabolism_and_other_lipidaemias)
 # 26225 coeliac disease
 - k90_(intestinal_malabsorption)
 # 26248 ischemic stroke
 - i63_(cerebral_infarction)
-- i64_(stroke,_not_specified_as_haemorrhage_or_infarction)
 - i65_(occlusion_and_stenosis_of_precerebral_arteries,_not_resulting_in_cerebral_infarction)
 - i66_(occlusion_and_stenosis_of_cerebral_arteries,_not_resulting_in_cerebral_infarction)
 # 26229 crohn's disease
@@ -43,7 +52,7 @@
 # 26283 type 1 diabetes
 # 26285 type 2 diabetes
 - e11_(non-insulin-dependent_diabetes_mellitus)
-- e12_(malnutrition-related_diabetes_mellitus)
+- e10_(insulin-dependent_diabetes_mellitus)
 # 26287 ulcerative colitis
 - k51_(ulcerative_colitis)
 # 26289 venous thromboembolitic disease
