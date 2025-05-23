@@ -152,7 +152,7 @@ class GenLogger:
 class TrainLogConfig:
     wandb_log: bool = True
     wandb_project: str = "delphi"
-    run_name: str = "gen" + str(datetime.now().strftime("%Y-%m-%d-%H%M%S"))
+    run_name: str = datetime.now().strftime("%Y-%m-%d-%H%M%S")
     always_ckpt_after_eval: bool = False
     ckpt_interval: int = 1000
     log_interval: int = 1
