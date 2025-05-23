@@ -4,3 +4,4 @@
 [submodule "submit/ebi"]
 	path = submit/ebi
 	url = git@github.com:shawnfan19/ebi-codon-launchpad.git
+	branch = delphi
