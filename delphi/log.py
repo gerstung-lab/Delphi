@@ -2,6 +2,7 @@ import gc
 import os
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Optional
 
 import numpy as np
 import torch
@@ -154,7 +155,7 @@ class TrainLogConfig:
     wandb_project: str = "delphi"
     run_name: str = datetime.now().strftime("%Y-%m-%d-%H%M%S")
     always_ckpt_after_eval: bool = False
-    ckpt_interval: int = 1000
+    ckpt_interval: Optional[int] = 1000
     log_interval: int = 1
 
 
