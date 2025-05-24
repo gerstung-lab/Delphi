@@ -46,7 +46,7 @@ class DelphiEmbedding(nn.Module):
         self.token_drop = nn.Dropout(config.token_dropout)
 
         self.biomarker_embed = nn.ModuleDict()
-        n_modality = 2  # pad + event
+        biomarker_modalities = []
         if config.prs:
             if config.prs_projector == "linear":
                 self.biomarker_embed[module_name(Modality.PRS)] = nn.Linear(
@@ -60,7 +60,7 @@ class DelphiEmbedding(nn.Module):
                 )
             else:
                 raise ValueError(f"unknown prs_projector: {config.prs_projector}")
-            n_modality += 1
+            biomarker_modalities.append(Modality.PRS)
 
         if config.family_hx:
             with open(config.family_hx_map_yaml, "r") as f:
@@ -69,10 +69,17 @@ class DelphiEmbedding(nn.Module):
             self.biomarker_embed[module_name(Modality.FAMILY_HX)] = nn.Embedding(
                 family_hx_vocab_size, config.n_embd, padding_idx=0
             )
-            n_modality += 1
+            biomarker_modalities.append(Modality.FAMILY_HX)
 
         if config.modality_emb:
-            self.mod_embedding = nn.Embedding(n_modality, config.n_embd, padding_idx=0)
+            max_modality_idx = (
+                max([modality.value for modality in biomarker_modalities])
+                if len(biomarker_modalities) > 0
+                else 1
+            )
+            self.mod_embedding = nn.Embedding(
+                max_modality_idx + 1, config.n_embd, padding_idx=0
+            )
 
     def ties_adjusted_delta_t(
         self, t0: torch.Tensor, t1: torch.Tensor, attn_mask: torch.Tensor

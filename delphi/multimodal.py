@@ -4,6 +4,7 @@ import torch
 
 
 class Modality(Enum):
+    # 0 for padding; 1 for event tokens
     PRS = 2
     FAMILY_HX = 3
 
