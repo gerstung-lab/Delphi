@@ -13,6 +13,7 @@ from delphi.data.dataset import (
     remove_trailing_biomarkers,
     train_iter,
 )
+from delphi.env import DELPHI_CKPT_DIR
 from delphi.log import TrainLogConfig, TrainLogger
 from delphi.model.config import DelphiConfig, validate_model_config
 from delphi.model.transformer import Delphi
@@ -21,7 +22,7 @@ from delphi.optim import OptimConfig, configure_optimizers
 
 @dataclass
 class TrainConfig:
-    ckpt_dir: str = "./checkpoints"
+    ckpt_dir: str = "."
     eval_interval: int = 2000
     eval_iters: int = 200
     eval_only: bool = False  # if True, script exits right after the first eval
@@ -61,7 +62,7 @@ def train(cfg: TrainConfig):
     validate_train_config(cfg)
     validate_model_config(cfg.model)
 
-    run_dir = os.path.join(cfg.ckpt_dir, cfg.log.run_name)
+    run_dir = os.path.join(DELPHI_CKPT_DIR, cfg.ckpt_dir, cfg.log.run_name)
 
     device_type = (
         "cuda" if "cuda" in cfg.device else "cpu"

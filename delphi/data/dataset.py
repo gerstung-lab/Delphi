@@ -9,6 +9,7 @@ from scipy.sparse import coo_array
 from delphi.data.family_hx import FamilyHxConfig, FamilyHxDataset
 from delphi.data.prs import PRSConfig, PRSDataset
 from delphi.data.transform import TransformArgs, parse_transform
+from delphi.env import DELPHI_DATA_DIR
 from delphi.multimodal import Modality, modality_X_dtype
 from delphi.tokenizer import load_tokenizer_from_yaml
 
@@ -211,12 +212,13 @@ class Dataset:
         self,
         cfg: UKBDataConfig,
     ):
-        print(f"\nbuilding dataset at {cfg.data_dir}")
-        tokenizer_path = os.path.join(cfg.data_dir, cfg.tokenizer_fname)
+        self.data_dir = os.path.join(DELPHI_DATA_DIR, cfg.data_dir)
+        print(f"\nbuilding dataset at {self.data_dir}")
+        tokenizer_path = os.path.join(self.data_dir, cfg.tokenizer_fname)
         print(f" – loading tokenizer from {tokenizer_path}")
         self.tokenizer = load_tokenizer_from_yaml(tokenizer_path)
 
-        memmap_path = os.path.join(cfg.data_dir, cfg.memmap_fname)
+        memmap_path = os.path.join(self.data_dir, cfg.memmap_fname)
         data = np.fromfile(memmap_path, dtype=np.uint32).reshape(-1, 3)
         print(f" – loading memmap from {memmap_path}")
 
@@ -237,7 +239,7 @@ class Dataset:
 
         self.mod_ds = {}
         if cfg.prs.include or cfg.prs.must:
-            prs_path = os.path.join(cfg.data_dir, cfg.prs.lmdb_fname)
+            prs_path = os.path.join(self.data_dir, cfg.prs.lmdb_fname)
             assert os.path.exists(prs_path)
             print(f" – found prs lmdb dataset at {prs_path}")
             prs_dataset = PRSDataset(db_path=prs_path)
@@ -254,7 +256,7 @@ class Dataset:
                 self.start_pos = self.start_pos[keep_participants]
 
         if cfg.family_hx.include or cfg.family_hx.must:
-            family_hx_path = os.path.join(cfg.data_dir, cfg.family_hx.lmdb_fname)
+            family_hx_path = os.path.join(self.data_dir, cfg.family_hx.lmdb_fname)
             assert os.path.exists(family_hx_path)
             print(f" – found family_hx lmdb dataset at {family_hx_path}")
             family_hx_dataset = FamilyHxDataset(

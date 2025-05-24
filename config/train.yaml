@@ -1,4 +1,3 @@
-ckpt_dir: ${oc.env:DELPHI_CKPT_DIR,checkpoints}
 eval_interval: 250 # keep frequent because we'll overfit
 eval_iters: 25
 eval_only: false
@@ -6,11 +5,11 @@ init_from: scratch
 seed: 42
 gradient_accumulation_steps: 1
 batch_size: 128
-device: mps
+device: cuda
 
 data_fraction: 1.0
 train_data:
-  data_dir: ${oc.env:DELPHI_DATA_DIR,data}/ukb_real_data
+  data_dir: ukb_real_data
   memmap_fname: train.bin
   tokenizer_fname: tokenizer.yaml
   prs:
@@ -28,7 +27,7 @@ train_data:
         interval_in_years: 5
         mode: random
 val_data:
-  data_dir: ${oc.env:DELPHI_DATA_DIR,data}/ukb_real_data
+  data_dir: ukb_real_data
   memmap_fname: val.bin
   tokenizer_fname: tokenizer.yaml
   prs:

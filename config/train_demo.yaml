@@ -1,4 +1,3 @@
-ckpt_dir: ${oc.env:DELPHI_CKPT_DIR,checkpoints}
 eval_interval: 250 # keep frequent because we'll overfit
 eval_iters: 25
 eval_only: false
@@ -10,7 +9,7 @@ device: mps
 
 data_fraction: 1.0
 train_data:
-  data_dir: data/ukb_simulated_data
+  data_dir: ukb_simulated_data
   memmap_fname: train.bin
   tokenizer_fname: tokenizer.yaml
   transforms:
@@ -19,7 +18,7 @@ train_data:
         interval_in_years: 5
         mode: random
 val_data:
-  data_dir: data/ukb_simulated_data
+  data_dir: ukb_simulated_data
   memmap_fname: val.bin
   tokenizer_fname: tokenizer.yaml
   transforms:
