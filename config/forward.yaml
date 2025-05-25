@@ -1,5 +1,5 @@
 name: forward
-device: mps
+device: cuda
 batch_size: 128
 subsample: null
 use_val_data: true
