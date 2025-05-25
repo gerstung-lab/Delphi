@@ -1,8 +1,9 @@
 import io
 import os
+
+import lmdb
 import numpy as np
 import pandas as pd
-import lmdb
 
 family_hx_dir = "/hps/nobackup/birney/users/sfan/delphi-data/multimodal/family_history"
 father_hx_txt = os.path.join(family_hx_dir, "father_illness.txt")
