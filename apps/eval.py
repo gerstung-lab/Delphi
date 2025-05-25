@@ -1,3 +1,4 @@
+import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any
@@ -42,6 +43,8 @@ class TaskConfig:
 @clock
 def eval(cfg: TaskConfig, ckpt: str):
 
+    ckpt = os.path.join(os.environ["DELPHI_CKPT_DIR"], ckpt)
+    assert os.path.exists(ckpt), f"checkpoint {ckpt} does not exist."
     model, _ = load_model(ckpt)
     tokenizer = load_tokenizer_from_ckpt(ckpt)
 
