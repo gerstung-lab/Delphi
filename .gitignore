@@ -1,5 +1,6 @@
 __pycache__
 .vscode
+.DS_Store
 submission
 log
 checkpoints
@@ -7,7 +8,11 @@ wandb
 common_commands.txt
 data/ukb_real_data
 data/ukb_simulated_data_large
+data/multimodal
+data/.gitattributes
 .ipynb_checkpoints
 logs
 submit/dkfz/exp/*.yaml
 notebook
+.env
+.envrc
