@@ -62,7 +62,9 @@ def train(cfg: TrainConfig):
     validate_train_config(cfg)
     validate_model_config(cfg.model)
 
-    run_dir = os.path.join(DELPHI_CKPT_DIR, cfg.ckpt_dir, cfg.log.run_name)
+    run_dir = os.path.normpath(
+        os.path.join(DELPHI_CKPT_DIR, cfg.ckpt_dir, cfg.log.run_name)
+    )
 
     device_type = (
         "cuda" if "cuda" in cfg.device else "cpu"
