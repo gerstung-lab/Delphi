@@ -9,10 +9,11 @@ blood_txt = os.path.join(
     os.environ["MULTIMODAL_INPUT_DIR"],
     "blood/biomarkers_biochem_bloods_imputed_clean_zscore.txt",
 )
-# data_dir = "/hps/nobackup/birney/users/sfan/delphi-data/ukb_real_data"
+print(f"reading blood mice biomarkers from: {blood_txt}")
 data_dir = os.path.join(os.environ["DELPHI_DATA_DIR"], "ukb_real_data")
-# db_path = "/hps/nobackup/birney/users/sfan/delphi-data/ukb_real_data/blood-mice.lmdb"
+print(f"loading train and val participants from: {data_dir}")
 db_path = os.path.join(os.environ["MULTIMODAL_OUTPUT_DIR"], "blood-mice.lmdb")
+print(f"saving LMDB database to: {db_path}")
 
 
 blood_df = pd.read_csv(blood_txt, sep="\t", index_col="eid")
