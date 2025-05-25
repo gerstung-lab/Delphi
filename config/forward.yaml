@@ -1,9 +1,10 @@
-name: debug_forward
+name: forward
 device: mps
 batch_size: 128
 subsample: null
+use_val_data: true
 data:
-  data_dir: data/ukb_real_data
+  data_dir: ukb_real_data
   memmap_fname: val.bin
   tokenizer_fname: tokenizer.yaml
   prs:

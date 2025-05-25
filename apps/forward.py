@@ -28,6 +28,7 @@ class FeedForwardConfig:
     device: str = "cpu"
     batch_size: int = 512
     subsample: Optional[int] = None
+    use_val_data: bool = False
     data: UKBDataConfig = field(default_factory=UKBDataConfig)
     log: GenLogConfig = field(default_factory=GenLogConfig)
 
@@ -39,8 +40,11 @@ def forward(
     tokenizer: Optional[Tokenizer] = None,
 ) -> None:
 
+    ckpt = os.path.join(os.environ["DELPHI_CKPT_DIR"], ckpt)
+    assert os.path.exists(ckpt), f"checkpoint {ckpt} does not exist."
+
     if model is None:
-        model, _ = load_model(ckpt)
+        model, train_cfg = load_model(ckpt)
     model.eval()
     model.to(cfg.device)
 
@@ -53,7 +57,11 @@ def forward(
     with open(os.path.join(dump_dir, "config.yaml"), "w") as f:
         OmegaConf.save(config=cfg, f=f)
 
-    ds = Dataset(cfg.data)
+    if cfg.use_val_data:
+        data_cfg = train_cfg.val_data
+    else:
+        data_cfg = cfg.data
+    ds = Dataset(data_cfg)
 
     n_participants = len(ds) if cfg.subsample is None else cfg.subsample
 
