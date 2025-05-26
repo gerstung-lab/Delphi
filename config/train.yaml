@@ -12,6 +12,7 @@ train_data:
   data_dir: ukb_real_data
   memmap_fname: train.bin
   tokenizer_fname: tokenizer.yaml
+  seed: 42
   prs:
     lmdb_fname: prs.lmdb
     include: ${model.prs}
@@ -30,6 +31,7 @@ val_data:
   data_dir: ukb_real_data
   memmap_fname: val.bin
   tokenizer_fname: tokenizer.yaml
+  seed: 42
   prs:
     lmdb_fname: ${train_data.prs.lmdb_fname}
     include: ${train_data.prs.include}
