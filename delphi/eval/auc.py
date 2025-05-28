@@ -32,6 +32,7 @@ class CalibrateAUCArgs:
     age_groups: AgeGroups = field(default_factory=AgeGroups)
     min_time_gap: float = 0.1
     box_plot: bool = True
+    seed: int = 42
 
 
 def parse_diseases(diseases: str):
@@ -132,6 +133,8 @@ def auc_by_age_group(
     task_args: CalibrateAUCArgs,
 ) -> tuple:
 
+    rng = np.random.default_rng(task_args.seed)
+
     age_groups = parse_age_groups(task_args.age_groups)
     age_buckets = [(i, j) for i, j in zip(age_groups[:-1], age_groups[1:])]
     l = len(age_buckets)
@@ -158,7 +161,7 @@ def auc_by_age_group(
         ctl_counts[i] = ctl_paths.n_participants
         dis_counts[i] = dis_paths.n_participants
 
-        _, ctl_token_rates = ctl_paths.disease_rate(t0_range=tw, keep="random")
+        _, ctl_token_rates = ctl_paths.disease_rate(t0_range=tw, keep="random", rng=rng)
         _, dis_token_rates = dis_paths.penultimate_disease_rate(disease_token)
         auc_vals[i] = mann_whitney_auc(ctl_token_rates.ravel(), dis_token_rates.ravel())
         token_rates.append((ctl_token_rates, dis_token_rates))

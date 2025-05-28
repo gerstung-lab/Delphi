@@ -9,3 +9,4 @@ task_args:
     start: 40
     end: 85
     step: 5
+  seed: 42
