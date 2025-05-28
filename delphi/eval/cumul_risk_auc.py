@@ -2,7 +2,6 @@ import os
 from dataclasses import asdict, dataclass, field
 
 import numpy as np
-import pandas as pd
 import yaml
 
 from delphi import DAYS_PER_YEAR
@@ -16,6 +15,7 @@ from delphi.eval.auc import (
     parse_age_groups,
     parse_diseases,
 )
+from delphi.eval.utils import write_auc_results
 from delphi.tokenizer import CoreEvents, Gender, Tokenizer
 
 
@@ -173,6 +173,8 @@ def cumul_risk_auc(
 
         for gender, is_gender in is_gender_dict.items():
 
+            csv_path = os.path.join(dis_dump_dir, f"{gender}.csv")
+
             tr = traj[is_gender]
             ctl = ~tr.has_token(dis_token)
             has_passed = tr.has_token(tokenizer[CoreEvents.DEATH.value])
@@ -180,6 +182,9 @@ def cumul_risk_auc(
             ctl_tr, dis_tr = tr[ctl & has_passed], tr[dis]
             n_ctl, n_dis = ctl_tr.n_participants, dis_tr.n_participants
             if n_ctl == 0 or n_dis == 0:
+                write_auc_results(
+                    auc_val=np.nan, n_ctl=n_ctl, n_dis=n_dis, csv_path=csv_path
+                )
                 continue
 
             ctl_predict_risk = ctl_tr.cumulative_disease_risk()
@@ -225,24 +230,8 @@ def cumul_risk_auc(
             )
             auc_val = mann_whitney_auc(ctl_relative_risk, dis_relative_risk)
 
-            column_types = {
-                "age_group": "string",
-                "auc": "float32",
-                "ctl_counts": "uint32",
-                "dis_counts": "uint32",
-            }
-            df = pd.DataFrame(
-                {
-                    "age_group": ["total"],
-                    "auc": [auc_val],
-                    "ctl_counts": [n_ctl],
-                    "dis_counts": [n_dis],
-                }
-            ).astype(column_types)
-            df.to_csv(
-                os.path.join(dis_dump_dir, f"{gender}.csv"),
-                index=False,
-                float_format="%.3f",
+            write_auc_results(
+                auc_val=auc_val, n_ctl=n_ctl, n_dis=n_dis, csv_path=csv_path
             )
 
     pass

@@ -2,7 +2,6 @@ import os
 from dataclasses import asdict, dataclass, field
 
 import numpy as np
-import pandas as pd
 import yaml
 
 from delphi import DAYS_PER_YEAR
@@ -21,10 +20,13 @@ from delphi.eval.cumul_risk_auc import (
     estimate_model_baseline_rate,
     plot_baseline_rate,
 )
+from delphi.eval.utils import write_auc_results
 from delphi.tokenizer import Gender, Tokenizer
 
 
-def normal_pdf(x, mu, sigma):
+def normal_pdf(x, mu, sigma, eps=1e-6):
+
+    sigma = np.maximum(sigma, eps)
     coef = 1 / (sigma * np.sqrt(2 * np.pi))
     exponent = -0.5 * ((x - mu) / sigma) ** 2
     return coef * np.exp(exponent)
@@ -129,12 +131,19 @@ def norm_risk_auc(
 
         for gender, is_gender in is_gender_dict.items():
 
+            csv_path = os.path.join(dis_dump_dir, f"{gender}.csv")
+
             tr = traj[is_gender]
             ctl = ~tr.has_token(dis_token, token_type=None)
             is_valid = tr.has_any_token(t0_range=(0, None))
             dis = tr.has_token(dis_token, token_type=None)
-            ctl_tr = tr[ctl & is_valid]
-            dis_tr = tr[dis]
+            ctl_tr, dis_tr = tr[ctl & is_valid], tr[dis]
+            n_ctl, n_dis = ctl_tr.n_participants, dis_tr.n_participants
+            if n_ctl == 0 or n_dis < 2:
+                write_auc_results(
+                    auc_val=np.nan, n_ctl=n_ctl, n_dis=n_dis, csv_path=csv_path
+                )
+                continue
 
             if task_args.baseline_estimate == "cohort":
                 co = cohort[is_gender]
@@ -207,22 +216,6 @@ def norm_risk_auc(
             )
             auc_val = mann_whitney_auc(ctl_relative_risk, dis_relative_risk)
 
-            column_types = {
-                "age_group": "string",
-                "auc": "float32",
-                "ctl_counts": "uint32",
-                "dis_counts": "uint32",
-            }
-            df = pd.DataFrame(
-                {
-                    "age_group": ["total"],
-                    "auc": [auc_val],
-                    "ctl_counts": [np.sum(ctl)],
-                    "dis_counts": [np.sum(dis)],
-                }
-            ).astype(column_types)
-            df.to_csv(
-                os.path.join(dis_dump_dir, f"{gender}.csv"),
-                index=False,
-                float_format="%.3f",
+            write_auc_results(
+                auc_val=auc_val, n_ctl=n_ctl, n_dis=n_dis, csv_path=csv_path
             )
