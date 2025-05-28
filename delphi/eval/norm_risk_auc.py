@@ -182,7 +182,7 @@ def norm_risk_auc(
                         mu=mu,
                         sigma=sigma,
                     )
-                    p /= np.sum(p)
+                    p = p / np.sum(p) if np.sum(p) > 0 else np.ones_like(p) / len(p)
                     keep_idx[i] = rng.choice(candidate_idx, p=p)
                 sample_mask = np.zeros_like(sample_mask)
                 sample_mask[np.arange(n_ctl), keep_idx] = 1
