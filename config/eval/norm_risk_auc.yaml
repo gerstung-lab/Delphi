@@ -1,0 +1,12 @@
+task_name: ${task_type}-bl_${task_args.baseline_estimate}-sample_${task_args.sample_control}-seed_${task_args.seed}-step_${task_args.age_groups.step}
+task_type: norm_risk_auc
+task_input: forward
+task_args:
+  disease_lst: config/disease_list/doi.yaml
+  age_groups:
+    start: 40
+    end: 85
+    step: 1
+  sample_control: normal
+  seed: 43
+  baseline_estimate: cohort

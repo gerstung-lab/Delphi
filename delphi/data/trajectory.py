@@ -4,15 +4,14 @@ import numpy as np
 
 OptionalSearchSpace = Optional[Literal["input", "target"]]
 OptionalTimeRange = Tuple[Optional[float], Optional[float]]
+SamplingScheme = Literal["first", "average", "last", "random"]
 
 
 def corrective_indices(T0: np.ndarray, T1: np.ndarray, offset: float):
 
-    # Get shapes
     m, n = T0.shape
     _, p = T1.shape
 
-    # Initialize result array
     C = np.zeros((m, p), dtype=int)
 
     for i in range(m):
@@ -97,8 +96,9 @@ class DiseaseRateTrajectory:
     def _sample_token_mask(
         self,
         token_mask: np.ndarray,
-        keep: Literal["first", "average", "last", "random"] = "average",
-    ):
+        keep: SamplingScheme = "average",
+        rng: Optional[np.random.Generator] = None,
+    ) -> np.ndarray:
 
         token_mask = token_mask.astype(float)
         if keep == "average":
@@ -106,11 +106,16 @@ class DiseaseRateTrajectory:
         elif keep == "first":
             token_mask = token_mask * (np.cumsum(token_mask, axis=1) == 1).astype(float)
         elif keep == "random":
+            assert (
+                rng is not None
+            ), "rng must be provided for random sampling for reproducibility"
             keep_idx = np.zeros((token_mask.shape[0],), dtype=int)
             for i in range(token_mask.shape[0]):
-                keep_idx[i] = np.random.choice(np.nonzero(token_mask[i])[0])
+                keep_idx[i] = rng.choice(np.nonzero(token_mask[i])[0])
             token_mask = np.zeros_like(token_mask)
             token_mask[np.arange(token_mask.shape[0]), keep_idx] = 1
+        elif keep == "last":
+            raise NotImplementedError("sampling scheme 'last' is not implemented yet.")
         else:
             raise ValueError("keep must be either 'first' or 'average'")
 
@@ -184,7 +189,8 @@ class DiseaseRateTrajectory:
         self,
         t0_range: OptionalTimeRange = (None, None),
         t1_range: OptionalTimeRange = (None, None),
-        keep: Literal["first", "average", "last", "random"] = "average",
+        keep: SamplingScheme = "average",
+        rng: Optional[np.random.Generator] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         computes the token rates for a specific input/target token in the specified time range
@@ -202,11 +208,11 @@ class DiseaseRateTrajectory:
 
         assert self.has_any_token(
             t0_range=t0_range, t1_range=t1_range
-        ).all(), "no tokens in the specified time range"
+        ).all(), "some participants have no tokens in the specified time range"
 
         in_time_range = self._in_time_range(t0_range=t0_range, t1_range=t1_range)
         in_time_range = in_time_range.astype(float)
-        in_time_range = self._sample_token_mask(in_time_range, keep=keep)
+        in_time_range = self._sample_token_mask(in_time_range, keep=keep, rng=rng)
 
         t0 = np.sum(self.T0 * in_time_range, axis=1)
         y1 = np.sum(self.Y_t1 * in_time_range, axis=1)
@@ -229,3 +235,20 @@ class DiseaseRateTrajectory:
         y1 = np.sum(self.Y_t1 * token_mask, axis=1)
 
         return t0, y1
+
+    def cumulative_disease_risk(
+        self,
+        until: Optional[np.ndarray] = None,
+    ):
+        delta_t = self.T1 - self.T0
+        delta_t[self.T0 == -10000] = 0
+
+        if until is not None:
+            assert until.ndim == 1, "until must be a 1D array"
+            until = until[:, np.newaxis]
+            until = np.broadcast_to(until, self.T0.shape)
+            delta_t = np.clip((until - self.T0), 0, delta_t)
+
+        cumulative_risk = np.sum(self.Y_t1 * delta_t, axis=1)
+
+        return cumulative_risk
