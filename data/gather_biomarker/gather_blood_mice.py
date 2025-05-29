@@ -5,6 +5,8 @@ import lmdb
 import numpy as np
 import pandas as pd
 
+from delphi.data.lmdb import get_all_pids
+
 blood_txt = os.path.join(
     os.environ["MULTIMODAL_INPUT_DIR"],
     "blood/biomarkers_biochem_bloods_imputed_clean_zscore.txt",
@@ -12,9 +14,12 @@ blood_txt = os.path.join(
 print(f"reading blood mice biomarkers from: {blood_txt}")
 data_dir = os.path.join(os.environ["DELPHI_DATA_DIR"], "ukb_real_data")
 print(f"loading train and val participants from: {data_dir}")
-db_path = os.path.join(os.environ["MULTIMODAL_OUTPUT_DIR"], "blood-mice.lmdb")
-print(f"saving LMDB database to: {db_path}")
-
+assess_date_db_path = os.path.join(
+    os.environ["MULTIMODAL_OUTPUT_DIR"], "assess-date.lmdb"
+)
+print(f"loading assessment date from: {assess_date_db_path}")
+blood_db_path = os.path.join(os.environ["MULTIMODAL_OUTPUT_DIR"], "blood-mice.lmdb")
+print(f"saving LMDB database to: {blood_db_path}")
 
 blood_df = pd.read_csv(blood_txt, sep="\t", index_col="eid")
 blood_df = blood_df.drop(blood_df.columns[0], axis=1)  # drop the first column (eid)
@@ -24,6 +29,11 @@ blood_P = blood_df.index.values
 assert blood_df.index.is_unique
 print(f"blood mice participants: {len(blood_P)}")
 blood_X = blood_df.values
+
+assess_date_P = get_all_pids(db_path=assess_date_db_path)
+assert np.isin(
+    blood_P, assess_date_P
+).all(), "some blood mice participants not in assess date database"
 
 train_PTX = np.memmap(
     os.path.join(data_dir, "train.bin"), dtype=np.uint32, mode="r"
@@ -49,14 +59,14 @@ print(f"estimated database size: {estimated_size / (1024**3):.2f} GB")
 print(f"using map_size: {map_size / (1024**3):.2f} GB")
 
 
-if os.path.exists(db_path):
-    print(f"found existing LMDB directory: {db_path}")
+if os.path.exists(blood_db_path):
+    print(f"found existing LMDB directory: {blood_db_path}")
     import shutil
 
-    shutil.rmtree(db_path)
-    print(f"deleted existing LMDB directory: {db_path}")
+    shutil.rmtree(blood_db_path)
+    print(f"deleted existing LMDB directory: {blood_db_path}")
 
-env = lmdb.open(db_path, map_size=map_size)
+env = lmdb.open(blood_db_path, map_size=map_size)
 
 with env.begin(write=True) as txn:
     for i in range(blood_P.shape[0]):
