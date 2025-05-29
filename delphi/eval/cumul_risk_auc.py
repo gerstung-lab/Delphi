@@ -63,7 +63,8 @@ def plot_baseline_rate(
     plt.plot(time_bins[:-1] / DAYS_PER_YEAR, baseline_rates, marker="o")
     plt.xlabel("time (year)")
     plt.ylabel("baseline Rate")
-    plt.yscale("log", base=10)
+    if baseline_rates.max() > 0:
+        plt.yscale("log", base=10)
     plt.grid()
     plt.savefig(save_path, bbox_inches="tight", dpi=300)
     plt.close()
