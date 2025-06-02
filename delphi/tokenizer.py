@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Union
 
@@ -36,6 +36,7 @@ class Tokenizer:
 
     def __init__(self, tokenizer_schema: TokenizerSchema):
 
+        self.tokenizer_schema = tokenizer_schema
         self.version = tokenizer_schema.version
         self.mapping = tokenizer_schema.mapping
 
@@ -97,6 +98,19 @@ class Tokenizer:
             if token not in self.disease_ids:
                 raise KeyError(f"disease ID {token} not found in tokenizer.")
             return self.id2disease[token]
+
+    def save_to_yaml(
+        self,
+        filepath: str,
+    ) -> None:
+
+        with open(filepath, "w") as f:
+            yaml.dump(
+                asdict(self.tokenizer_schema),
+                f,
+                default_flow_style=False,
+                sort_keys=False,
+            )
 
 
 def load_tokenizer_from_yaml(

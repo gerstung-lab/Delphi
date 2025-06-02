@@ -203,6 +203,7 @@ def train(cfg: TrainConfig):
         exp_cfg=asdict(cfg),
         dump_dir=run_dir,
         model=model,  # type: ignore
+        tokenizer=train_ds.tokenizer,
         optimizer=optimizer,
         scheduler=scheduler,
     )
