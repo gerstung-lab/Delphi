@@ -1,0 +1,9 @@
+menarche: 1
+menopause: 2
+parity_zero: 3
+parity_one: 4
+parity_two: 5
+parity_three_or_more: 6
+first_live_birth: 7
+miscarriage_one: 8
+miscarriage_multiple: 9

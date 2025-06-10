@@ -1,0 +1,102 @@
+age_menarche:
+  id: 2714
+  unknown:
+    - -3 # prefer not to answer
+    - -1 # do not know
+had_ocp:
+  id: 2784
+  yes: 1
+  no: 0
+  unknown:
+    - -3 # prefer not to answer
+    - -1 # do not know
+age_start_ocp:
+  id: 2794
+  unknown:
+    - -3 # prefer not to answer
+    - -1 # do not know
+number_of_live_births:
+  id: 2734
+  unknown:
+    - -3 # prefer not to answer
+age_primiparous:
+  id: 3872
+  unknown:
+    - -4 # do not remember
+    - -3 # prefer not to answer
+age_first_live_birth:
+  id: 2754
+  unknown:
+    - -4 # do not remember
+    - -3 # prefer not to answer
+had_stillbirth_miscarriage_termination:
+  id: 2774
+  yes: 1
+  no: 0
+  unknown:
+    - -3 # prefer not to answer
+    - -1 # do not know
+number_stillbirths:
+  id: 3829
+  unknown:
+    - -3 # prefer not to answer
+    - -1 # do not know
+number_miscarriages:
+  id: 3839
+  unknown:
+    - -3 # prefer not to answer
+    - -1 # do not know
+number_terminations:
+  id: 3849
+  unknown:
+    - -3 # prefer not to answer
+    - -1 # do not know
+had_hysterectomy:
+  id: 3591
+  yes: 1
+  no: 0
+  unknown:
+    - -5 # not sure
+    - -3 # prefer not to answer
+age_hysterectomy:
+  id: 2824
+  unknown:
+    - -3 # prefer not to answer
+    - -1 # do not know
+had_oophorectomy:
+  id: 2834
+  yes: 1
+  no: 0
+  unknown:
+    - -3 # prefer not to answer
+    - -1 # do not know
+age_oophorectomy:
+  id: 2844
+  unknown:
+    - -3 # prefer not to answer
+    - -1 # do not know
+had_menopause:
+  id: 2724
+  yes: 1
+  no: 0
+  had_hysterectomy: 2
+  unknown:
+    - -3 # prefer not to answer
+    - 3 # not sure - other reason
+age_menopause:
+  id: 3581
+  unknown:
+    - -3 # prefer not to answer
+    - -1 # do not know
+had_hrt:
+  id: 2814
+  yes: 1
+  no: 0
+  unknown:
+    - -3 # prefer not to answer
+    - -1 # do not know
+age_start_hrt:
+  id: 3536
+  unknown:
+    - -3 # prefer not to answer
+    - -1 # do not know

@@ -1,88 +1,83 @@
-import io
 import os
+from pathlib import Path
 
-import lmdb
 import numpy as np
 import pandas as pd
+import yaml
+from utils import (
+    MULTIMODAL_INPUT_DIR,
+    MULTIMODAL_OUTPUT_DIR,
+    all_ukb_participants,
+    assessment_age,
+)
 
-from delphi.data.lmdb import get_all_pids
+from delphi.data.lmdb import data_key, estimate_write_size, time_key, write_lmdb
 
+blood_panel_dir = "data/gather_biomarker/blood/panel"
 blood_txt = os.path.join(
-    os.environ["MULTIMODAL_INPUT_DIR"],
-    "blood/biomarkers_biochem_bloods_imputed_clean_zscore.txt",
+    MULTIMODAL_INPUT_DIR,
+    "blood",
+    "biomarkers_biochem_bloods_imputed_clean_zscore.txt",
 )
-print(f"reading blood mice biomarkers from: {blood_txt}")
-data_dir = os.path.join(os.environ["DELPHI_DATA_DIR"], "ukb_real_data")
-print(f"loading train and val participants from: {data_dir}")
-assess_date_db_path = os.path.join(
-    os.environ["MULTIMODAL_OUTPUT_DIR"], "assess-date.lmdb"
-)
-print(f"loading assessment date from: {assess_date_db_path}")
-blood_db_path = os.path.join(os.environ["MULTIMODAL_OUTPUT_DIR"], "blood-mice.lmdb")
-print(f"saving LMDB database to: {blood_db_path}")
 
 blood_df = pd.read_csv(blood_txt, sep="\t", index_col="eid")
-blood_df = blood_df.drop(blood_df.columns[0], axis=1)  # drop the first column (eid)
-print(f"blood mice biomarkers: {blood_df.shape[1]}")
-print(blood_df.columns)
-blood_P = blood_df.index.values
 assert blood_df.index.is_unique
-print(f"blood mice participants: {len(blood_P)}")
-blood_X = blood_df.values
+blood_df = blood_df.drop(blood_df.columns[0], axis=1)  # drop the first column (eid)
+blood_df.columns = blood_df.columns.str.replace(".txt", "")
 
-assess_date_P = get_all_pids(db_path=assess_date_db_path)
-assert np.isin(
-    blood_P, assess_date_P
-).all(), "some blood mice participants not in assess date database"
+all_biomarkers = list(blood_df.columns)
+with open(os.path.join(blood_panel_dir, "blood_all.yaml"), "w") as f:
+    yaml.dump(
+        all_biomarkers,
+        f,
+        default_flow_style=False,
+        sort_keys=False,
+    )
+all_biomarkers = np.array(all_biomarkers)
 
-train_PTX = np.memmap(
-    os.path.join(data_dir, "train.bin"), dtype=np.uint32, mode="r"
-).reshape(-1, 3)
-train_P = np.unique(train_PTX[:, 0])
-print(f"train participants: {train_P.shape}")
-val_PTX = np.memmap(
-    os.path.join(data_dir, "val.bin"), dtype=np.uint32, mode="r"
-).reshape(-1, 3)
-val_P = np.unique(val_PTX[:, 0])
-print(f"val participants: {val_P.shape}")
-all_P = np.concatenate([train_P, val_P])
-print(f"participants without blood mice: {(~np.isin(all_P, blood_P)).sum()}")
+participants = all_ukb_participants()
+participants_with_blood = blood_df.index.astype(int).to_numpy()
+participants_with_assessment_age = list(assessment_age.keys())
 
-# estimate map_size
-test_buffer = io.BytesIO()
-np.save(test_buffer, blood_X[0, :])
-array_size = len(test_buffer.getvalue())
-record_size = len(str(int(blood_P[0])).encode("utf-8")) + array_size + 16
-estimated_size = record_size * blood_P.shape[0]
-map_size = int(estimated_size * 1.5)  # 50% safety margin
-print(f"estimated database size: {estimated_size / (1024**3):.2f} GB")
-print(f"using map_size: {map_size / (1024**3):.2f} GB")
+blood_panel_yamls = Path(blood_panel_dir).glob("*.yaml")
+for blood_panel_yaml in blood_panel_yamls:
 
+    blood_panel = blood_panel_yaml.stem
 
-if os.path.exists(blood_db_path):
-    print(f"found existing LMDB directory: {blood_db_path}")
-    import shutil
+    with open(blood_panel_yaml, "r") as file:
+        panel_biomarkers = yaml.safe_load(file)
 
-    shutil.rmtree(blood_db_path)
-    print(f"deleted existing LMDB directory: {blood_db_path}")
+    blood_panel_db_path = os.path.join(MULTIMODAL_OUTPUT_DIR, f"{blood_panel}.lmdb")
+    print(f"saving lmdb database to: {blood_panel_db_path}")
 
-env = lmdb.open(blood_db_path, map_size=map_size)
+    blood_panel_db = {}
+    for pid in participants:
+        blood_panel_db[data_key(pid)] = np.array([], dtype=np.float32)
+        blood_panel_db[time_key(pid)] = np.array([], dtype=np.uint32)
 
-with env.begin(write=True) as txn:
-    for i in range(blood_P.shape[0]):
-        participant_id = str(int(blood_P[i])).encode(
-            "utf-8"
-        )  # Convert the first column to the key (as a string)
-        blood = blood_X[i, :]  # Remaining columns are the values
+    n_blood_missing = len(set(participants) - set(participants_with_blood))
+    n_age_missing = len(set(participants) - set(participants_with_assessment_age))
+    valid_participants = (
+        set(participants)
+        & set(participants_with_blood)
+        & set(participants_with_assessment_age)
+    )
 
-        # Convert values to bytes using pickle or np.save
-        buffer = io.BytesIO()
-        np.save(buffer, blood)
-        value_bytes = buffer.getvalue()
+    for pid in valid_participants:
+        blood_val = blood_df.loc[pid, list(panel_biomarkers)].to_numpy()
+        pid_data = blood_val[np.newaxis, :].astype(np.float32)
+        blood_time = assessment_age[pid]
+        pid_time = np.array([blood_time], dtype=np.uint32)
+        blood_panel_db[data_key(pid)] = pid_data
+        blood_panel_db[time_key(pid)] = pid_time
 
-        txn.put(participant_id, value_bytes)
+    print(f"number of participants with missing blood data: {n_blood_missing}")
+    print(f"number of participants with missing age data: {n_age_missing}")
 
-print(participant_id)
-print(blood)
+    map_size = estimate_write_size(db=blood_panel_db, n_samples=10)
 
-env.close()
+    write_lmdb(
+        db=blood_panel_db,
+        db_path=blood_panel_db_path,
+        map_size=map_size,
+    )
