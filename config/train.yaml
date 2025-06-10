@@ -11,17 +11,25 @@ data_fraction: 1.0
 train_data:
   data_dir: ukb_real_data
   memmap_fname: train.bin
-  tokenizer_fname: tokenizer.yaml
   seed: 42
-  prs:
-    lmdb_fname: prs.lmdb
-    include: ${model.prs}
-    must: true
-  family_hx:
-    lmdb_fname: family_hx.lmdb
-    map_yaml: config/family_hx/map.yaml
-    include: ${model.family_hx}
-    must: true
+  biomarker_dir: ukb_real_data/biomarkers
+  biomarkers:
+    prs: ${model.biomarkers.prs.n_token}
+    family_hx: ${model.biomarkers.family_hx.n_token}
+    # blood_all: ${model.biomarkers.blood_all.n_token}
+    wbc: ${model.biomarkers.wbc.n_token}
+    lipid: ${model.biomarkers.lipid.n_token}
+    lft: ${model.biomarkers.lft.n_token}
+    renal: ${model.biomarkers.renal.n_token}
+    hba1c: ${model.biomarkers.hba1c.n_token}
+    crp: ${model.biomarkers.crp.n_token}
+    urate: ${model.biomarkers.urate.n_token}
+    cysc: ${model.biomarkers.cysc.n_token}
+    apo: ${model.biomarkers.apo.n_token}
+    vitd: ${model.biomarkers.vitd.n_token}
+    dht: ${model.biomarkers.dht.n_token}
+    shbg: ${model.biomarkers.shbg.n_token}
+    igf1: ${model.biomarkers.igf1.n_token}
   transforms:
     - name: no-event
       args:
@@ -30,17 +38,25 @@ train_data:
 val_data:
   data_dir: ukb_real_data
   memmap_fname: val.bin
-  tokenizer_fname: tokenizer.yaml
   seed: 42
-  prs:
-    lmdb_fname: ${train_data.prs.lmdb_fname}
-    include: ${train_data.prs.include}
-    must: ${train_data.prs.must}
-  family_hx:
-    lmdb_fname: ${train_data.family_hx.lmdb_fname}
-    map_yaml: ${train_data.family_hx.map_yaml}
-    include: ${train_data.family_hx.include}
-    must: ${train_data.family_hx.must}
+  biomarker_dir: ukb_real_data/biomarkers
+  biomarkers:
+    prs: ${model.biomarkers.prs.n_token}
+    family_hx: ${model.biomarkers.family_hx.n_token}
+    # blood_all: ${model.biomarkers.blood_all.n_token}
+    wbc: ${model.biomarkers.wbc.n_token}
+    lipid: ${model.biomarkers.lipid.n_token}
+    lft: ${model.biomarkers.lft.n_token}
+    renal: ${model.biomarkers.renal.n_token}
+    hba1c: ${model.biomarkers.hba1c.n_token}
+    crp: ${model.biomarkers.crp.n_token}
+    urate: ${model.biomarkers.urate.n_token}
+    cysc: ${model.biomarkers.cysc.n_token}
+    apo: ${model.biomarkers.apo.n_token}
+    vitd: ${model.biomarkers.vitd.n_token}
+    dht: ${model.biomarkers.dht.n_token}
+    shbg: ${model.biomarkers.shbg.n_token}
+    igf1: ${model.biomarkers.igf1.n_token}
   transforms:
     - name: no-event
       args:
@@ -57,12 +73,76 @@ model:
   t_min: 0.1
   bias: true
   mask_ties: true
-  ignore_tokens: [0, 2 ,3, 4, 5, 6, 7, 8, 9, 10, 11, 12] # ignore padding and lifestyle tokens
-  prs: true
-  prs_size: 36
-  prs_projector: mlp
-  family_hx: true
-  family_hx_map_yaml: ${train_data.family_hx.map_yaml}
+  ignore_tokens:
+    - padding
+    - male
+    - female
+    - config/disease_list/lifestyle.yaml
+  biomarkers:
+    prs:
+      projector: linear
+      input_size: 36
+      n_token: 1
+    family_hx:
+      projector: embed
+      vocab_size: 15
+      n_token: null
+    # blood_all:
+    #   projector: linear
+    #   input_size: 57
+    #   n_token: 1
+    wbc:
+      projector: linear
+      input_size: 31
+      n_token: 1
+    lipid:
+      projector: linear
+      input_size: 4
+      n_token: 1
+    lft:
+      projector: linear
+      input_size: 7
+      n_token: 1
+    renal:
+      projector: linear
+      input_size: 6
+      n_token: 1
+    hba1c:
+      projector: linear
+      input_size: 1
+      n_token: 1
+    crp:
+      projector: linear
+      input_size: 1
+      n_token: 1
+    urate:
+      projector: linear
+      input_size: 1
+      n_token: 1
+    cysc:
+      projector: linear
+      input_size: 1
+      n_token: 1
+    apo:
+      projector: linear
+      input_size: 2
+      n_token: 1
+    vitd:
+      projector: linear
+      input_size: 1
+      n_token: 1
+    dht:
+      projector: linear
+      input_size: 1
+      n_token: 1
+    shbg:
+      projector: linear
+      input_size: 1
+      n_token: 1
+    igf1:
+      projector: linear
+      input_size: 1
+      n_token: 1
   modality_emb: true
   loss:
     ce_beta: 1.0

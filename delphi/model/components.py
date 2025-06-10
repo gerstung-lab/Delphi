@@ -1,11 +1,11 @@
 import math
+from ast import Not
 from typing import Optional
 
 import torch
 import torch.nn as nn
-import yaml
 
-from delphi.model.config import DelphiConfig
+from delphi.model.config import BiomarkerEmbedConfig, DelphiConfig
 from delphi.multimodal import Modality, module_name
 
 
@@ -34,6 +34,56 @@ class AgeEncoding(nn.Module):
         return y  # self.dropout(x)
 
 
+class BiomarkerEmbedding(nn.Module):
+
+    def __init__(self, config: BiomarkerEmbedConfig, n_embed: int) -> None:
+
+        super().__init__()
+        self.config = config
+        if config.n_token is not None and config.n_token > 1:
+            raise NotImplementedError(
+                "n_token > 1 is not yet implemented for BiomarkerEmbedding"
+            )
+
+        if config.projector == "linear":
+            assert (
+                config.input_size is not None
+            ), "input_size must be specified for linear projector"
+            self.projector = nn.Linear(config.input_size, n_embed, bias=False)
+        elif config.projector == "mlp":
+            layers = []
+            assert (
+                config.input_size is not None
+            ), "input_size must be specified for mlp projector"
+            assert (
+                config.n_layers is not None
+            ), "n_layers must be specified for mlp projector"
+            assert (
+                config.n_hidden is not None
+            ), "n_hidden must be specified for mlp projector"
+            for i in range(config.n_layers):
+                in_size = config.input_size if i == 0 else config.n_hidden
+                out_size = n_embed if i == config.n_layers - 1 else config.n_hidden
+                layers.append(nn.Linear(in_size, out_size, bias=False))
+                if i < config.n_layers - 1:
+                    layers.append(nn.ReLU())
+            self.projector = nn.Sequential(*layers)
+        elif config.projector == "embed":
+            assert (
+                config.vocab_size is not None
+            ), "vocab_size must be specified for embed projector"
+            self.projector = nn.Embedding(config.vocab_size, n_embed, padding_idx=0)
+        else:
+            raise ValueError(f"unknown projector type: {config.projector}")
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.config.projector == "embed":
+            x = x[x != 0]  # remove padding
+            return self.projector(x)
+
+        return self.projector(x)
+
+
 class DelphiEmbedding(nn.Module):
 
     def __init__(self, config: DelphiConfig) -> None:
@@ -47,29 +97,12 @@ class DelphiEmbedding(nn.Module):
 
         self.biomarker_embed = nn.ModuleDict()
         biomarker_modalities = []
-        if config.prs:
-            if config.prs_projector == "linear":
-                self.biomarker_embed[module_name(Modality.PRS)] = nn.Linear(
-                    config.prs_size, config.n_embd, bias=False
-                )
-            elif config.prs_projector == "mlp":
-                self.biomarker_embed[module_name(Modality.PRS)] = nn.Sequential(
-                    nn.Linear(config.prs_size, 64, bias=False),
-                    nn.ReLU(),
-                    nn.Linear(64, config.n_embd, bias=False),
-                )
-            else:
-                raise ValueError(f"unknown prs_projector: {config.prs_projector}")
-            biomarker_modalities.append(Modality.PRS)
-
-        if config.family_hx:
-            with open(config.family_hx_map_yaml, "r") as f:
-                map_config = yaml.safe_load(f)
-            family_hx_vocab_size = max(map_config.values()) + 1
-            self.biomarker_embed[module_name(Modality.FAMILY_HX)] = nn.Embedding(
-                family_hx_vocab_size, config.n_embd, padding_idx=0
+        for biomarker, biomarker_cfg in config.biomarkers.items():
+            bm_key = module_name(Modality[biomarker.upper()])
+            self.biomarker_embed[bm_key] = BiomarkerEmbedding(
+                config=biomarker_cfg, n_embed=config.n_embd
             )
-            biomarker_modalities.append(Modality.FAMILY_HX)
+            biomarker_modalities.append(Modality[biomarker.upper()])
 
         if config.modality_emb:
             max_modality_idx = (

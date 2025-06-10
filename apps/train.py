@@ -10,12 +10,12 @@ from delphi.data.dataset import (
     Dataset,
     UKBDataConfig,
     load_sequences,
-    remove_trailing_biomarkers,
+    pad_trailing_biomarkers,
     train_iter,
 )
 from delphi.env import DELPHI_CKPT_DIR
 from delphi.log import TrainLogConfig, TrainLogger
-from delphi.model.config import DelphiConfig, validate_model_config
+from delphi.model.config import DelphiConfig, parse_ignore_tokens, validate_model_config
 from delphi.model.transformer import Delphi
 from delphi.optim import OptimConfig, configure_optimizers
 
@@ -51,10 +51,26 @@ class TrainConfig:
     log: TrainLogConfig = field(default_factory=TrainLogConfig)
 
 
-def validate_train_config(cfg: TrainConfig):
+def validate_train_config(cfg: TrainConfig) -> None:
 
-    assert cfg.model.prs == cfg.train_data.prs.include
-    assert cfg.model.family_hx == cfg.train_data.family_hx.include
+    train_modalities = []
+    for modality in cfg.train_data.biomarkers.keys():
+        train_modalities.append(modality)
+    train_modalities = set(train_modalities)
+    print(f"biomarker modalities to load for training: {train_modalities}")
+
+    model_modalities = set(cfg.model.biomarkers.keys())
+    print(f"biomarker modules in model: {model_modalities}")
+    assert (
+        train_modalities == model_modalities
+    ), "train modalities must match model modalities"
+
+    val_modalities = []
+    for modality in cfg.val_data.biomarkers.keys():
+        val_modalities.append(modality)
+    val_modalities = set(val_modalities)
+    print(f"biomarker modalities to load for validation: {val_modalities}")
+    assert val_modalities.issubset(train_modalities)
 
 
 def train(cfg: TrainConfig):
@@ -99,6 +115,10 @@ def train(cfg: TrainConfig):
     train_loader = load_sequences(it=train_it, dataset=train_ds)
 
     val_ds = Dataset(cfg.val_data)
+
+    print(f"ignored tokens: {cfg.model.ignore_tokens}")
+    ignore_tokens = parse_ignore_tokens(cfg.model.ignore_tokens)
+    cfg.model.ignore_tokens = train_ds.tokenizer.encode(ignore_tokens)  # type: ignore
 
     iter_num = 0
 
@@ -167,15 +187,14 @@ def train(cfg: TrainConfig):
             eval_loss[split] = {"loss_ce": 0, "loss_dt": 0}
             for _ in range(cfg.eval_iters):
 
-                _, X, T, M, biomarker_X = next(loader)
+                _, X, T, M, biomarker_X, _, _ = next(loader)
+                X, T, M = pad_trailing_biomarkers(X, T, M)
                 X, T, M = X.to(cfg.device), T.to(cfg.device), M.to(cfg.device)
                 biomarker_X = {k: v.to(cfg.device) for k, v in biomarker_X.items()}
 
                 X_t0, X_t1 = X[:, :-1], X[:, 1:]
                 T_t0, T_t1 = T[:, :-1], T[:, 1:]
-
-                biomarker_X = remove_trailing_biomarkers(M=M, biomarker_X=biomarker_X)
-                M_t0, M_t1 = M[:, :-1], M[:, 1:]
+                M_t0, _ = M[:, :-1], M[:, 1:]
 
                 with ctx:
                     _, loss, _ = model(
@@ -222,15 +241,14 @@ def train(cfg: TrainConfig):
         # and using the GradScaler if data type is float16``
         for _ in range(cfg.gradient_accumulation_steps):
 
-            _, X, T, M, biomarker_X = next(train_loader)
+            _, X, T, M, biomarker_X, _, _ = next(train_loader)
+            X, T, M = pad_trailing_biomarkers(X, T, M)
             X, T, M = X.to(cfg.device), T.to(cfg.device), M.to(cfg.device)
             biomarker_X = {k: v.to(cfg.device) for k, v in biomarker_X.items()}
 
             X_t0, X_t1 = X[:, :-1], X[:, 1:]
             T_t0, T_t1 = T[:, :-1], T[:, 1:]
-
-            biomarker_X = remove_trailing_biomarkers(M=M, biomarker_X=biomarker_X)
-            M_t0, M_t1 = M[:, :-1], M[:, 1:]
+            M_t0, _ = M[:, :-1], M[:, 1:]
 
             with ctx:
                 _, loss, _ = model(

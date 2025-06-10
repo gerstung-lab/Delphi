@@ -79,12 +79,13 @@ class AugmentLifestyle:
         self,
         tokenizer: Tokenizer,
         seed: int,
+        lifestyle_tokens: list[int],
         min_time: float = -20 * DAYS_PER_YEAR,
         max_time: float = 40 * DAYS_PER_YEAR,
     ):
 
         self.rng = np.random.default_rng(seed)
-        self.lifestyle_tokens = np.array(tokenizer.lifestyle_tokens)
+        self.lifestyle_tokens = np.array(lifestyle_tokens)
         self.min_time = min_time
         self.max_time = max_time
 

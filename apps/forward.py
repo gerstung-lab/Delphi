@@ -80,7 +80,7 @@ def forward(
     loader = tqdm(loader, total=math.ceil(n_participants / cfg.batch_size), leave=True)
 
     with torch.no_grad():
-        for P, X, T, M, biomarker in loader:
+        for P, X, T, M, biomarker, _ in loader:
             biomarker = {k: v.to(cfg.device) for k, v in biomarker.items()}
             batch_logits, _, _ = model(
                 idx=X.to(cfg.device),

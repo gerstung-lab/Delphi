@@ -3,15 +3,16 @@ from dataclasses import dataclass, field
 from typing import Iterator, List, Optional
 
 import numpy as np
+import pandas as pd
 import torch
+import yaml
 from scipy.sparse import coo_array
 
-from delphi.data.family_hx import FamilyHxConfig, FamilyHxDataset
-from delphi.data.prs import PRSConfig, PRSDataset
+from delphi.data.lmdb import BiomarkerLMDB, collate_batch_data, collate_batch_time
 from delphi.data.transform import TransformArgs, parse_transform
 from delphi.env import DELPHI_DATA_DIR
-from delphi.multimodal import Modality, modality_X_dtype
-from delphi.tokenizer import load_tokenizer_from_yaml
+from delphi.multimodal import Modality
+from delphi.tokenizer import Tokenizer, update_tokenizer
 
 
 def get_p2i(data):
@@ -79,33 +80,32 @@ def squeeze(X: np.ndarray, T: np.ndarray):
 def biomarker_to_tensor(
     biomarker_X: dict[Modality, np.ndarray],
     biomarker_T: dict[Modality, np.ndarray],
+    biomarker_C: dict[Modality, np.ndarray],
 ):
 
     for modality in biomarker_X.keys():
         m_X = biomarker_X[modality]
         m_T = biomarker_T[modality]
-        biomarker_X[modality] = torch.tensor(m_X, dtype=modality_X_dtype[modality])  # type: ignore
-        biomarker_T[modality] = torch.tensor(m_T, dtype=torch.float)  # type: ignore
+        biomarker_X[modality] = torch.from_numpy(m_X)  # type: ignore
+        biomarker_T[modality] = torch.tensor(m_T)  # type: ignore
+        biomarker_C[modality] = torch.from_numpy(biomarker_C[modality])  # type: ignore
 
-    return biomarker_X, biomarker_T
+    return biomarker_X, biomarker_T, biomarker_C
 
 
-def remove_trailing_biomarkers(
-    M: np.ndarray,
-    biomarker_X: dict[Modality, np.ndarray] = {},
+def pad_trailing_biomarkers(
+    X: torch.Tensor,
+    T: torch.Tensor,
+    M: torch.Tensor,
 ):
 
-    l = M.shape[1]
+    trailing_M = M[:, -1:]
+    if trailing_M.max() > 1:
+        M = torch.cat([M, trailing_M * 0], dim=1)
+        X = torch.cat([X, torch.zeros_like(X[:, :1], dtype=X.dtype)], dim=1)
+        T = torch.cat([T, T[:, -1:]], dim=1)
 
-    for modality in biomarker_X.keys():
-
-        biomarker_idx = torch.nonzero(M == modality.value)
-        is_trailing = biomarker_idx[:, 1] == l - 1
-        biomarker_X[modality] = biomarker_X[modality][~is_trailing]
-
-        assert biomarker_X[modality].shape[0] == (~is_trailing).sum()
-
-    return biomarker_X
+    return X, T, M
 
 
 def multimodal_T_and_X(
@@ -158,7 +158,7 @@ def load_sequences(
 
     for idx in it:
 
-        P, X, T, biomarker_X, biomarker_T = dataset.get_batch(idx)
+        P, X, T, biomarker_X, biomarker_T, biomarker_C = dataset.get_batch(idx)
 
         M, multi_T, multi_X = multimodal_T_and_X(X=X, T=T, biomarker_T=biomarker_T)
 
@@ -174,13 +174,15 @@ def load_sequences(
 
         P = torch.tensor(P, dtype=torch.long)
         multi_X = torch.tensor(multi_X, dtype=torch.long)
-        multi_T = torch.tensor(multi_T, dtype=torch.float)
+        multi_T = torch.tensor(multi_T)
         M = torch.tensor(M, dtype=torch.long)
-        biomarker_X, biomarker_T = biomarker_to_tensor(
-            biomarker_X=biomarker_X, biomarker_T=biomarker_T
+        biomarker_X, biomarker_T, biomarker_C = biomarker_to_tensor(
+            biomarker_X=biomarker_X,
+            biomarker_T=biomarker_T,
+            biomarker_C=biomarker_C,
         )
 
-        yield P, multi_X, multi_T, M, biomarker_X
+        yield P, multi_X, multi_T, M, biomarker_X, biomarker_T, biomarker_C
 
 
 def build_prefetch_loader(loader: Iterator) -> Iterator:
@@ -198,12 +200,38 @@ def build_prefetch_loader(loader: Iterator) -> Iterator:
 @dataclass
 class UKBDataConfig:
     data_dir: str = "data/ukb_simulated_data"
-    memmap_fname: str = "train.bin"
-    tokenizer_fname: str = "tokenizer.yaml"
-    prs: PRSConfig = field(default_factory=PRSConfig)
-    family_hx: FamilyHxConfig = field(default_factory=FamilyHxConfig)
+    subject_list: str = "participants.bin"
+    expansion_pack_dir: str = "data/ukb_simulated_data/expansion_packs"
+    expansion_packs: list[str] = field(default_factory=list)
+    biomarker_dir: str = "data/ukb_simulated_data/biomarkers"
+    biomarkers: dict[str, Optional[int]] = field(default_factory=dict)
     seed: int = 42
     transforms: Optional[List[TransformArgs]] = None
+
+
+class ExpansionPack:
+
+    def __init__(self, path: str, offset: int):
+
+        p2i = pd.read_csv(os.path.join(path, "p2i.csv"), index_col="pid")
+        self.offset = offset
+        self.start_pos = p2i["start_pos"].to_dict()
+        self.seq_len = p2i["seq_len"].to_dict()
+        self.tokens = np.memmap(
+            os.path.join(path, "data.bin"), dtype=np.uint32, mode="r"
+        )
+        self.time_steps = np.memmap(
+            os.path.join(path, "time.bin"), dtype=np.uint32, mode="r"
+        )
+
+    def get_expansion(self, pid: int) -> tuple[np.ndarray, np.ndarray]:
+
+        i = self.start_pos[pid]
+        l = self.seq_len[pid]
+        x_pid = self.tokens[i : i + l] + self.offset
+        t_pid = self.time_steps[i : i + l]
+
+        return x_pid, t_pid
 
 
 class Dataset:
@@ -214,65 +242,55 @@ class Dataset:
     ):
         self.data_dir = os.path.join(DELPHI_DATA_DIR, cfg.data_dir)
         print(f"\nbuilding dataset at {self.data_dir}")
-        tokenizer_path = os.path.join(self.data_dir, cfg.tokenizer_fname)
-        print(f" – loading tokenizer from {tokenizer_path}")
-        self.tokenizer = load_tokenizer_from_yaml(tokenizer_path)
+        tokenizer_path = os.path.join(self.data_dir, "tokenizer.yaml")
+        print(f"\t– loading tokenizer from {tokenizer_path}")
+        with open(tokenizer_path, "r") as f:
+            base_tokenizer = yaml.safe_load(f)
 
-        memmap_path = os.path.join(self.data_dir, cfg.memmap_fname)
-        data = np.fromfile(memmap_path, dtype=np.uint32).reshape(-1, 3)
-        print(f" – loading memmap from {memmap_path}")
+        self.participants = np.memmap(
+            os.path.join(self.data_dir, cfg.subject_list), dtype=np.uint32, mode="r"
+        )
 
-        p2i = get_p2i(data)
-        self.participants = data[:, 0][
-            p2i[:, 0]
-        ]  # todo: investigate duplicate participants
-
-        self.seq_len = p2i[:, 1]
-        assert self.seq_len.size == self.participants.size
-
-        self.start_pos = np.cumsum(p2i[:, 1]) - p2i[:, 1]
-        assert self.start_pos.size == self.participants.size
-
-        self.tokens = data[:, 2] + 1
-        self.time_steps = data[:, 1]
-        assert self.tokens.size == self.time_steps.size
-
-        self.mod_ds = {}
-        if cfg.prs.include or cfg.prs.must:
-            prs_path = os.path.join(self.data_dir, cfg.prs.lmdb_fname)
-            assert os.path.exists(prs_path)
-            print(f" – found prs lmdb dataset at {prs_path}")
-            prs_dataset = PRSDataset(db_path=prs_path)
-            prs_participants = prs_dataset.get_all_pids()
-            if cfg.prs.include:
-                self.mod_ds[Modality.PRS] = prs_dataset
-            if cfg.prs.must:
-                keep_participants = np.isin(self.participants, prs_participants)
-                print(
-                    f"keeping {np.sum(keep_participants)}/{self.participants.size} participants with prs"
-                )
-                self.participants = self.participants[keep_participants]
-                self.seq_len = self.seq_len[keep_participants]
-                self.start_pos = self.start_pos[keep_participants]
-
-        if cfg.family_hx.include or cfg.family_hx.must:
-            family_hx_path = os.path.join(self.data_dir, cfg.family_hx.lmdb_fname)
-            assert os.path.exists(family_hx_path)
-            print(f" – found family_hx lmdb dataset at {family_hx_path}")
-            family_hx_dataset = FamilyHxDataset(
-                db_path=family_hx_path, map_yaml=cfg.family_hx.map_yaml
+        p2i_path = os.path.join(self.data_dir, "p2i.csv")
+        self.p2i = pd.read_csv(p2i_path, index_col="pid")
+        self.start_pos = self.p2i["start_pos"].to_dict()
+        self.seq_len = self.p2i["seq_len"].to_dict()
+        self.tokens = np.memmap(
+            os.path.join(self.data_dir, "data.bin"), dtype=np.uint32, mode="r"
+        )
+        self.tokens += 1
+        self.time_steps = np.memmap(
+            os.path.join(self.data_dir, "time.bin"), dtype=np.uint32, mode="r"
+        )
+        expansion_packs = cfg.expansion_packs
+        expansion_packs.sort()
+        self.expansion_packs = []
+        for pack in expansion_packs:
+            print(f"\t– loading expansion pack: {pack}")
+            pack_path = os.path.join(cfg.expansion_pack_dir, pack)
+            assert os.path.exists(pack_path), FileNotFoundError(
+                f"expansion pack {pack_path} not found"
             )
-            family_hx_participants = family_hx_dataset.get_all_pids()
-            if cfg.family_hx.include:
-                self.mod_ds[Modality.FAMILY_HX] = family_hx_dataset
-            if cfg.family_hx.must:
-                keep_participants = np.isin(self.participants, family_hx_participants)
-                print(
-                    f"keeping {np.sum(keep_participants)}/{self.participants.size} participants with family hx"
-                )
-                self.participants = self.participants[keep_participants]
-                self.seq_len = self.seq_len[keep_participants]
-                self.start_pos = self.start_pos[keep_participants]
+            tokenizer_path = os.path.join(pack_path, "tokenizer.yaml")
+            with open(tokenizer_path, "r") as f:
+                add_tokenizer = yaml.safe_load(f)
+
+            base_tokenizer, offset = update_tokenizer(
+                base_tokenizer=base_tokenizer, add_tokenizer=add_tokenizer
+            )
+            self.expansion_packs.append(ExpansionPack(path=pack_path, offset=offset))
+        self.tokenizer = Tokenizer(base_tokenizer)
+
+        self.biomarker_dir = os.path.join(DELPHI_DATA_DIR, cfg.biomarker_dir)
+        self.mod_ds = {}
+        for modality, n_token in cfg.biomarkers.items():
+            modality = Modality[modality.upper()]
+            print(f"\t– loading biomarker: {modality.name}")
+            lmdb_path = os.path.join(
+                self.biomarker_dir, modality.name.lower() + ".lmdb"
+            )
+            dataset = BiomarkerLMDB(lmdb_path=lmdb_path, n_token=n_token)
+            self.mod_ds[modality] = dataset
 
         self.transforms = []
         if cfg.transforms is not None:
@@ -288,46 +306,45 @@ class Dataset:
 
         return self.participants.size
 
-    def get_raw_batch(self, batch_idx):
-
-        batch_size = batch_idx.size
-        batch_seq_len = self.seq_len[batch_idx]
-        batch_seq_slice = np.concatenate(
-            [
-                np.arange(s, s + l)
-                for s, l in zip(self.start_pos[batch_idx], batch_seq_len)
-            ]
-        )
-        batch_tokens = self.tokens[batch_seq_slice]
-        batch_time_steps = self.time_steps[batch_seq_slice]
-        row_idx = np.repeat(np.arange(batch_size), batch_seq_len)
-        col_idx = np.concatenate([np.arange(length) for length in batch_seq_len])
+    def get_raw_batch(self, batch_idx: np.ndarray):
 
         P = self.participants[batch_idx]
+        X = []
+        T = []
+        for i, pid in enumerate(P):
+            i = self.start_pos[pid]
+            l = self.seq_len[pid]
+            x_pid = self.tokens[i : i + l]
+            t_pid = self.time_steps[i : i + l]
+            for expansion_pack in self.expansion_packs:
+                pack_x_pid, pack_t_pid = expansion_pack.get_expansion(pid)
+                x_pid = np.concatenate((x_pid, pack_x_pid))
+                t_pid = np.concatenate((t_pid, pack_t_pid))
+            X.append(x_pid)
+            T.append(t_pid)
 
-        X = coo_array(
-            (batch_tokens, (row_idx, col_idx)), shape=(batch_size, batch_seq_len.max())
-        ).toarray()
-        T = np.full(X.shape, -10000, dtype=np.float32)
-        T[row_idx, col_idx] = batch_time_steps
+        X = collate_batch_data(X)
+        T = collate_batch_time(T)
 
         biomarker_X = {}
         biomarker_T = {}
+        biomarker_C = {}
         for modality, dataset in self.mod_ds.items():
-            m_X, m_T = dataset.get_raw_batch([str(P_i) for P_i in P])
+            m_X, m_T, m_C = dataset.get_raw_batch([str(P_i) for P_i in P])
             biomarker_X[modality] = m_X
             biomarker_T[modality] = m_T
+            biomarker_C[modality] = m_C
 
-        return P, X, T, biomarker_X, biomarker_T
+        return P, X, T, biomarker_X, biomarker_T, biomarker_C
 
     def get_batch(self, batch_idx):
 
-        P, X, T, biomarker_X, biomarker_T = self.get_raw_batch(batch_idx)
+        P, X, T, biomarker_X, biomarker_T, biomarker_C = self.get_raw_batch(batch_idx)
 
         for transform in self.transforms:
             X, T = transform(X, T)
 
-        return P, X, T, biomarker_X, biomarker_T
+        return P, X, T, biomarker_X, biomarker_T, biomarker_C
 
 
 class PromptDataset(Dataset):
@@ -351,7 +368,9 @@ class PromptDataset(Dataset):
 
     def get_batch(self, batch_idx):
 
-        P, X, T, biomarker_X, biomarker_T = super().get_raw_batch(batch_idx)
+        P, X, T, biomarker_X, biomarker_T, biomarker_C = super().get_raw_batch(
+            batch_idx
+        )
 
         X[T > self.start_age] = 0
         T[T > self.start_age] = -1e4
@@ -365,4 +384,4 @@ class PromptDataset(Dataset):
         T = np.pad(T, ((0, 0), (0, 1)), mode="constant", constant_values=self.start_age)
 
         # TODO: remove biomarkers after prompt_age
-        return P, X, T, biomarker_X, biomarker_T
+        return P, X, T, biomarker_X, biomarker_T, biomarker_C

@@ -1,10 +1,8 @@
 import os
-from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Union
 
 import yaml
-from dacite import from_dict
 
 
 class Gender(Enum):
@@ -18,86 +16,56 @@ class CoreEvents(Enum):
     DEATH = "death"
 
 
-@dataclass
-class Disease:
-    id: int
-    ukb_name: str
-    chapter: str = ""
-
-
-@dataclass
-class TokenizerSchema:
-    version: str = "0.0"
-    lifestyle: list = field(default_factory=list)
-    mapping: dict[str, Disease] = field(default_factory=dict)
-
-
 class Tokenizer:
 
-    def __init__(self, tokenizer_schema: TokenizerSchema):
+    def __init__(self, name2id: dict) -> None:
 
-        self.tokenizer_schema = tokenizer_schema
-        self.version = tokenizer_schema.version
-        self.mapping = tokenizer_schema.mapping
-
+        self.name2id = name2id
         core_events = {e.value for e in CoreEvents}
-        missing_core_events = core_events - set(self.mapping.keys())
-        if missing_core_events:
-            raise ValueError(f"missing core events in tokenizer: {missing_core_events}")
-
+        missing_core_events = core_events - set(self.name2id.keys())
         assert (
-            Gender.MALE.value in self.mapping.keys()
-            and Gender.FEMALE.value in self.mapping.keys()
+            missing_core_events == set()
+        ), f"missing core events in tokenizer: {missing_core_events}"
+        assert (
+            Gender.MALE.value in self.name2id.keys()
+            and Gender.FEMALE.value in self.name2id.keys()
         )
 
-        self.disease_ids = [disease.id for disease in self.mapping.values()]
-        assert len(self.disease_ids) == len(
-            set(self.disease_ids)
-        ), "disease IDs must be unique"
+        assert len(self.name2id.values()) == len(
+            set(self.name2id.values())
+        ), "tokens must be unique"
+        assert self.name2id[CoreEvents.PADDING.value] == 0, "padding token must be 0"
 
-        # reverse mapping for decoding
-        self.id2disease = {disease.id: k for k, disease in self.mapping.items()}
-
-        assert min(self.disease_ids) == 0, "disease IDs must start at 0"
-        assert (
-            self[CoreEvents.PADDING.value] == 0
-        ), "padding token must be the same as the padding key"
-
-        self.vocab_size = len(self.disease_ids)
-
-        self.lifestyle_tokens = tokenizer_schema.lifestyle
+        self.id2name = {v: k for k, v in self.name2id.items()}
+        self.vocab_size = len(self.name2id)
 
     def __getitem__(self, key: str) -> int:
-        if key not in self.mapping:
+        if key not in self.name2id:
             raise KeyError(f"disease key {key} not found in tokenizer.")
 
-        return self.mapping[key].id
+        return self.name2id[key]
 
     def encode(self, token: Union[str, list]) -> Union[int, list]:
         if isinstance(token, list):
             for t in token:
-                if t not in self.mapping:
+                if t not in self.name2id:
                     raise KeyError(f"disease key {t} not found in tokenizer.")
             return [self[t] for t in token]
         else:
-            if token not in self.mapping:
+            if token not in self.name2id:
                 raise KeyError(f"disease key {token} not found in tokenizer.")
             return self[token]
-
-    def name_for_plot(self, key: str) -> str:
-
-        return self.mapping[key].ukb_name
 
     def decode(self, token: Union[int, list]) -> Union[str, list]:
         if isinstance(token, list):
             for t in token:
-                if t not in self.disease_ids:
+                if t not in self.id2name.keys():
                     raise KeyError(f"disease ID {t} not found in tokenizer.")
-            return [self.id2disease[t] for t in token]
+            return [self.id2name[t] for t in token]
         else:
-            if token not in self.disease_ids:
+            if token not in self.id2name.keys():
                 raise KeyError(f"disease ID {token} not found in tokenizer.")
-            return self.id2disease[token]
+            return self.id2name[token]
 
     def save_to_yaml(
         self,
@@ -106,7 +74,7 @@ class Tokenizer:
 
         with open(filepath, "w") as f:
             yaml.dump(
-                asdict(self.tokenizer_schema),
+                self.name2id,
                 f,
                 default_flow_style=False,
                 sort_keys=False,
@@ -116,16 +84,11 @@ class Tokenizer:
 def load_tokenizer_from_yaml(
     filepath: str,
 ) -> Tokenizer:
-    """
-    Load a tokenizer from a yaml file.
-    """
+    assert os.path.exists(filepath), f"tokenizer file {filepath} does not exist"
     with open(filepath, "r") as f:
-        tokenizer_schema = from_dict(
-            TokenizerSchema,
-            yaml.safe_load(f),
-        )
+        name2id = yaml.safe_load(f)
 
-    return Tokenizer(tokenizer_schema)
+    return Tokenizer(name2id=name2id)
 
 
 def load_tokenizer_from_ckpt(
@@ -136,3 +99,16 @@ def load_tokenizer_from_ckpt(
     tokenizer = load_tokenizer_from_yaml(tokenizer_path)
 
     return tokenizer
+
+
+def update_tokenizer(base_tokenizer: dict, add_tokenizer: dict) -> tuple[dict, int]:
+
+    assert min(base_tokenizer.values()) == 0, "base tokenizer must start with 0"
+    assert min(add_tokenizer.values()) == 1, "additional tokenizer must start with 1"
+    offset = len(base_tokenizer) - 1
+    for key, value in add_tokenizer.items():
+        if key not in base_tokenizer:
+            base_tokenizer[key] = value + offset
+        else:
+            raise ValueError(f"{key} already exists in base tokenizer")
+    return base_tokenizer, offset
