@@ -4,9 +4,7 @@ task_input: forward
 task_args:
   disease_lst: config/disease_list/doi.yaml
   min_time_gap: 0.1
-  box_plot: false
   age_groups:
-    start: 40
-    end: 85
-    step: 5
-  seed: 42
+    bin_start: 40
+    bin_end: 80
+    bin_width: 5

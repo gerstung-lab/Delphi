@@ -1,4 +1,5 @@
 import os
+import time
 
 import numpy as np
 import pytest
@@ -6,15 +7,9 @@ import pytest
 from archive.evaluate_auc import get_calibration_auc
 from delphi import disease
 from delphi.data.dataset import tricolumnar_to_2d
-from delphi.data.trajectory import DiseaseRateTrajectory, corrective_indices
+from delphi.data.trajectory import corrective_indices
 from delphi.env import DELPHI_CKPT_DIR
-from delphi.eval.auc import (
-    AgeGroups,
-    CalibrateAUCArgs,
-    auc_by_age_group,
-    parse_age_groups,
-    rates_by_age_bin,
-)
+from delphi.eval.auc import rates_by_age_bin
 from delphi.tokenizer import load_tokenizer_from_ckpt
 
 
@@ -51,43 +46,36 @@ def load_Y(
 
 def new_pipeline(X, T, Y, dis_token, offset):
 
-    X_t0, X_t1 = X[:, :-1], X[:, 1:]
+    now = time.time()
+
+    X_t1 = X[:, 1:]
     T_t0, T_t1 = T[:, :-1], T[:, 1:]
     Y_t1 = Y[:, :-1]
 
     C = corrective_indices(T0=T_t0, T1=T_t1, offset=offset)
     T_t0 = np.take_along_axis(T_t0, C, axis=1)
-    X_t0 = np.take_along_axis(X_t0, C, axis=1)
     Y_t1 = np.take_along_axis(Y_t1, C, axis=1)
 
-    # age_group_edges = np.arange(45, 85, 5)
-    # age_groups = [(i, j) for i, j in zip(age_group_edges[:-1], age_group_edges[1:])]
-    # ctl_subjects, dis_subjects, ctl_rates, dis_rates = rates_by_age_bin(
-    #     dis_token=dis_token,
-    #     input_time=T_t0,
-    #     targets=X_t1,
-    #     predicted_rates=Y_t1,
-    #     age_groups=age_groups,
-    # )
-    # ctl_counts = np.array([len(np.unique(subj)) for subj in ctl_subjects])
-    # dis_counts = np.array([len(np.unique(subj)) for subj in dis_subjects])
-
-    traj = DiseaseRateTrajectory(
-        X_t0=X_t0,
-        T_t0=T_t0,
-        X_t1=X_t1,
-        T_t1=T_t1,
-        Y_t1=Y_t1,
+    age_group_edges = np.arange(45, 85, 5)
+    age_groups = [(i, j) for i, j in zip(age_group_edges[:-1], age_group_edges[1:])]
+    ctl_subjects, dis_subjects, ctl_rates, dis_rates = rates_by_age_bin(
+        dis_token=dis_token,
+        input_time=T_t0,
+        targets=X_t1,
+        predicted_rates=Y_t1,
+        age_groups=age_groups,
     )
+    ctl_counts = np.array([len(np.unique(subj)) for subj in ctl_subjects])
+    dis_counts = np.array([len(np.unique(subj)) for subj in dis_subjects])
 
-    age_groups, _, ctl_counts, dis_counts, ctl_rates, dis_rates = auc_by_age_group(
-        disease_token=dis_token, trajectory=traj, age_groups=np.arange(45, 85, 5)
-    )
+    time_elapsed = time.time() - now
 
-    return (ctl_counts, dis_counts, ctl_rates, dis_rates)
+    return (ctl_counts, dis_counts, ctl_rates, dis_rates), time_elapsed
 
 
 def baseline(X, T, Y, dis_token, offset):
+
+    now = time.time()
 
     X_t0, X_t1 = X[:, :-1], X[:, 1:]
     T_t0, T_t1 = T[:, :-1], T[:, 1:]
@@ -97,12 +85,14 @@ def baseline(X, T, Y, dis_token, offset):
         j=0, k=dis_token, d=(X_t0, T_t0, X_t1, T_t1), p=Y_t1[..., None], offset=offset
     )  # type: ignore
 
+    time_elapsed = time.time() - now
+
     return (
         np.array(ctl_counts),
         np.array(dis_counts),
         ctl_rates,
         dis_rates,
-    )
+    ), time_elapsed
 
 
 def same_counts(
@@ -143,9 +133,19 @@ def same_dis_rates_for_every_age_bin(
     return True
 
 
+def not_too_slow(new_t: float, bl_t: float) -> bool:
+
+    if new_t < bl_t:
+        print("new pipeline faster by {:.2f} seconds".format(bl_t - new_t))
+        return True
+    else:
+        print("new pipeline slower by {:.2f} seconds".format(new_t - bl_t))
+        return new_t < bl_t * 1.1
+
+
 ckpt = ["debug"]
 disease = ["a41_(other_septicaemia)", "g30_(alzheimer's_disease)", "death"]
-offset = [0.1, 0.5, 1.0, 5.0]
+offset = [0.1, 0.5, 1.0, 5.0, 10.0]
 
 
 @pytest.mark.parametrize(
@@ -155,10 +155,10 @@ def test(ckpt: str, disease: str, offset: float):
 
     X, T = load_XT(ckpt)
     Y, dis_token = load_Y(ckpt, disease, X)
-    ctl_counts_new, dis_counts_new, ctl_rates, dis_rates = new_pipeline(
+    (ctl_counts_new, dis_counts_new, ctl_rates, dis_rates), new_t = new_pipeline(
         X, T, Y, dis_token, offset
     )
-    bl_ctl_n, bl_dis_n, bl_ctl_rates, bl_dis_rates = baseline(
+    (bl_ctl_n, bl_dis_n, bl_ctl_rates, bl_dis_rates), bl_t = baseline(
         X, T, Y, dis_token, offset
     )
 
@@ -177,3 +177,5 @@ def test(ckpt: str, disease: str, offset: float):
         ctl_rates=ctl_rates,
         bl_ctl_rates=bl_ctl_rates,
     )
+
+    # assert not_too_slow(new_t, bl_t)

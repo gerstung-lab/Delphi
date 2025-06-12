@@ -5,40 +5,40 @@ from typing import Optional
 
 import numpy as np
 import yaml
+from tqdm import tqdm
 
 from delphi import DAYS_PER_YEAR
 from delphi.data.dataset import tricolumnar_to_2d
-from delphi.data.trajectory import DiseaseRateTrajectory, corrective_indices
+from delphi.data.trajectory import corrective_indices
 from delphi.eval import eval_task
 from delphi.tokenizer import Gender, Tokenizer
 
 
 @dataclass
-class AgeGroups:
-    custom_groups: Optional[list[int]] = None
-    start: int = 40
-    end: int = 85
-    step: int = 5
+class TimeBins:
+    # in years
+    custom_bin_edges: Optional[list[int]] = None
+    bin_start: int = 40
+    bin_end: int = 85
+    bin_width: int = 5
 
 
 @dataclass
 class CalibrateAUCArgs:
     disease_lst: str = ""
-    age_groups: AgeGroups = field(default_factory=AgeGroups)
+    age_groups: TimeBins = field(default_factory=TimeBins)
     min_time_gap: float = 0.1
-    box_plot: bool = True
-    seed: int = 42
 
 
-def parse_age_groups(age_groups: AgeGroups) -> list[tuple[int, int]]:
-    if age_groups.custom_groups is None:
+def parse_time_bins(time_bins: TimeBins) -> list[tuple[int, int]]:
+    if time_bins.custom_bin_edges is None:
         age_group_edges = np.arange(
-            age_groups.start,
-            age_groups.end,
-            age_groups.step,
+            time_bins.bin_start,
+            time_bins.bin_end + time_bins.bin_width,
+            time_bins.bin_width,
         )
     else:
-        age_group_edges = np.array(age_groups.custom_groups)
+        age_group_edges = np.array(time_bins.custom_bin_edges)
     age_grps = [(i, j) for i, j in zip(age_group_edges[:-1], age_group_edges[1:])]
     return age_grps
 
@@ -54,54 +54,6 @@ def mann_whitney_auc(x1: np.ndarray, x2: np.ndarray) -> float:
     return U1 / n1 / n2
 
 
-def auc_by_age_group(
-    disease_token: int,
-    trajectory: DiseaseRateTrajectory,
-    age_groups: np.ndarray,
-    rng: Optional[np.random.Generator] = None,
-) -> tuple:
-
-    if rng is None:
-        rng = np.random.default_rng()
-
-    age_buckets = [(i, j) for i, j in zip(age_groups[:-1], age_groups[1:])]
-    l = len(age_buckets)
-
-    ctl_counts = np.zeros(l)
-    dis_counts = np.zeros(l)
-    auc_vals = np.zeros(l)
-    ctl_rates = []
-    dis_rates = []
-
-    disease_free = ~trajectory.has_token(disease_token, token_type=None)
-
-    for i, (age_start, age_end) in enumerate(age_buckets):
-
-        tw = (age_start * DAYS_PER_YEAR, age_end * DAYS_PER_YEAR)
-
-        any_in_tw = trajectory.has_any_token(t0_range=tw)
-        ctl_paths = trajectory[disease_free & any_in_tw]
-
-        disease_in_tw = trajectory.has_token(
-            disease_token, token_type="target", t0_range=tw
-        )
-        dis_paths = trajectory[disease_in_tw]
-
-        ctl_counts[i] = ctl_paths.n_participants
-        dis_counts[i] = dis_paths.n_participants
-
-        # _, ctl_token_rates = ctl_paths.disease_rate(t0_range=tw, keep="random", rng=rng)
-        ctl_token_rates = ctl_paths.disease_rate(time_range=tw, keep="random", rng=rng)
-        ctl_rates.append(ctl_token_rates)
-
-        # _, dis_token_rates = dis_paths.penultimate_disease_rate(disease_token)
-        dis_token_rates = dis_paths.penultimate_disease_rate(disease_token)
-        dis_rates.append(dis_token_rates)
-        auc_vals[i] = mann_whitney_auc(ctl_token_rates.ravel(), dis_token_rates.ravel())
-
-    return age_buckets, auc_vals, ctl_counts, dis_counts, ctl_rates, dis_rates
-
-
 def rates_by_age_bin(
     input_time: np.ndarray,
     targets: np.ndarray,
@@ -115,8 +67,8 @@ def rates_by_age_bin(
     ctl_rates = []
     dis_rates = []
 
-    disease_free = ~np.any(targets == dis_token, axis=1)[:, np.newaxis]
     have_disease = targets == dis_token
+    disease_free = ~np.any(have_disease, axis=1)[:, np.newaxis]
 
     for age_start, age_end in age_groups:
 
@@ -157,16 +109,21 @@ def calibrate_auc(
     **kwargs,
 ) -> None:
 
-    logbook_path = os.path.join(task_input, "auc_by_age_bin.json")
-    if os.path.exists(logbook_path):
-        logbook = json.load(open(logbook_path, "r"))
-    logbook = {task_name: {}}
-    logbook[task_name]["config"] = asdict(task_args)
-
-    age_groups = parse_age_groups(task_args.age_groups)
+    age_groups = parse_time_bins(task_args.age_groups)
     age_group_keys = [f"{start}-{end}" for start, end in age_groups]
     with open(task_args.disease_lst, "r") as f:
         disease_lst = yaml.safe_load(f)
+
+    logbook_path = os.path.join(ckpt, task_input, f"{task_name}.json")
+    if os.path.exists(logbook_path):
+        logbook = json.load(open(logbook_path, "r"))
+    else:
+        logbook = {}
+    logbook_cfg = logbook.setdefault("config", {})
+    if "min_time_gap" in logbook_cfg:
+        assert logbook_cfg["min_time_gap"] == round(float(task_args.min_time_gap), 1)
+    else:
+        logbook_cfg["min_time_gap"] = round(float(task_args.min_time_gap), 1)
 
     input_dir = os.path.join(ckpt, task_input)
     logits_path = os.path.join(input_dir, "logits.bin")
@@ -195,10 +152,12 @@ def calibrate_auc(
         "either": is_female | is_male,
     }
 
-    for disease in disease_lst:
+    sub_idx, pos_idx = np.nonzero(X)
+
+    for disease in tqdm(disease_lst):
+        logbook[disease] = {}
 
         Y = np.zeros_like(X, dtype=np.float16)
-        sub_idx, pos_idx = np.nonzero(X)
         dis_token = tokenizer[disease]
         Y[sub_idx, pos_idx] = logits[:, dis_token]
         Y_t1 = Y[:, :-1]
@@ -222,27 +181,24 @@ def calibrate_auc(
                 sample_one_per_participant(subj, rate)
                 for subj, rate in zip(ctl_subjects, ctl_rates)
             ]
-            dis_rates = [
-                sample_one_per_participant(subj, rate)
-                for subj, rate in zip(dis_subjects, dis_rates)
-            ]
             auc = [
                 mann_whitney_auc(ctl_rate, dis_rate)
                 for ctl_rate, dis_rate in zip(ctl_rates, dis_rates)
             ]
 
-            logbook[task_name][disease][gender] = {
+            logbook[disease][gender] = {
                 age_group_keys[i]: {
-                    "auc": auc[i],
+                    "auc": round(float(auc[i]), 2) if not np.isnan(auc[i]) else None,
                     "ctl_count": len(ctl_subjects[i]),
                     "dis_count": len(dis_subjects[i]),
                 }
                 for i in range(len(age_groups))
             }
-            logbook[task_name][disease][gender]["total"] = {
-                "auc": np.nanmean(auc),
-                "ctl_count": np.sum([len(subj) for subj in ctl_subjects]),
-                "dis_count": np.sum([len(subj) for subj in dis_subjects]),
+            mean_auc = float(np.nanmean(auc))
+            logbook[disease][gender]["total"] = {
+                "auc": round(mean_auc, 2) if not np.isnan(mean_auc) else None,
+                "ctl_count": int(np.sum([len(s) for s in ctl_subjects])),
+                "dis_count": int(np.sum([len(s) for s in dis_subjects])),
             }
 
     with open(logbook_path, "w") as f:
