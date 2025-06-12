@@ -187,11 +187,10 @@ class DiseaseRateTrajectory:
 
     def disease_rate(
         self,
-        t0_range: OptionalTimeRange = (None, None),
-        t1_range: OptionalTimeRange = (None, None),
+        time_range: OptionalTimeRange = (None, None),
         keep: SamplingScheme = "average",
         rng: Optional[np.random.Generator] = None,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ):
         """
         computes the token rates for a specific input/target token in the specified time range
         computes a single token rate for each participant in the specified time range
@@ -207,22 +206,23 @@ class DiseaseRateTrajectory:
         """
 
         assert self.has_any_token(
-            t0_range=t0_range, t1_range=t1_range
+            t0_range=time_range,
         ).all(), "some participants have no tokens in the specified time range"
 
-        in_time_range = self._in_time_range(t0_range=t0_range, t1_range=t1_range)
-        in_time_range = in_time_range.astype(float)
-        in_time_range = self._sample_token_mask(in_time_range, keep=keep, rng=rng)
+        in_time_range = self._in_time_range(t0_range=time_range)
+        # in_time_range = in_time_range.astype(float)
+        # in_time_range = self._sample_token_mask(in_time_range, keep=keep, rng=rng)
 
-        t0 = np.sum(self.T0 * in_time_range, axis=1)
-        y1 = np.sum(self.Y_t1 * in_time_range, axis=1)
+        # t0 = np.sum(self.T0 * in_time_range, axis=1)
+        # y1 = np.sum(self.Y_t1 * in_time_range, axis=1)
 
-        return t0, y1
+        # return t0, y1
+        return self.Y_t1[in_time_range]
 
     def penultimate_disease_rate(
         self,
         token: int,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ):
 
         assert self.has_token(
             token, token_type="target"
@@ -230,11 +230,13 @@ class DiseaseRateTrajectory:
 
         token_mask = self.X1 == token
         token_mask = self._sample_token_mask(token_mask, keep="first")
+        token_mask = token_mask.astype(bool)
 
         t0 = np.sum(self.T0 * token_mask, axis=1)
         y1 = np.sum(self.Y_t1 * token_mask, axis=1)
 
-        return t0, y1
+        # return t0, y1
+        return self.Y_t1[token_mask]
 
     def cumulative_disease_risk(
         self,

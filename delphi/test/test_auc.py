@@ -1,76 +1,179 @@
 import os
 
 import numpy as np
+import pytest
 
 from archive.evaluate_auc import get_calibration_auc
-from delphi import DAYS_PER_YEAR
+from delphi import disease
 from delphi.data.dataset import tricolumnar_to_2d
 from delphi.data.trajectory import DiseaseRateTrajectory, corrective_indices
-from delphi.eval.auc import AgeGroups, CalibrateAUCArgs, auc_by_age_group
-from delphi.model.transformer import load_model
+from delphi.env import DELPHI_CKPT_DIR
+from delphi.eval.auc import (
+    AgeGroups,
+    CalibrateAUCArgs,
+    auc_by_age_group,
+    parse_age_groups,
+    rates_by_age_bin,
+)
 from delphi.tokenizer import load_tokenizer_from_ckpt
 
-ckpt = "checkpoints/delphi"
-task_input = "forward"
-disease = "a41_(other_septicaemia)"
-disease = "g30_(alzheimer's_disease)"
-disease_lst = "config/disease_list/doi.yaml"
 
-offset = 0.1
+def load_XT(ckpt: str, task_input: str = "forward"):
 
-auc_args = CalibrateAUCArgs(
-    disease_lst=disease_lst,
-    age_groups=AgeGroups(start=45, end=85, step=5),
-    min_time_gap=offset,
-    box_plot=False,
+    xt_path = os.path.join(DELPHI_CKPT_DIR, ckpt, task_input, "gen.bin")
+    XT = np.fromfile(xt_path, dtype=np.uint32).reshape(-1, 3)
+
+    X, T = tricolumnar_to_2d(XT)
+
+    return X, T
+
+
+def load_Y(
+    ckpt: str,
+    disease: str,
+    tokens: np.ndarray,
+    task_input: str = "forward",
+):
+
+    tokenizer = load_tokenizer_from_ckpt(os.path.join(DELPHI_CKPT_DIR, ckpt))
+    dis_token = tokenizer[disease]
+    logits_path = os.path.join(DELPHI_CKPT_DIR, ckpt, task_input, "logits.bin")
+    logits = np.fromfile(logits_path, dtype=np.float16).reshape(
+        -1, tokenizer.vocab_size + 1
+    )
+
+    Y = np.zeros_like(tokens, dtype=np.float16)
+    sub_idx, pos_idx = np.nonzero(tokens)
+    Y[sub_idx, pos_idx] = logits[:, dis_token]
+
+    return Y, dis_token
+
+
+def new_pipeline(X, T, Y, dis_token, offset):
+
+    X_t0, X_t1 = X[:, :-1], X[:, 1:]
+    T_t0, T_t1 = T[:, :-1], T[:, 1:]
+    Y_t1 = Y[:, :-1]
+
+    C = corrective_indices(T0=T_t0, T1=T_t1, offset=offset)
+    T_t0 = np.take_along_axis(T_t0, C, axis=1)
+    X_t0 = np.take_along_axis(X_t0, C, axis=1)
+    Y_t1 = np.take_along_axis(Y_t1, C, axis=1)
+
+    # age_group_edges = np.arange(45, 85, 5)
+    # age_groups = [(i, j) for i, j in zip(age_group_edges[:-1], age_group_edges[1:])]
+    # ctl_subjects, dis_subjects, ctl_rates, dis_rates = rates_by_age_bin(
+    #     dis_token=dis_token,
+    #     input_time=T_t0,
+    #     targets=X_t1,
+    #     predicted_rates=Y_t1,
+    #     age_groups=age_groups,
+    # )
+    # ctl_counts = np.array([len(np.unique(subj)) for subj in ctl_subjects])
+    # dis_counts = np.array([len(np.unique(subj)) for subj in dis_subjects])
+
+    traj = DiseaseRateTrajectory(
+        X_t0=X_t0,
+        T_t0=T_t0,
+        X_t1=X_t1,
+        T_t1=T_t1,
+        Y_t1=Y_t1,
+    )
+
+    age_groups, _, ctl_counts, dis_counts, ctl_rates, dis_rates = auc_by_age_group(
+        disease_token=dis_token, trajectory=traj, age_groups=np.arange(45, 85, 5)
+    )
+
+    return (ctl_counts, dis_counts, ctl_rates, dis_rates)
+
+
+def baseline(X, T, Y, dis_token, offset):
+
+    X_t0, X_t1 = X[:, :-1], X[:, 1:]
+    T_t0, T_t1 = T[:, :-1], T[:, 1:]
+    Y_t1 = Y[:, :-1]
+
+    age_groups, ctl_counts, dis_counts, ctl_rates, dis_rates = get_calibration_auc(
+        j=0, k=dis_token, d=(X_t0, T_t0, X_t1, T_t1), p=Y_t1[..., None], offset=offset
+    )  # type: ignore
+
+    return (
+        np.array(ctl_counts),
+        np.array(dis_counts),
+        ctl_rates,
+        dis_rates,
+    )
+
+
+def same_counts(
+    ctl_counts_new: np.ndarray,
+    dis_counts_new: np.ndarray,
+    baseline_ctl_n: np.ndarray,
+    baseline_dis_n: np.ndarray,
+) -> bool:
+
+    return np.array_equal(ctl_counts_new, baseline_ctl_n) and np.array_equal(
+        dis_counts_new, baseline_dis_n
+    )
+
+
+def same_ctl_rates_for_every_age_bin(
+    ctl_rates: list[np.ndarray],
+    bl_ctl_rates: list[np.ndarray],
+) -> bool:
+
+    for ctl_rate, baseline_ctl_rate in zip(ctl_rates, bl_ctl_rates):
+        ctl_rate = np.sort(ctl_rate)
+        baseline_ctl_rate = np.sort(baseline_ctl_rate)
+        if not np.array_equal(ctl_rate, baseline_ctl_rate):
+            return False
+
+    return True
+
+
+def same_dis_rates_for_every_age_bin(
+    dis_rates: list[np.ndarray],
+    bl_dis_rates: list[np.ndarray],
+) -> bool:
+
+    for dis_rate, baseline_dis_rate in zip(dis_rates, bl_dis_rates):
+        if not np.array_equal(dis_rate, baseline_dis_rate):
+            return False
+
+    return True
+
+
+ckpt = ["debug"]
+disease = ["a41_(other_septicaemia)", "g30_(alzheimer's_disease)", "death"]
+offset = [0.1, 0.5, 1.0, 5.0]
+
+
+@pytest.mark.parametrize(
+    "ckpt, disease, offset", [(c, d, o) for c in ckpt for d in disease for o in offset]
 )
+def test(ckpt: str, disease: str, offset: float):
 
-model, _ = load_model(ckpt)
-tokenizer = load_tokenizer_from_ckpt(ckpt)
+    X, T = load_XT(ckpt)
+    Y, dis_token = load_Y(ckpt, disease, X)
+    ctl_counts_new, dis_counts_new, ctl_rates, dis_rates = new_pipeline(
+        X, T, Y, dis_token, offset
+    )
+    bl_ctl_n, bl_dis_n, bl_ctl_rates, bl_dis_rates = baseline(
+        X, T, Y, dis_token, offset
+    )
 
-logits_path = os.path.join(ckpt, task_input, "logits.bin")
-assert os.path.exists(logits_path)
-"logits.bin not found in the checkpoint directory"
-xt_path = os.path.join(ckpt, task_input, "gen.bin")
-assert os.path.exists(xt_path)
-"gen.bin not found in the checkpoint directory"
+    assert same_counts(
+        ctl_counts_new=ctl_counts_new,
+        dis_counts_new=dis_counts_new,
+        baseline_ctl_n=bl_ctl_n,
+        baseline_dis_n=bl_dis_n,
+    )
 
-logits = np.fromfile(logits_path, dtype=np.float16).reshape(
-    -1, tokenizer.vocab_size + 1
-)
-XT = np.fromfile(xt_path, dtype=np.uint32).reshape(-1, 3)
-
-X, T = tricolumnar_to_2d(XT)
-X_t0, X_t1 = X[:, :-1], X[:, 1:]
-T_t0, T_t1 = T[:, :-1], T[:, 1:]
-
-
-dis_token = tokenizer[disease]
-
-Y = np.zeros_like(X, dtype=np.float16)
-sub_idx, pos_idx = np.nonzero(X)
-Y[sub_idx, pos_idx] = logits[:, dis_token]
-Y = np.exp(Y) * DAYS_PER_YEAR
-Y = 1 - np.exp(-Y)
-
-Y_t1 = Y[:, :-1]
-C = corrective_indices(T0=T_t0, T1=T_t1, offset=offset)
-traj = DiseaseRateTrajectory(
-    X_t0=X_t0,
-    T_t0=np.take_along_axis(T_t0, C, axis=1),
-    X_t1=X_t1,
-    T_t1=T_t1,
-    Y_t1=Y_t1,
-)
-
-gt_age_groups, gt_ctl_counts, gt_dis_counts = get_calibration_auc(
-    j=0, k=dis_token, d=(X_t0, T_t0, X_t1, T_t1), p=Y_t1[..., None], offset=offset
-)  # type: ignore
-
-age_groups, _, ctl_counts, dis_counts = auc_by_age_group(
-    disease_token=dis_token,
-    trajectory=traj,
-    task_args=auc_args,
-)
-
-print("debug")
+    assert same_dis_rates_for_every_age_bin(
+        dis_rates=dis_rates,
+        bl_dis_rates=bl_dis_rates,
+    )
+    assert same_ctl_rates_for_every_age_bin(
+        ctl_rates=ctl_rates,
+        bl_ctl_rates=bl_ctl_rates,
+    )
