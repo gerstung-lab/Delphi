@@ -10,10 +10,9 @@ from delphi.data.dataset import get_p2i, tricolumnar_to_2d
 from delphi.data.trajectory import DiseaseRateTrajectory
 from delphi.eval import eval_task
 from delphi.eval.auc import (
-    AgeGroups,
+    TimeBins,
     mann_whitney_auc,
-    parse_age_groups,
-    parse_diseases,
+    parse_time_bins,
 )
 from delphi.eval.utils import write_auc_results
 from delphi.tokenizer import CoreEvents, Gender, Tokenizer
@@ -98,7 +97,7 @@ def cumulative_baseline_risks(
 @dataclass
 class CumulRiskAUCArgs:
     disease_lst: str = ""
-    age_groups: AgeGroups = field(default_factory=AgeGroups)
+    age_groups: TimeBins = field(default_factory=TimeBins)
     baseline_estimate: str = "cohort"
 
 
@@ -138,9 +137,10 @@ def cumul_risk_auc(
         tokens=X,
         time_steps=T,
     )
-    time_bins = parse_age_groups(task_args.age_groups)
+    time_bins = parse_time_bins(task_args.age_groups)
     time_bins = time_bins * DAYS_PER_YEAR
-    diseases = parse_diseases(task_args.disease_lst)
+    with open(task_args.disease_lst, "r") as f:
+        diseases = yaml.safe_load(f)
 
     for disease in diseases:
 

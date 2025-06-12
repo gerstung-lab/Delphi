@@ -11,7 +11,6 @@ import yaml
 
 from delphi.env import DELPHI_CKPT_DIR
 from delphi.eval import eval_task
-from delphi.eval.auc import parse_diseases
 
 
 @dataclass
@@ -101,7 +100,8 @@ def compare_auc(
     with open(os.path.join(task_dump_dir, "config.yaml"), "w") as f:
         yaml.dump(asdict(task_args), f, default_flow_style=False, sort_keys=False)
 
-    diseases = parse_diseases(task_args.disease_lst)
+    with open(task_args.disease_lst, "r") as f:
+        diseases = yaml.safe_load(f)
 
     ckpt_auc_dir = os.path.join(ckpt, task_input)
     assert os.path.exists(
