@@ -7,6 +7,9 @@ from utils import MULTIMODAL_INPUT_DIR, MULTIMODAL_OUTPUT_DIR, all_ukb_participa
 
 from delphi.data.lmdb import data_key, estimate_write_size, time_key, write_lmdb
 
+data_dtype = np.int64
+time_dtype = np.uint8
+
 family_hx_dir = os.path.join(MULTIMODAL_INPUT_DIR, "family_history")
 father_hx_txt = os.path.join(family_hx_dir, "father_illness.txt")
 mother_hx_txt = os.path.join(family_hx_dir, "mother_illness.txt")
@@ -36,8 +39,8 @@ for key, value in map_config.items():
 hx_db = {}
 n_unknown = 0
 for pid in participants:
-    hx_db[data_key(pid)] = np.array([], dtype=np.uint8)
-    hx_db[time_key(pid)] = np.array([], dtype=np.uint8)
+    hx_db[data_key(pid)] = np.array([], dtype=data_dtype)
+    hx_db[time_key(pid)] = np.array([], dtype=time_dtype)
 
 for pid in valid_participants:
 
@@ -53,8 +56,8 @@ for pid in valid_participants:
         continue
     if H.max() > 1:
         H = H[H > 1]
-    hx_db[data_key(pid)] = H[np.newaxis, :].astype(np.uint8)
-    hx_db[time_key(pid)] = np.array([0]).astype(np.uint8)
+    hx_db[data_key(pid)] = H[np.newaxis, :].astype(data_dtype)
+    hx_db[time_key(pid)] = np.array([0]).astype(time_dtype)
 
 print(f"# participants with unknown family_hx: {n_unknown}")
 

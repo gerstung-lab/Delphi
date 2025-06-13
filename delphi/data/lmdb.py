@@ -155,7 +155,12 @@ def collate_batch_data(
 ) -> np.ndarray:
 
     n_measurement = [data.shape[0] for data in batch_data]
-    n_feature = [data.shape[1] for data in batch_data]
+    n_feature = []
+    for data in batch_data:
+        if data.ndim > 1:
+            n_feature.append(data.shape[1])
+        else:
+            n_feature.append(0)
     max_n_feature = max(n_feature) if n_feature else 0
     collated_batch = np.full(
         shape=(sum(n_measurement), max_n_feature),
@@ -165,7 +170,7 @@ def collate_batch_data(
     for i, data in enumerate(batch_data):
         start_idx = sum(n_measurement[:i])
         end_idx = start_idx + n_measurement[i]
-        collated_batch[start_idx:end_idx, : data.shape[1]] = data
+        collated_batch[start_idx:end_idx, : n_feature[i]] = data
 
     return collated_batch
 

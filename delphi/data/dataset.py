@@ -8,7 +8,7 @@ import torch
 import yaml
 from scipy.sparse import coo_array
 
-from delphi.data.lmdb import BiomarkerLMDB, collate_batch_data, collate_batch_time
+from delphi.data.lmdb import BiomarkerLMDB, collate_batch_time
 from delphi.data.transform import TransformArgs, parse_transform
 from delphi.env import DELPHI_DATA_DIR
 from delphi.multimodal import Modality
@@ -197,6 +197,20 @@ def build_prefetch_loader(loader: Iterator) -> Iterator:
             return
 
 
+def collate_batch_data(batch_data: list[np.ndarray]) -> np.ndarray:
+
+    max_len = max([data.size for data in batch_data])
+    collated_batch = np.full(
+        shape=(len(batch_data), max_len),
+        fill_value=0,
+        dtype=batch_data[0].dtype,
+    )
+    for i, data in enumerate(batch_data):
+        collated_batch[i, : data.size] = data
+
+    return collated_batch
+
+
 @dataclass
 class UKBDataConfig:
     data_dir: str = "data/ukb_simulated_data"
@@ -248,7 +262,7 @@ class Dataset:
             base_tokenizer = yaml.safe_load(f)
 
         self.participants = np.memmap(
-            os.path.join(self.data_dir, cfg.subject_list), dtype=np.uint32, mode="r"
+            os.path.join(DELPHI_DATA_DIR, cfg.subject_list), dtype=np.uint32, mode="r"
         )
 
         p2i_path = os.path.join(self.data_dir, "p2i.csv")
@@ -258,16 +272,17 @@ class Dataset:
         self.tokens = np.memmap(
             os.path.join(self.data_dir, "data.bin"), dtype=np.uint32, mode="r"
         )
-        self.tokens += 1
         self.time_steps = np.memmap(
             os.path.join(self.data_dir, "time.bin"), dtype=np.uint32, mode="r"
         )
         expansion_packs = cfg.expansion_packs
+        if expansion_packs is None:
+            expansion_packs = []
         expansion_packs.sort()
         self.expansion_packs = []
         for pack in expansion_packs:
             print(f"\t– loading expansion pack: {pack}")
-            pack_path = os.path.join(cfg.expansion_pack_dir, pack)
+            pack_path = os.path.join(DELPHI_DATA_DIR, cfg.expansion_pack_dir, pack)
             assert os.path.exists(pack_path), FileNotFoundError(
                 f"expansion pack {pack_path} not found"
             )
@@ -306,6 +321,10 @@ class Dataset:
 
         return self.participants.size
 
+    @property
+    def vocab_size(self):
+        return self.tokenizer.vocab_size
+
     def get_raw_batch(self, batch_idx: np.ndarray):
 
         P = self.participants[batch_idx]
@@ -314,7 +333,7 @@ class Dataset:
         for i, pid in enumerate(P):
             i = self.start_pos[pid]
             l = self.seq_len[pid]
-            x_pid = self.tokens[i : i + l]
+            x_pid = self.tokens[i : i + l] + 1
             t_pid = self.time_steps[i : i + l]
             for expansion_pack in self.expansion_packs:
                 pack_x_pid, pack_t_pid = expansion_pack.get_expansion(pid)
