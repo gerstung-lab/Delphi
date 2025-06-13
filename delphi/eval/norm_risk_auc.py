@@ -10,10 +10,9 @@ from delphi.data.dataset import get_p2i, tricolumnar_to_2d
 from delphi.data.trajectory import DiseaseRateTrajectory, corrective_indices
 from delphi.eval import eval_task
 from delphi.eval.auc import (
-    AgeGroups,
+    TimeBins,
     mann_whitney_auc,
-    parse_age_groups,
-    parse_diseases,
+    parse_time_bins,
 )
 from delphi.eval.cumul_risk_auc import (
     estimate_cohort_baseline_rate,
@@ -47,7 +46,7 @@ def nearest_baseline_risks(
 @dataclass
 class NormRiskAUCArgs:
     disease_lst: str = ""
-    age_groups: AgeGroups = field(default_factory=AgeGroups)
+    age_groups: TimeBins = field(default_factory=TimeBins)
     min_time_gap: float = 0.1
     baseline_estimate: str = "cohort"
     seed: int = 42
@@ -91,9 +90,10 @@ def norm_risk_auc(
         time_steps=T,
     )
 
-    time_bins = parse_age_groups(task_args.age_groups)
+    time_bins = parse_time_bins(task_args.age_groups)
     time_bins = time_bins * DAYS_PER_YEAR
-    diseases = parse_diseases(task_args.disease_lst)
+    with open(task_args.disease_lst, "r") as f:
+        diseases = yaml.safe_load(f)
 
     for disease in diseases:
 

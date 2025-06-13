@@ -10,16 +10,16 @@ from dacite import from_dict
 from apps.generate import GenConfig
 from delphi import DAYS_PER_YEAR
 from delphi.data.dataset import tricolumnar_to_2d
-from delphi.data.trajectory import DiseaseRateTrajectory
+from delphi.data.trajectory import DiseaseRateTrajectory, corrective_indices
 from delphi.eval import eval_task
-from delphi.eval.auc import AgeGroups
+from delphi.eval.auc import TimeBins
 from delphi.tokenizer import Gender, load_tokenizer_from_ckpt
 
 
 @dataclass
 class CalibrationArgs:
     diseases: list[str] = field(default_factory=list)
-    age_groups: AgeGroups = field(default_factory=AgeGroups)
+    age_groups: TimeBins = field(default_factory=TimeBins)
     min_time_gap: float = 0.1
 
 
@@ -29,14 +29,14 @@ def calibrate_by_age_group(
     task_args: CalibrationArgs,
 ):
 
-    if task_args.age_groups.groups is None:
+    if task_args.age_groups.custom_groups is None:
         age_groups = np.arange(
             task_args.age_groups.start,
             task_args.age_groups.end,
             task_args.age_groups.step,
         )
     else:
-        age_groups = task_args.age_groups.groups
+        age_groups = task_args.age_groups.custom_groups
 
     age_buckets = [(i, j) for i, j in zip(age_groups[:-1], age_groups[1:])]
     l = len(age_buckets)
@@ -51,12 +51,9 @@ def calibrate_by_age_group(
 
         tw = (age_start * DAYS_PER_YEAR, age_end * DAYS_PER_YEAR)
 
-        has_valid_pred_in_tw = val_paths.has_any_valid_predictions(
-            min_time_gap=task_args.min_time_gap,
-            t0_range=tw,
-        )
-        tw_paths = val_paths[has_valid_pred_in_tw]
-        _, rates = tw_paths.disease_rate(t0_range=tw)
+        any_in_tw = val_paths.has_any_token(t0_range=tw)
+        tw_paths = val_paths[any_in_tw]
+        _, rates = tw_paths.disease_rate(t0_range=tw, keep="random")
 
         rates = np.exp(np.array(rates)) * 365.25
         rates = 1 - np.exp(-rates * (age_end - age_start))
@@ -214,9 +211,15 @@ def calibrate(
         Y[sub_idx, pos_idx, :] = logits[:, [dis_token]]
         Y_t1 = Y[:, :-1, :]
 
+        C = corrective_indices(
+            T0=T_t0,
+            T1=T_t1,
+            offset=task_args.min_time_gap,
+        )
+
         trajectories = DiseaseRateTrajectory(
             X_t0=X_t0,
-            T_t0=T_t0,
+            T_t0=np.take_along_axis(T_t0, C, axis=1),
             X_t1=X_t1,
             T_t1=T_t1,
             Y_t1=Y_t1,

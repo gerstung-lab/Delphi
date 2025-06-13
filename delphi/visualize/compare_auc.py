@@ -1,52 +1,30 @@
-import glob
+import json
 import os
-from dataclasses import asdict, dataclass
-from typing import Literal, Optional
+from dataclasses import dataclass
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import seaborn as sns
 import yaml
 
 from delphi.env import DELPHI_CKPT_DIR
 from delphi.eval import eval_task
-from delphi.eval.auc import parse_diseases
+from delphi.tokenizer import Gender
 
 
 @dataclass
 class CompareAUCArgs:
     disease_lst: str = ""
-    gender: str = "either"
     male_only_disease_lst: Optional[str] = None
     female_only_disease_lst: Optional[str] = None
-    ctrl_ckpt: str = ""
-    ctrl_task_input: str = ""
-    plot_name: str = ""
-
-
-def fetch_auc(
-    disease_auc_dir: str, gender: Literal["male", "female", "either"]
-) -> tuple[float, int]:
-
-    # for backward compatibility, some .csv files were name as f"{gender}_0.1.csv"
-    pattern = os.path.join(glob.escape(disease_auc_dir), f"{gender}*.csv")
-    matching_files = glob.glob(pattern)
-    if not matching_files:
-        raise FileNotFoundError(f"no file found matching pattern: {pattern}")
-    if len(matching_files) > 1:
-        raise RuntimeError(f"multiple files found for pattern: {pattern}")
-
-    auc_df = pd.read_csv(matching_files[0], index_col=0)
-
-    return auc_df.loc["total", "auc"], auc_df.loc["total", "dis_counts"]  # type: ignore
+    baseline_auc_json: str = ""
 
 
 def scatter_plot(
     ckpt_auc: list,
     ctrl_auc: list,
     n_dis: list,
-    savefig: str,
 ) -> None:
 
     fig, ax = plt.subplots()
@@ -84,11 +62,6 @@ def scatter_plot(
     plt.title(
         f"avg delta: {delta_mu:.3f}({delta_std:.3f}), n improved: {n_improved}/{len(ckpt_auc)}"
     )
-    plt.savefig(
-        savefig,
-        dpi=300,
-        bbox_inches="tight",
-    )
 
 
 @eval_task.register
@@ -96,63 +69,51 @@ def compare_auc(
     task_args: CompareAUCArgs, task_name: str, task_input: str, ckpt: str, **kwargs
 ):
 
-    task_dump_dir = os.path.join(ckpt, task_input, task_name)
-    os.makedirs(task_dump_dir, exist_ok=True)
-    with open(os.path.join(task_dump_dir, "config.yaml"), "w") as f:
-        yaml.dump(asdict(task_args), f, default_flow_style=False, sort_keys=False)
-
-    diseases = parse_diseases(task_args.disease_lst)
-
-    ckpt_auc_dir = os.path.join(ckpt, task_input)
-    assert os.path.exists(
-        ckpt_auc_dir
-    ), f"ckpt auc directory {ckpt_auc_dir} does not exist."
-
-    ctrl_ckpt = os.path.join(DELPHI_CKPT_DIR, task_args.ctrl_ckpt)
-    assert os.path.exists(ctrl_ckpt), f"control ckpt {ctrl_ckpt} does not exist."
-    ctrl_ckpt_auc_dir = os.path.join(ctrl_ckpt, task_args.ctrl_task_input)
-    assert os.path.exists(
-        ctrl_ckpt_auc_dir
-    ), f"ctrl auc directory {ctrl_ckpt_auc_dir} does not exist."
-
+    with open(task_args.disease_lst, "r") as f:
+        diseases = yaml.safe_load(f)
     male_only_diseases = []
     if task_args.male_only_disease_lst is not None:
-        male_only_diseases = parse_diseases(task_args.male_only_disease_lst)
+        with open(task_args.male_only_disease_lst, "r") as f:
+            male_only_diseases = yaml.safe_load(f)
     female_only_diseases = []
     if task_args.female_only_disease_lst is not None:
-        female_only_diseases = parse_diseases(task_args.female_only_disease_lst)
+        with open(task_args.female_only_disease_lst, "r") as f:
+            female_only_diseases = yaml.safe_load(f)
 
-    ckpt_auc_list = []
-    ctrl_auc_list = []
-    n_dis_list = []
+    with open(os.path.join(DELPHI_CKPT_DIR, ckpt, task_input), "r") as f:
+        auc_logbook = json.load(f)
 
-    for disease in diseases:
+    with open(task_args.baseline_auc_json, "r") as f:
+        bl_auc_logbook = json.load(f)
 
-        gender = task_args.gender
-        if disease in male_only_diseases:
-            gender = "male"
-        if disease in female_only_diseases:
-            gender = "female"
+    auc_lst = {}
+    bl_auc_lst = {}
+    n_dis_list = {}
 
-        ckpt_disease_auc_dir = os.path.join(ckpt_auc_dir, disease)
-        assert os.path.exists(
-            ckpt_disease_auc_dir
-        ), f"auc for {disease} not found in {ckpt_auc_dir}"
+    for gender in Gender:
+        gender = gender.value
+        auc_lst[gender] = []
+        bl_auc_lst[gender] = []
+        for disease in diseases:
+            if disease in male_only_diseases:
+                gender = "male"
+            if disease in female_only_diseases:
+                gender = "female"
 
-        ckpt_auc, ckpt_n_dis = fetch_auc(ckpt_disease_auc_dir, gender)  # type: ignore
-        ckpt_auc_list.append(ckpt_auc)
-        n_dis_list.append(ckpt_n_dis)
+            auc_lst[gender].append(bl_auc_logbook[disease][gender]["total"]["auc"])
+            n_dis_list[gender].append(
+                bl_auc_logbook[disease][gender]["total"]["dis_count"]
+            )
+            bl_auc_lst[gender].append(auc_logbook[disease][gender]["total"]["auc"])
 
-        ctrl_disease_auc_dir = os.path.join(ctrl_ckpt_auc_dir, disease)
-        assert os.path.exists(
-            ctrl_disease_auc_dir
-        ), f"auc for {disease} not found in {ctrl_ckpt_auc_dir}"
-        ctrl_auc, _ = fetch_auc(ctrl_disease_auc_dir, gender)  # type: ignore
-        ctrl_auc_list.append(ctrl_auc)
+            scatter_plot(
+                ckpt_auc=auc_lst,
+                ctrl_auc=bl_auc_lst,
+                n_dis=n_dis_list,
+            )
 
-    scatter_plot(
-        ckpt_auc=ckpt_auc_list,
-        ctrl_auc=ctrl_auc_list,
-        n_dis=n_dis_list,
-        savefig=os.path.join(task_dump_dir, f"{task_args.plot_name}.png"),
-    )
+            plt.savefig(
+                os.path.join(os.path.dirname(task_input), f"{task_name}.png"),
+                dpi=300,
+                bbox_inches="tight",
+            )
