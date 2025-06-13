@@ -120,8 +120,8 @@ def train(cfg: TrainConfig):
     assert (
         cfg.model.vocab_size == train_ds.vocab_size
     ), f"inconsistent vocab size between tokenizer ({train_ds.vocab_size}) and model ({cfg.model.vocab_size})"
-    print(f"ignored tokens: {cfg.model.ignore_tokens}")
     ignore_tokens = parse_ignore_tokens(cfg.model.ignore_tokens)
+    print(f"ignored tokens: {ignore_tokens}")
     cfg.model.ignore_tokens = train_ds.tokenizer.encode(ignore_tokens)  # type: ignore
 
     iter_num = 0

@@ -275,12 +275,9 @@ class Dataset:
         self.time_steps = np.memmap(
             os.path.join(self.data_dir, "time.bin"), dtype=np.uint32, mode="r"
         )
-        expansion_packs = cfg.expansion_packs
-        if expansion_packs is None:
-            expansion_packs = []
-        expansion_packs.sort()
+        cfg.expansion_packs.sort()
         self.expansion_packs = []
-        for pack in expansion_packs:
+        for pack in self.expansion_packs:
             print(f"\t– loading expansion pack: {pack}")
             pack_path = os.path.join(DELPHI_DATA_DIR, cfg.expansion_pack_dir, pack)
             assert os.path.exists(pack_path), FileNotFoundError(
