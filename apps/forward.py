@@ -10,7 +10,6 @@ from tqdm import tqdm
 from delphi.data.dataset import (
     Dataset,
     UKBDataConfig,
-    build_prefetch_loader,
     eval_iter,
     load_sequences,
 )
@@ -67,20 +66,17 @@ def forward(
 
     it = eval_iter(total_size=n_participants, batch_size=cfg.batch_size)
     loader = load_sequences(it=it, dataset=ds)
-    loader = build_prefetch_loader(loader=loader)
 
-    # todo: fix quick & dirty estimate
-    n_max_token = ds.seq_len[:n_participants].sum() + 20 * n_participants
     logger.init_memmaps(
-        n_max_token=n_max_token,
-        # +1 to account for 0 padding
-        n_vocab=tokenizer.vocab_size + 1,
+        # todo: fix quick & dirty estimate
+        n_max_token=len(ds) * 50,
+        n_vocab=tokenizer.vocab_size,
     )
 
     loader = tqdm(loader, total=math.ceil(n_participants / cfg.batch_size), leave=True)
 
     with torch.no_grad():
-        for P, X, T, M, biomarker, _ in loader:
+        for P, X, T, M, biomarker, _, _ in loader:
             biomarker = {k: v.to(cfg.device) for k, v in biomarker.items()}
             batch_logits, _, _ = model(
                 idx=X.to(cfg.device),

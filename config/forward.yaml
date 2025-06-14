@@ -5,12 +5,8 @@ subsample: null
 use_val_data: true
 data:
   data_dir: ukb_real_data
-  memmap_fname: val.bin
-  tokenizer_fname: tokenizer.yaml
-  prs:
-    lmdb_fname: prs.lmdb
-    include: true
-    must: true
+  subject_list: ukb_real_data/participants/val_fold.bin
+  seed: 42
   transforms:
     - name: no-event
       args:

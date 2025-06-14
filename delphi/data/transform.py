@@ -55,6 +55,7 @@ class AddNoEvent:
             no_event_timesteps = np.linspace(
                 1, int(max_age) - self.no_event_interval, num=n_no_events
             ) * np.ones((n_participants, 1))
+        no_event_timesteps = no_event_timesteps.astype(np.float32)
         no_event_tokens = np.full(no_event_timesteps.shape, self.tokenizer["no_event"])
 
         T_cp = T.copy()
