@@ -129,7 +129,7 @@ def calibrate_auc(
     logits_path = os.path.join(input_dir, "logits.bin")
     xt_path = os.path.join(input_dir, "gen.bin")
     logits = np.memmap(logits_path, dtype=np.float16, mode="r").reshape(
-        -1, tokenizer.vocab_size + 1
+        -1, tokenizer.vocab_size
     )
     XT = np.fromfile(xt_path, dtype=np.uint32).reshape(-1, 3)
 
