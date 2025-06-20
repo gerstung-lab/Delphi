@@ -15,25 +15,28 @@ train_data:
   seed: 42
   biomarker_dir: ukb_real_data/biomarkers
   biomarkers:
-    # prs: ${model.biomarkers.prs.n_token}
-    # family_hx: ${model.biomarkers.family_hx.n_token}
+    prs: ${model.biomarkers.prs.n_token}
+    family_hx: ${model.biomarkers.family_hx.n_token}
     blood_all: ${model.biomarkers.blood_all.n_token}
-    # wbc: ${model.biomarkers.wbc.n_token}
-    # lipid: ${model.biomarkers.lipid.n_token}
-    # lft: ${model.biomarkers.lft.n_token}
-    # renal: ${model.biomarkers.renal.n_token}
-    # hba1c: ${model.biomarkers.hba1c.n_token}
-    # crp: ${model.biomarkers.crp.n_token}
-    # urate: ${model.biomarkers.urate.n_token}
-    # cysc: ${model.biomarkers.cysc.n_token}
-    # apo: ${model.biomarkers.apo.n_token}
-    # vitd: ${model.biomarkers.vitd.n_token}
-    # dht: ${model.biomarkers.dht.n_token}
-    # shbg: ${model.biomarkers.shbg.n_token}
-    # igf1: ${model.biomarkers.igf1.n_token}
-  # expansion_pack_dir: ukb_real_data/expansion_packs
-  # expansion_packs:
-  #   - fsf
+    meds: ${model.biomarkers.meds.n_token}
+    wbc: ${model.biomarkers.wbc.n_token}
+    lipid: ${model.biomarkers.lipid.n_token}
+    lft: ${model.biomarkers.lft.n_token}
+    renal: ${model.biomarkers.renal.n_token}
+    hba1c: ${model.biomarkers.hba1c.n_token}
+    crp: ${model.biomarkers.crp.n_token}
+    urate: ${model.biomarkers.urate.n_token}
+    cysc: ${model.biomarkers.cysc.n_token}
+    apo: ${model.biomarkers.apo.n_token}
+    vitd: ${model.biomarkers.vitd.n_token}
+    dht: ${model.biomarkers.dht.n_token}
+    shbg: ${model.biomarkers.shbg.n_token}
+    igf1: ${model.biomarkers.igf1.n_token}
+  expansion_pack_dir: ukb_real_data/expansion_packs
+  expansion_packs:
+    - fsf
+    - summary_ops
+    - ops
   transforms:
     - name: no-event
       args:
@@ -45,25 +48,28 @@ val_data:
   seed: 42
   biomarker_dir: ukb_real_data/biomarkers
   biomarkers:
-    # prs: ${model.biomarkers.prs.n_token}
-    # family_hx: ${model.biomarkers.family_hx.n_token}
+    prs: ${model.biomarkers.prs.n_token}
+    family_hx: ${model.biomarkers.family_hx.n_token}
     blood_all: ${model.biomarkers.blood_all.n_token}
-    # wbc: ${model.biomarkers.wbc.n_token}
-    # lipid: ${model.biomarkers.lipid.n_token}
-    # lft: ${model.biomarkers.lft.n_token}
-    # renal: ${model.biomarkers.renal.n_token}
-    # hba1c: ${model.biomarkers.hba1c.n_token}
-    # crp: ${model.biomarkers.crp.n_token}
-    # urate: ${model.biomarkers.urate.n_token}
-    # cysc: ${model.biomarkers.cysc.n_token}
-    # apo: ${model.biomarkers.apo.n_token}
-    # vitd: ${model.biomarkers.vitd.n_token}
-    # dht: ${model.biomarkers.dht.n_token}
-    # shbg: ${model.biomarkers.shbg.n_token}
-    # igf1: ${model.biomarkers.igf1.n_token}
-  # expansion_pack_dir: ukb_real_data/expansion_packs
-  # expansion_packs:
-  #   - fsf
+    meds: ${model.biomarkers.meds.n_token}
+    wbc: ${model.biomarkers.wbc.n_token}
+    lipid: ${model.biomarkers.lipid.n_token}
+    lft: ${model.biomarkers.lft.n_token}
+    renal: ${model.biomarkers.renal.n_token}
+    hba1c: ${model.biomarkers.hba1c.n_token}
+    crp: ${model.biomarkers.crp.n_token}
+    urate: ${model.biomarkers.urate.n_token}
+    cysc: ${model.biomarkers.cysc.n_token}
+    apo: ${model.biomarkers.apo.n_token}
+    vitd: ${model.biomarkers.vitd.n_token}
+    dht: ${model.biomarkers.dht.n_token}
+    shbg: ${model.biomarkers.shbg.n_token}
+    igf1: ${model.biomarkers.igf1.n_token}
+  expansion_pack_dir: ukb_real_data/expansion_packs
+  expansion_packs:
+    - fsf
+    - summary_ops
+    - ops
   transforms:
     - name: no-event
       args:
@@ -71,7 +77,8 @@ val_data:
         mode: random
 model:
   block_size: 48
-  vocab_size: 1270
+  # vocab_size: 1270
+  vocab_size: 3097
   n_layer: 12
   n_head: 12
   n_embd: 120
@@ -86,70 +93,74 @@ model:
     - female
     - config/disease_list/lifestyle.yaml
   biomarkers:
-    # prs:
-    #   projector: linear
-    #   input_size: 36
-    #   n_token: 1
-    # family_hx:
-    #   projector: embed
-    #   vocab_size: 15
-    #   n_token: null
+    prs:
+      projector: linear
+      input_size: 36
+      n_token: 1
+    family_hx:
+      projector: embed
+      vocab_size: 15
+      n_token: null
     blood_all:
       projector: linear
       input_size: 57
       n_token: 1
-    # wbc:
-    #   projector: linear
-    #   input_size: 31
-    #   n_token: 1
-    # lipid:
-    #   projector: linear
-    #   input_size: 4
-    #   n_token: 1
-    # lft:
-    #   projector: linear
-    #   input_size: 7
-    #   n_token: 1
-    # renal:
-    #   projector: linear
-    #   input_size: 6
-    #   n_token: 1
-    # hba1c:
-    #   projector: linear
-    #   input_size: 1
-    #   n_token: 1
-    # crp:
-    #   projector: linear
-    #   input_size: 1
-    #   n_token: 1
-    # urate:
-    #   projector: linear
-    #   input_size: 1
-    #   n_token: 1
-    # cysc:
-    #   projector: linear
-    #   input_size: 1
-    #   n_token: 1
-    # apo:
-    #   projector: linear
-    #   input_size: 2
-    #   n_token: 1
-    # vitd:
-    #   projector: linear
-    #   input_size: 1
-    #   n_token: 1
-    # dht:
-    #   projector: linear
-    #   input_size: 1
-    #   n_token: 1
-    # shbg:
-    #   projector: linear
-    #   input_size: 1
-    #   n_token: 1
-    # igf1:
-    #   projector: linear
-    #   input_size: 1
-    #   n_token: 1
+    meds:
+      projector: embed
+      vocab_size: 745
+      n_token: null
+    wbc:
+      projector: linear
+      input_size: 31
+      n_token: 1
+    lipid:
+      projector: linear
+      input_size: 4
+      n_token: 1
+    lft:
+      projector: linear
+      input_size: 7
+      n_token: 1
+    renal:
+      projector: linear
+      input_size: 6
+      n_token: 1
+    hba1c:
+      projector: linear
+      input_size: 1
+      n_token: 1
+    crp:
+      projector: linear
+      input_size: 1
+      n_token: 1
+    urate:
+      projector: linear
+      input_size: 1
+      n_token: 1
+    cysc:
+      projector: linear
+      input_size: 1
+      n_token: 1
+    apo:
+      projector: linear
+      input_size: 2
+      n_token: 1
+    vitd:
+      projector: linear
+      input_size: 1
+      n_token: 1
+    dht:
+      projector: linear
+      input_size: 1
+      n_token: 1
+    shbg:
+      projector: linear
+      input_size: 1
+      n_token: 1
+    igf1:
+      projector: linear
+      input_size: 1
+      n_token: 1
   modality_emb: true
   loss:
     ce_beta: 1.0
