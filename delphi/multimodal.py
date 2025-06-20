@@ -19,6 +19,10 @@ class Modality(Enum):
     DHT = 15
     SHBG = 16
     IGF1 = 17
+    NAK = 18
+    CREAT = 19
+    ALBU = 20
+    MEDS = 21
 
 
 def module_name(modality: Modality) -> str:

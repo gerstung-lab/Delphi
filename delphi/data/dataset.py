@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass, field
+from turtle import st
 from typing import Iterator, List, Optional
 
 import numpy as np
@@ -8,7 +9,6 @@ import torch
 import yaml
 from scipy.sparse import coo_array
 
-from delphi.data.lmdb import BiomarkerLMDB, collate_batch_time
 from delphi.data.transform import TransformArgs, parse_transform
 from delphi.env import DELPHI_DATA_DIR
 from delphi.multimodal import Modality
@@ -64,15 +64,6 @@ def sort_by_time(X: np.ndarray, T: np.ndarray):
     s = np.argsort(T, axis=1)
     X = np.take_along_axis(X, s, axis=1)
     T = np.take_along_axis(T, s, axis=1)
-
-    return X, T
-
-
-def squeeze(X: np.ndarray, T: np.ndarray):
-
-    squeeze_margin = np.min(np.sum(X == 0, axis=1))
-    X = X[:, squeeze_margin:]
-    T = T[:, squeeze_margin:]
 
     return X, T
 
@@ -199,28 +190,86 @@ def build_prefetch_loader(loader: Iterator) -> Iterator:
 
 def collate_batch_data(batch_data: list[np.ndarray]) -> np.ndarray:
 
-    max_len = max([data.size for data in batch_data])
+    max_len = max([bd.size for bd in batch_data])
     collated_batch = np.full(
         shape=(len(batch_data), max_len),
         fill_value=0,
         dtype=batch_data[0].dtype,
     )
-    for i, data in enumerate(batch_data):
-        collated_batch[i, : data.size] = data
+    for i, bd in enumerate(batch_data):
+        collated_batch[i, : bd.size] = bd
+
+    return collated_batch
+
+
+def collate_batch_time(batch_time: list[np.ndarray]) -> np.ndarray:
+
+    max_len = max([bt.size for bt in batch_time])
+    collated_batch = np.full(
+        shape=(len(batch_time), max_len), fill_value=-1e4, dtype=np.float32
+    )
+    for i, bt in enumerate(batch_time):
+        collated_batch[i, : bt.size] = bt
 
     return collated_batch
 
 
 @dataclass
 class UKBDataConfig:
-    data_dir: str = "data/ukb_simulated_data"
+    data_dir: str = "ukb_real_data"
     subject_list: str = "participants.bin"
-    expansion_pack_dir: str = "data/ukb_simulated_data/expansion_packs"
+    expansion_pack_dir: str = "ukb_real_data/expansion_packs"
     expansion_packs: list[str] = field(default_factory=list)
-    biomarker_dir: str = "data/ukb_simulated_data/biomarkers"
+    biomarker_dir: str = "ukb_real_data/biomarkers"
     biomarkers: dict[str, Optional[int]] = field(default_factory=dict)
     seed: int = 42
     transforms: Optional[List[TransformArgs]] = None
+
+
+class Biomarker:
+
+    def __init__(self, path: str, n_token: Optional[int] = None):
+        self.path = path
+        self.n_token = n_token
+        self.data = np.load(
+            os.path.join(path, "data.npy"),
+            allow_pickle=True,
+        )
+        p2i = pd.read_csv(
+            os.path.join(path, "p2i.csv"),
+            index_col="pid",
+        )
+        self.start_pos = p2i["start_pos"].to_dict()
+        self.seq_len = p2i["seq_len"].to_dict()
+        self.time_steps = p2i["time"].to_dict()
+
+    def __repr__(self):
+        return f"Biomarker(path={self.path}, n_token={self.n_token})"
+
+    def get_raw_batch(
+        self, pids: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+
+        time_steps = np.array([self.time_steps[pid] for pid in pids])
+        start_pos = np.array([self.start_pos[pid] for pid in pids])
+        seq_len = np.array([self.seq_len[pid] for pid in pids])
+
+        batch_data = []
+        batch_time = []
+        batch_count = (seq_len == 0).astype(np.int32)
+
+        for i, l, t in zip(start_pos, seq_len, time_steps):
+            if l > 0:
+                x = self.data[i : i + l]
+                batch_data.append(x)
+                n_token = x.size if self.n_token is None else self.n_token
+                t = np.repeat(t, n_token)
+            batch_time.append(np.array(t))
+
+        batch_data = collate_batch_data(batch_data)
+        batch_time = collate_batch_time(batch_time)
+
+        return batch_data, batch_time, batch_count
 
 
 class ExpansionPack:
@@ -231,12 +280,8 @@ class ExpansionPack:
         self.offset = offset
         self.start_pos = p2i["start_pos"].to_dict()
         self.seq_len = p2i["seq_len"].to_dict()
-        self.tokens = np.memmap(
-            os.path.join(path, "data.bin"), dtype=np.uint32, mode="r"
-        )
-        self.time_steps = np.memmap(
-            os.path.join(path, "time.bin"), dtype=np.uint32, mode="r"
-        )
+        self.tokens = np.load(os.path.join(path, "data.npy"))
+        self.time_steps = np.load(os.path.join(path, "time.npy"))
 
     def get_expansion(self, pid: int) -> tuple[np.ndarray, np.ndarray]:
 
@@ -277,7 +322,7 @@ class Dataset:
         )
         cfg.expansion_packs.sort()
         self.expansion_packs = []
-        for pack in self.expansion_packs:
+        for pack in cfg.expansion_packs:
             print(f"\t– loading expansion pack: {pack}")
             pack_path = os.path.join(DELPHI_DATA_DIR, cfg.expansion_pack_dir, pack)
             assert os.path.exists(pack_path), FileNotFoundError(
@@ -298,10 +343,8 @@ class Dataset:
         for modality, n_token in cfg.biomarkers.items():
             modality = Modality[modality.upper()]
             print(f"\t– loading biomarker: {modality.name}")
-            lmdb_path = os.path.join(
-                self.biomarker_dir, modality.name.lower() + ".lmdb"
-            )
-            dataset = BiomarkerLMDB(lmdb_path=lmdb_path, n_token=n_token)
+            biomarker_path = os.path.join(self.biomarker_dir, modality.name.lower())
+            dataset = Biomarker(path=biomarker_path, n_token=n_token)
             self.mod_ds[modality] = dataset
 
         self.transforms = []
@@ -346,7 +389,7 @@ class Dataset:
         biomarker_T = {}
         biomarker_C = {}
         for modality, dataset in self.mod_ds.items():
-            m_X, m_T, m_C = dataset.get_raw_batch([str(P_i) for P_i in P])
+            m_X, m_T, m_C = dataset.get_raw_batch(P)
             biomarker_X[modality] = m_X
             biomarker_T[modality] = m_T
             biomarker_C[modality] = m_C

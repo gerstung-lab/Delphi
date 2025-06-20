@@ -39,6 +39,9 @@ class Tokenizer:
         self.id2name = {v: k for k, v in self.name2id.items()}
         self.vocab_size = len(self.name2id)
 
+    def __repr__(self) -> str:
+        return f"Tokenizer(vocab_size={self.vocab_size}, name2id={self.name2id})"
+
     def __getitem__(self, key: str) -> int:
         if key not in self.name2id:
             raise KeyError(f"disease key {key} not found in tokenizer.")
