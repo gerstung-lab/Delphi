@@ -1,5 +1,5 @@
 import os
-from curses.ascii import DEL
+from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -10,6 +10,7 @@ MULTIMODAL_INPUT_DIR = os.environ["MULTIMODAL_INPUT_DIR"]
 MULTIMODAL_OUTPUT_DIR = os.environ["MULTIMODAL_OUTPUT_DIR"]
 
 expansion_pack_dir = os.path.join(DELPHI_DATA_DIR, "ukb_real_data", "expansion_packs")
+biomarker_dir = os.path.join(DELPHI_DATA_DIR, "ukb_real_data", "biomarkers")
 
 
 def all_ukb_participants():
@@ -29,10 +30,29 @@ def all_ukb_participants():
     return all_P
 
 
+def load_visit(fid: str, visit_idx: int = 0) -> dict:
+
+    df = pd.read_csv(fid, delimiter="\t", index_col="f.eid")
+    assert visit_idx < df.shape[1], "visit index out of bounds"
+
+    return df.iloc[:, visit_idx].to_dict()
+
+
+def data_key(pid: Union[int, str]) -> str:
+    return f"{pid}.data"
+
+
+def time_key(pid: Union[int, str]) -> str:
+    return f"{pid}.time"
+
+
 assessment_age = pd.read_csv(
-    "data/multimodal/general/age_at_assess.csv", index_col="pid"
-)["age"].to_dict()
+    os.path.join(DELPHI_DATA_DIR, "multimodal/general/age_at_assess.csv"),
+    index_col="pid",
+)["age"]
 
 sex = pd.read_csv(
-    "data/multimodal/general/sex_31.txt", delimiter="\t", index_col="f.eid"
+    os.path.join(DELPHI_DATA_DIR, "multimodal/general/sex_31.txt"),
+    delimiter="\t",
+    index_col="f.eid",
 )["f.31.0.0"].to_dict()
