@@ -32,6 +32,9 @@ train_data:
     dht: ${model.biomarkers.dht.n_token}
     shbg: ${model.biomarkers.shbg.n_token}
     igf1: ${model.biomarkers.igf1.n_token}
+    nak: ${model.biomarkers.nak.n_token}
+    albu: ${model.biomarkers.albu.n_token}
+    creat: ${model.biomarkers.creat.n_token}
   expansion_pack_dir: ukb_real_data/expansion_packs
   expansion_packs:
     - fsf
@@ -65,6 +68,9 @@ val_data:
     dht: ${model.biomarkers.dht.n_token}
     shbg: ${model.biomarkers.shbg.n_token}
     igf1: ${model.biomarkers.igf1.n_token}
+    nak: ${model.biomarkers.nak.n_token}
+    albu: ${model.biomarkers.albu.n_token}
+    creat: ${model.biomarkers.creat.n_token}
   expansion_pack_dir: ukb_real_data/expansion_packs
   expansion_packs:
     - fsf
@@ -161,6 +167,18 @@ model:
       projector: linear
       input_size: 1
       n_token: 1
+    nak:
+      projector: linear
+      input_size: 2
+      n_token: 1
+    creat:
+      projector: linear
+      input_size: 1
+      n_token: 1
+    albu:
+      projector: linear
+      input_size: 1
+      n_token: 1
   modality_emb: true
   loss:
     ce_beta: 1.0
@@ -168,7 +186,7 @@ model:
     zero_inflate: false
 log:
   wandb_log: true
-  wandb_project: delphi
+  wandb_project: ${ckpt_dir}
   run_name: debug
   log_interval: 25
   always_ckpt_after_eval: true
