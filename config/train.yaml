@@ -98,6 +98,9 @@ model:
     - male
     - female
     - config/disease_list/lifestyle.yaml
+    - config/disease_list/ops.yaml
+    - config/disease_list/summary_ops.yaml
+    - config/disease_list/fsf.yaml
   biomarkers:
     prs:
       projector: linear
