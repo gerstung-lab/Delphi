@@ -152,7 +152,7 @@ def calibrate_auc(
         "either": is_female | is_male,
     }
 
-    sub_idx, pos_idx = np.nonzero(X)
+    sub_idx, pos_idx = np.nonzero(T != -1e4)
 
     for disease in tqdm(disease_lst):
         logbook[disease] = {}
