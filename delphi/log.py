@@ -115,7 +115,7 @@ class GenLogger:
             raise ValueError("memmaps not initialized; call init_memmaps first")
 
         if self.save_tokens:
-            sub_idx, pos_idx = np.nonzero(tokens > 0)
+            sub_idx, pos_idx = np.nonzero(timesteps != -1e4)
             packed_batch = np.stack(
                 (
                     participants[sub_idx],
