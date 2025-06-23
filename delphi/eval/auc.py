@@ -1,6 +1,6 @@
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -9,7 +9,6 @@ from tqdm import tqdm
 
 from delphi import DAYS_PER_YEAR
 from delphi.data.dataset import tricolumnar_to_2d
-from delphi.data.trajectory import corrective_indices
 from delphi.eval import eval_task
 from delphi.tokenizer import Gender, Tokenizer
 
@@ -56,8 +55,10 @@ def mann_whitney_auc(x1: np.ndarray, x2: np.ndarray) -> float:
 
 def rates_by_age_bin(
     input_time: np.ndarray,
-    targets: np.ndarray,
     predicted_rates: np.ndarray,
+    disease_free: np.ndarray,
+    targets: np.ndarray,
+    sub_idx: np.ndarray,
     dis_token: int,
     age_groups: list[tuple[int, int]],
 ):
@@ -68,7 +69,6 @@ def rates_by_age_bin(
     dis_rates = []
 
     have_disease = targets == dis_token
-    disease_free = ~np.any(have_disease, axis=1)[:, np.newaxis]
 
     for age_start, age_end in age_groups:
 
@@ -78,8 +78,8 @@ def rates_by_age_bin(
         is_ctl = disease_free & in_time_range
         is_dis = have_disease & in_time_range
 
-        ctl_subjects.append(np.nonzero(is_ctl)[0])
-        dis_subjects.append(np.nonzero(is_dis)[0])
+        ctl_subjects.append(sub_idx[is_ctl])
+        dis_subjects.append(sub_idx[is_dis])
 
         ctl_rates.append(predicted_rates[is_ctl])
         dis_rates.append(predicted_rates[is_dis])
@@ -99,6 +99,27 @@ def sample_one_per_participant(subjects, rates):
     return rates[uniq_idx]
 
 
+def corrective_indices(T0: np.ndarray, T1: np.ndarray, offset: float):
+
+    m, _ = T0.shape
+    _, p = T1.shape
+
+    C = np.zeros((m, p), dtype=int)
+
+    for i in range(m):
+        t0_row = T0[i]
+        t1_row = T1[i]
+
+        c_idx = (
+            np.broadcast_to(t0_row, (t1_row.size, t0_row.size))
+            <= (t1_row - offset).reshape(-1, 1)
+        ).sum(axis=1) - 1
+
+        C[i] = c_idx
+
+    return C
+
+
 @eval_task.register
 def calibrate_auc(
     task_args: CalibrateAUCArgs,
@@ -115,15 +136,7 @@ def calibrate_auc(
         disease_lst = yaml.safe_load(f)
 
     logbook_path = os.path.join(ckpt, task_input, f"{task_name}.json")
-    if os.path.exists(logbook_path):
-        logbook = json.load(open(logbook_path, "r"))
-    else:
-        logbook = {}
-    logbook_cfg = logbook.setdefault("config", {})
-    if "min_time_gap" in logbook_cfg:
-        assert logbook_cfg["min_time_gap"] == round(float(task_args.min_time_gap), 1)
-    else:
-        logbook_cfg["min_time_gap"] = round(float(task_args.min_time_gap), 1)
+    logbook = {}
 
     input_dir = os.path.join(ckpt, task_input)
     logits_path = os.path.join(input_dir, "logits.bin")
@@ -134,45 +147,54 @@ def calibrate_auc(
     XT = np.fromfile(xt_path, dtype=np.uint32).reshape(-1, 3)
 
     X, T = tricolumnar_to_2d(XT)
+    sub_idx, pos_idx = np.nonzero(T != -1e4)
+    max_len = T.shape[1] - 1
     X_t0, X_t1 = X[:, :-1], X[:, 1:]
     T_t0, T_t1 = T[:, :-1], T[:, 1:]
     C = corrective_indices(
         T0=T_t0,
         T1=T_t1,
-        offset=task_args.min_time_gap,
+        offset=task_args.min_time_gap * 365.25,
     )
-    T_t0 = np.take_along_axis(T_t0, C, axis=1)
-    X_t0 = np.take_along_axis(X_t0, C, axis=1)
 
-    is_female = (X_t0 == tokenizer[Gender.FEMALE.value]).any(axis=1)
-    is_male = (X_t0 == tokenizer[Gender.MALE.value]).any(axis=1)
+    remove_last = pos_idx < max_len
+    sub_idx, pos_idx = sub_idx[remove_last], pos_idx[remove_last]
+    logits_idx = np.arange(logits.shape[0])[remove_last]
+
+    offset_pos_idx = C[sub_idx, pos_idx]
+
+    has_input = offset_pos_idx >= 0
+    sub_idx, pos_idx = sub_idx[has_input], pos_idx[has_input]
+    offset_pos_idx = offset_pos_idx[has_input]
+    logits_idx = logits_idx[has_input]
+
+    logits_idx = logits_idx[np.arange(logits_idx.shape[0]) + offset_pos_idx - pos_idx]
+    t_t0 = T_t0[sub_idx, offset_pos_idx]
+    targets = X_t1[sub_idx, pos_idx]
+
+    is_female = (X_t0 == tokenizer[Gender.FEMALE.value]).any(axis=1)[sub_idx]
+    is_male = (X_t0 == tokenizer[Gender.MALE.value]).any(axis=1)[sub_idx]
     is_gender_dict = {
         "female": is_female,
         "male": is_male,
         "either": is_female | is_male,
     }
 
-    sub_idx, pos_idx = np.nonzero(T != -1e4)
-
     for disease in tqdm(disease_lst):
         logbook[disease] = {}
-
-        Y = np.zeros_like(X, dtype=np.float16)
         dis_token = tokenizer[disease]
-        Y[sub_idx, pos_idx] = logits[:, dis_token]
-        Y_t1 = Y[:, :-1]
-        Y_t1 = np.take_along_axis(Y_t1, C, axis=1)
+
+        disease_free = (~(X_t1 == dis_token).any(axis=1))[sub_idx]
+        y_t1 = logits[logits_idx, dis_token]
 
         for gender, is_gender in is_gender_dict.items():
 
-            x1 = X_t1[is_gender]
-            t0 = T_t0[is_gender]
-            y = Y_t1[is_gender]
-
             ctl_subjects, dis_subjects, ctl_rates, dis_rates = rates_by_age_bin(
-                input_time=t0,
-                targets=x1,
-                predicted_rates=y,
+                input_time=t_t0[is_gender],
+                sub_idx=sub_idx[is_gender],
+                predicted_rates=y_t1[is_gender],
+                disease_free=disease_free[is_gender],
+                targets=targets[is_gender],
                 dis_token=dis_token,
                 age_groups=age_groups,
             )

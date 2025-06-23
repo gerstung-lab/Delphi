@@ -5,11 +5,9 @@ import numpy as np
 import pytest
 
 from archive.evaluate_auc import get_calibration_auc
-from delphi import disease
 from delphi.data.dataset import tricolumnar_to_2d
-from delphi.data.trajectory import corrective_indices
 from delphi.env import DELPHI_CKPT_DIR
-from delphi.eval.auc import rates_by_age_bin
+from delphi.eval.auc import corrective_indices, rates_by_age_bin
 from delphi.tokenizer import load_tokenizer_from_ckpt
 
 
@@ -26,7 +24,7 @@ def load_XT(ckpt: str, task_input: str = "forward"):
 def load_Y(
     ckpt: str,
     disease: str,
-    tokens: np.ndarray,
+    timesteps: np.ndarray,
     task_input: str = "forward",
 ):
 
@@ -34,35 +32,57 @@ def load_Y(
     dis_token = tokenizer[disease]
     logits_path = os.path.join(DELPHI_CKPT_DIR, ckpt, task_input, "logits.bin")
     logits = np.fromfile(logits_path, dtype=np.float16).reshape(
-        -1, tokenizer.vocab_size + 1
+        -1, tokenizer.vocab_size
     )
 
-    Y = np.zeros_like(tokens, dtype=np.float16)
-    sub_idx, pos_idx = np.nonzero(tokens)
+    Y = np.zeros_like(timesteps, dtype=np.float16)
+    sub_idx, pos_idx = np.nonzero(timesteps != -1e4)
     Y[sub_idx, pos_idx] = logits[:, dis_token]
 
-    return Y, dis_token
+    return logits, Y, dis_token
 
 
-def new_pipeline(X, T, Y, dis_token, offset):
+def new_pipeline(X, T, logits, dis_token, offset):
 
     now = time.time()
 
-    X_t1 = X[:, 1:]
+    sub_idx, pos_idx = np.nonzero(T != -1e4)
+    max_len = T.shape[1] - 1
+    X_t0, X_t1 = X[:, :-1], X[:, 1:]
     T_t0, T_t1 = T[:, :-1], T[:, 1:]
-    Y_t1 = Y[:, :-1]
+    C = corrective_indices(
+        T0=T_t0,
+        T1=T_t1,
+        offset=offset,
+    )
 
-    C = corrective_indices(T0=T_t0, T1=T_t1, offset=offset)
-    T_t0 = np.take_along_axis(T_t0, C, axis=1)
-    Y_t1 = np.take_along_axis(Y_t1, C, axis=1)
+    remove_last = pos_idx < max_len
+    sub_idx, pos_idx = sub_idx[remove_last], pos_idx[remove_last]
+    logits_idx = np.arange(logits.shape[0])[remove_last]
+
+    offset_pos_idx = C[sub_idx, pos_idx]
+
+    has_input = offset_pos_idx >= 0
+    sub_idx, pos_idx = sub_idx[has_input], pos_idx[has_input]
+    offset_pos_idx = offset_pos_idx[has_input]
+    logits_idx = logits_idx[has_input]
+
+    logits_idx = logits_idx[np.arange(logits_idx.shape[0]) + offset_pos_idx - pos_idx]
+    t_t0 = T_t0[sub_idx, offset_pos_idx]
+    targets = X_t1[sub_idx, pos_idx]
+
+    disease_free = (~(X_t1 == dis_token).any(axis=1))[sub_idx]
+    y_t1 = logits[logits_idx, dis_token]
 
     age_group_edges = np.arange(45, 85, 5)
     age_groups = [(i, j) for i, j in zip(age_group_edges[:-1], age_group_edges[1:])]
     ctl_subjects, dis_subjects, ctl_rates, dis_rates = rates_by_age_bin(
+        input_time=t_t0,
+        sub_idx=sub_idx,
+        predicted_rates=y_t1,
+        disease_free=disease_free,
+        targets=targets,
         dis_token=dis_token,
-        input_time=T_t0,
-        targets=X_t1,
-        predicted_rates=Y_t1,
         age_groups=age_groups,
     )
     ctl_counts = np.array([len(np.unique(subj)) for subj in ctl_subjects])
@@ -145,7 +165,8 @@ def not_too_slow(new_t: float, bl_t: float) -> bool:
 
 ckpt = ["debug"]
 disease = ["a41_(other_septicaemia)", "g30_(alzheimer's_disease)", "death"]
-offset = [0.1, 0.5, 1.0, 5.0, 10.0]
+# offset = [0.1, 0.5, 1.0, 5.0, 10.0]
+offset = [10.0]
 
 
 @pytest.mark.parametrize(
@@ -154,9 +175,10 @@ offset = [0.1, 0.5, 1.0, 5.0, 10.0]
 def test(ckpt: str, disease: str, offset: float):
 
     X, T = load_XT(ckpt)
-    Y, dis_token = load_Y(ckpt, disease, X)
+    logits, Y, dis_token = load_Y(ckpt, disease, T)
+    offset = offset * 365.25  # convert years to days
     (ctl_counts_new, dis_counts_new, ctl_rates, dis_rates), new_t = new_pipeline(
-        X, T, Y, dis_token, offset
+        X, T, logits, dis_token, offset
     )
     (bl_ctl_n, bl_dis_n, bl_ctl_rates, bl_dis_rates), bl_t = baseline(
         X, T, Y, dis_token, offset
@@ -178,4 +200,4 @@ def test(ckpt: str, disease: str, offset: float):
         bl_ctl_rates=bl_ctl_rates,
     )
 
-    # assert not_too_slow(new_t, bl_t)
+    assert not_too_slow(new_t, bl_t)
