@@ -1,4 +1,4 @@
-task_name: auc
+task_name: auc-min_tim_gap_${task_args.min_time_gap}-event_input_only_${task_args.event_input_only}
 task_type: auc
 task_input: forward
 task_args:
@@ -8,3 +8,4 @@ task_args:
     bin_start: 40
     bin_end: 80
     bin_width: 5
+  event_input_only: false

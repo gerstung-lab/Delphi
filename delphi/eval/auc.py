@@ -215,19 +215,23 @@ def calibrate_auc(
                 for ctl_rate, dis_rate in zip(ctl_rates, dis_rates)
             ]
 
+            n_ctl = [len(np.unique(s)) for s in ctl_subjects]
+            n_dis = [len(s) for s in dis_subjects]
             logbook[disease][gender] = {
                 age_group_keys[i]: {
                     "auc": round(float(auc[i]), 2) if not np.isnan(auc[i]) else None,
-                    "ctl_count": len(ctl_subjects[i]),
-                    "dis_count": len(dis_subjects[i]),
+                    "ctl_count": int(n_ctl[i]),
+                    "dis_count": int(n_dis[i]),
                 }
                 for i in range(len(age_groups))
             }
             mean_auc = float(np.nanmean(auc))
+            all_ctl = np.concatenate(ctl_subjects)
+            all_dis = np.concatenate(dis_subjects)
             logbook[disease][gender]["total"] = {
                 "auc": round(mean_auc, 2) if not np.isnan(mean_auc) else None,
-                "ctl_count": int(np.sum([len(s) for s in ctl_subjects])),
-                "dis_count": int(np.sum([len(s) for s in dis_subjects])),
+                "ctl_count": len(np.unique(all_ctl)),
+                "dis_count": len(all_dis),
             }
 
     with open(logbook_path, "w") as f:
