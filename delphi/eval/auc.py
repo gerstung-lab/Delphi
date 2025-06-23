@@ -27,6 +27,7 @@ class CalibrateAUCArgs:
     disease_lst: str = ""
     age_groups: TimeBins = field(default_factory=TimeBins)
     min_time_gap: float = 0.1
+    event_input_only: bool = True
 
 
 def parse_time_bins(time_bins: TimeBins) -> list[tuple[int, int]]:
@@ -148,6 +149,7 @@ def calibrate_auc(
 
     X, T = tricolumnar_to_2d(XT)
     sub_idx, pos_idx = np.nonzero(T != -1e4)
+
     max_len = T.shape[1] - 1
     X_t0, X_t1 = X[:, :-1], X[:, 1:]
     T_t0, T_t1 = T[:, :-1], T[:, 1:]
@@ -159,14 +161,19 @@ def calibrate_auc(
 
     remove_last = pos_idx < max_len
     sub_idx, pos_idx = sub_idx[remove_last], pos_idx[remove_last]
-    logits_idx = np.arange(logits.shape[0])[remove_last]
-
     offset_pos_idx = C[sub_idx, pos_idx]
+    logits_idx = np.arange(logits.shape[0])[remove_last]
 
     has_input = offset_pos_idx >= 0
     sub_idx, pos_idx = sub_idx[has_input], pos_idx[has_input]
     offset_pos_idx = offset_pos_idx[has_input]
     logits_idx = logits_idx[has_input]
+
+    if task_args.event_input_only:
+        is_event = X_t0[sub_idx, offset_pos_idx] > 0
+        sub_idx, pos_idx = sub_idx[is_event], pos_idx[is_event]
+        offset_pos_idx = offset_pos_idx[is_event]
+        logits_idx = logits_idx[is_event]
 
     logits_idx = logits_idx[np.arange(logits_idx.shape[0]) + offset_pos_idx - pos_idx]
     t_t0 = T_t0[sub_idx, offset_pos_idx]
