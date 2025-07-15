@@ -1,4 +1,3 @@
-import inspect
 import math
 from pathlib import Path
 from typing import Optional
@@ -140,9 +139,6 @@ class Delphi(nn.Module):
         self.transformer = nn.ModuleDict(
             dict(
                 embed=DelphiEmbedding(config),
-                # wte=nn.Embedding(config.vocab_size, config.n_embd),
-                # wae=AgeEncoding(config),
-                # token_drop=nn.Dropout(config.token_dropout),
                 drop=nn.Dropout(config.dropout),
                 h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
                 ln_f=LayerNorm(config.n_embd, bias=config.bias),
@@ -165,18 +161,11 @@ class Delphi(nn.Module):
                 )
 
         # report number of parameters
-        print("number of parameters: %.2fM" % (self.get_num_params() / 1e6,))
+        print("number of parameters: %.2fM" % (self.num_params / 1e6,))
 
-    def get_num_params(self, non_embedding=True):
-        """
-        Return the number of parameters in the model.
-        For non-embedding count (default), the position embeddings get subtracted.
-        The token embeddings would too, except due to the parameter sharing these
-        params are actually used as weights in the final layer, so we include them.
-        """
+    @property
+    def num_params(self):
         n_params = sum(p.numel() for p in self.parameters())
-        # if non_embedding:
-        #    n_params -= self.transformer.wpe.weight.numel()
         return n_params
 
     def _init_weights(self, module):
