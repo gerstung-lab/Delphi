@@ -1,0 +1,144 @@
+ckpt_dir: multimodal
+eval_interval: 250
+eval_iters: 25
+eval_only: false
+init_from: scratch
+seed: 42
+gradient_accumulation_steps: 1
+batch_size: 128
+device: cuda
+
+train_data:
+  data_dir: ukb_real_data
+  subject_list: ukb_real_data/participants/train_fold.bin
+  seed: 42
+  biomarker_dir: ukb_real_data/biomarkers
+  biomarkers:
+    prs: ${model.biomarkers.prs.n_token}
+    family_hx: ${model.biomarkers.family_hx.n_token}
+    blood_all: ${model.biomarkers.blood_all.n_token}
+    meds: ${model.biomarkers.meds.n_token}
+    nak: ${model.biomarkers.nak.n_token}
+    albu: ${model.biomarkers.albu.n_token}
+    creat: ${model.biomarkers.creat.n_token}
+    diet: ${model.biomarkers.diet.n_token}
+    met: ${model.biomarkers.met.n_token}
+    telomere: ${model.biomarkers.telomere.n_token}
+  expansion_pack_dir: ukb_real_data/expansion_packs
+  expansion_packs:
+    - fsf
+    - summary_ops
+    - ops
+    - prescriptions
+  transforms:
+    - name: no-event
+      args:
+        interval_in_years: 5
+        mode: random
+val_data:
+  data_dir: ukb_real_data
+  subject_list: ukb_real_data/participants/val_fold.bin
+  seed: 42
+  biomarker_dir: ukb_real_data/biomarkers
+  biomarkers:
+    prs: ${model.biomarkers.prs.n_token}
+    family_hx: ${model.biomarkers.family_hx.n_token}
+    blood_all: ${model.biomarkers.blood_all.n_token}
+    meds: ${model.biomarkers.meds.n_token}
+    nak: ${model.biomarkers.nak.n_token}
+    albu: ${model.biomarkers.albu.n_token}
+    creat: ${model.biomarkers.creat.n_token}
+    diet: ${model.biomarkers.diet.n_token}
+    met: ${model.biomarkers.met.n_token}
+    telomere: ${model.biomarkers.telomere.n_token}
+  expansion_pack_dir: ukb_real_data/expansion_packs
+  expansion_packs:
+    - fsf
+    - summary_ops
+    - ops
+    - prescriptions
+  transforms:
+    - name: no-event
+      args:
+        interval_in_years: 5
+        mode: random
+model:
+  block_size: 48
+  n_layer: 12
+  n_head: 12
+  n_embd: 120
+  dropout: 0.1
+  token_dropout: 0.0
+  t_min: 0.1
+  bias: true
+  mask_ties: true
+  ignore_tokens:
+    - padding
+    - male
+    - female
+    - config/disease_list/lifestyle.yaml
+    - config/disease_list/ops.yaml
+    - config/disease_list/summary_ops.yaml
+    - config/disease_list/fsf.yaml
+    - config/disease_list/prescriptions.yaml
+  biomarkers:
+    prs:
+      projector: linear
+      input_size: 36
+      n_token: 1
+    family_hx:
+      projector: embed
+      vocab_size: 15
+      n_token: null
+    blood_all:
+      projector: linear
+      input_size: 57
+      n_token: 1
+    meds:
+      projector: embed
+      vocab_size: 745
+      n_token: null
+    nak:
+      projector: linear
+      input_size: 2
+      n_token: 1
+    creat:
+      projector: linear
+      input_size: 1
+      n_token: 1
+    albu:
+      projector: linear
+      input_size: 1
+      n_token: 1
+    diet:
+      projector: linear
+      input_size: 16
+      n_token: 1
+    met:
+      projector: linear
+      input_size: 3
+      n_token: 1
+    telomere:
+      projector: linear
+      input_size: 1
+      n_token: 1
+  modality_emb: true
+  loss:
+    ce_beta: 1.0
+    dt_beta: 1.0
+    zero_inflate: false
+log:
+  wandb_log: true
+  wandb_project: ${ckpt_dir}
+  run_name: delphi-m4
+  log_interval: 25
+  always_ckpt_after_eval: true
+  ckpt_interval: null
+optim:
+  learning_rate: 6e-4
+  max_iters: 100000
+  weight_decay: 2e-1
+  lr_decay_iters: 100000
+  min_lr: 6e-5
+  beta2: 0.99
+  warmup_iters: 1000
