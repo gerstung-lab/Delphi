@@ -116,10 +116,17 @@ def train(cfg: TrainConfig):
 
     val_ds = Dataset(cfg.val_data)
 
-    print(f"vocab_size: {cfg.model.vocab_size}")
-    assert (
-        cfg.model.vocab_size == train_ds.vocab_size
-    ), f"inconsistent vocab size between tokenizer ({train_ds.vocab_size}) and model ({cfg.model.vocab_size})"
+    if cfg.model.vocab_size is None:
+        cfg.model.vocab_size = train_ds.vocab_size
+        print(
+            f"vocab_size not set, using vocab size of training dataset's tokenizer: {cfg.model.vocab_size}"
+        )
+    else:
+        print(f"vocab_size: {cfg.model.vocab_size}")
+        assert (
+            cfg.model.vocab_size == train_ds.vocab_size
+        ), f"inconsistent vocab size between tokenizer ({train_ds.vocab_size}) and model"
+
     ignore_tokens = parse_ignore_tokens(cfg.model.ignore_tokens)
     print(f"ignored tokens: {ignore_tokens}")
     cfg.model.ignore_tokens = train_ds.tokenizer.encode(ignore_tokens)  # type: ignore
