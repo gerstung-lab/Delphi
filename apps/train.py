@@ -106,12 +106,7 @@ def train(cfg: TrainConfig):
     torch.set_default_dtype(ptdtype)
 
     train_ds = Dataset(cfg.train_data)
-    total_train_size = len(train_ds)
-    if cfg.data_fraction < 1.0:
-        total_train_size = int(cfg.data_fraction * len(train_ds))
-    train_it = train_iter(
-        rng=rng, total_size=total_train_size, batch_size=cfg.batch_size
-    )
+    train_it = train_iter(rng=rng, total_size=len(train_ds), batch_size=cfg.batch_size)
     train_loader = load_sequences(it=train_it, dataset=train_ds)
 
     val_ds = Dataset(cfg.val_data)

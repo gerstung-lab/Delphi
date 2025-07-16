@@ -7,7 +7,6 @@ gradient_accumulation_steps: 1
 batch_size: 256
 device: mps
 
-data_fraction: 1.0
 train_data:
   data_dir: ukb_simulated_data
   memmap_fname: train.bin
