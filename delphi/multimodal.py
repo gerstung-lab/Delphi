@@ -23,6 +23,9 @@ class Modality(Enum):
     CREAT = 19
     ALBU = 20
     MEDS = 21
+    DIET = 22
+    MET = 23
+    TELOMERE = 24
 
 
 def module_name(modality: Modality) -> str:
