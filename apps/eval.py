@@ -9,22 +9,20 @@ from delphi.eval import clock, eval_task
 from delphi.eval.auc import CalibrateAUCArgs
 from delphi.model.transformer import load_model
 from delphi.tokenizer import load_tokenizer_from_ckpt
-from delphi.visualize.compare_auc import CompareAUCArgs
 
 
 class TaskType(Enum):
     AUC = "auc"
-    COMPARE_AUC = "compare_auc"
-    CUMUL_RISK_AUC = "cumul_risk_auc"
-    NORM_RISK_AUC = "norm_risk_auc"
-    CALIBRATION = "calibration"
-    INCIDENCE = "incidence"
-    BURDEN = "burden"
+    # COMPARE_AUC = "compare_auc"
+    # CUMUL_RISK_AUC = "cumul_risk_auc"
+    # NORM_RISK_AUC = "norm_risk_auc"
+    # CALIBRATION = "calibration"
+    # INCIDENCE = "incidence"
+    # BURDEN = "burden"
 
 
 task_type_to_args_type = {
     TaskType.AUC: CalibrateAUCArgs,
-    TaskType.COMPARE_AUC: CompareAUCArgs,
 }
 
 
