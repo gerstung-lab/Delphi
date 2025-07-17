@@ -7,14 +7,9 @@ from omegaconf import OmegaConf
 
 from delphi.eval import clock, eval_task
 from delphi.eval.auc import CalibrateAUCArgs
-from delphi.eval.burden import BurdenArgs
-from delphi.eval.cumul_risk_auc import CumulRiskAUCArgs
-from delphi.eval.norm_risk_auc import NormRiskAUCArgs
 from delphi.model.transformer import load_model
 from delphi.tokenizer import load_tokenizer_from_ckpt
-from delphi.visualize.calibration import CalibrationArgs
 from delphi.visualize.compare_auc import CompareAUCArgs
-from delphi.visualize.incidence import IncidencePlotConfig
 
 
 class TaskType(Enum):
@@ -30,11 +25,6 @@ class TaskType(Enum):
 task_type_to_args_type = {
     TaskType.AUC: CalibrateAUCArgs,
     TaskType.COMPARE_AUC: CompareAUCArgs,
-    TaskType.CUMUL_RISK_AUC: CumulRiskAUCArgs,
-    TaskType.NORM_RISK_AUC: NormRiskAUCArgs,
-    TaskType.INCIDENCE: IncidencePlotConfig,
-    TaskType.BURDEN: BurdenArgs,
-    TaskType.CALIBRATION: CalibrationArgs,
 }
 
 
