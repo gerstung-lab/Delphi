@@ -1,50 +1,142 @@
-# Data preparation
+# Data Preparation
 
-If you would like to train Delphi on your own data, you can use the following instructions for data preparation.
-
-## Event records
-
-First, you need to prepare the actual disease records.
-An easy way of doing this is to prepare a Numpy array with the following columns of dtype `np.uint32`:
-- `patient_id`
-- `patient_age` (in days)
-- `token_id`
-
-`patient_id` should be a unique identifier for each patient. It is used exclusively for identifying which records belong to the same patient and it is not used in the training. The entries should be consecutive entries, meaning that first in the array come all the rows related to the first patient, then all the rows related to the second patient and so on.
-`patient_age` is the age of the patient in days at the time of recording the disease.
-`token_id` is some unique identifier for the data record, a `uint32` number, starting from `1` (`0` is reserved for `no event` tokens). In Delphi-2M, it could be a disease event, a lifestyle token or sex token. All the tokens are processed by the model in a unified way (however, there are some tokens that are not used for calculating the gradients - see below for more details).
-
-Then split this numpy array into train/val in a desired ratio and save into `data/%your_name%` folder.
-
-```python
-data_val.astype(np.uint32).tofile('val.bin')
-data_train.astype(np.uint32).tofile( 'train.bin')
-```
-
-## Label file
-
-See `data/ukb_simulated_data/labels.csv` for the example.
-The labels aren't required for training, but are later used in the downstream notebooks for `token_id` -> `event_name` mapping.
-The labels file should be a CSV with only one column:
-- `event_name`
-
-**None!** The row N+1 of this file corresponds to the N-th token. E.g. if in the `train.bin` file you used `token_id` 42 for `Common cold`, then the `Common cold` should be the 43-th row in the `labels.csv` file. This happens because we insert `no event` and `padding` tokens in the beginning of the file.
-
-Place this file into the `data/%your_name%` folder.
-
-## Preparing the model
-
-Either by defining in the `config/%my_config%.py` file or by passing as a command line argument.
-
-The following parameters likely need to be adjusted:
-- `vocab_size` - maximum `token_id` in your data + 1 (for padding)
-- `ignore_tokens` - list of tokens that are not used for calculating the gradients (we exclude padding, sex and lifestyle tokens)
-- `dataset` - name of the dataset, e.g. `ukb_real_data` or `ukb_simulated_data`
-
-## Training
-
-Now you are ready to train the model.
+Multimodal Delphi handles data differently compared to the original version. The data directory should be structured as follows:
 
 ```bash
-python train.py config/%my_config%.py --dataset %your_name% --out_dir=%your_model_name%
-``` 
+# example file tree of multimodal Delphi data corpus
+ukb_data/
+├── data.bin
+├── time.bin
+├── p2i.csv
+├── tokenizer.yaml
+├── expansion_packs/
+│   └── surgical_ops/
+│       ├── data.bin
+│       ├── time.bin
+│       ├── p2i.csv
+│       └── tokenizer.yaml
+└── biomarkers/
+    └── polygenic_risk_scores/
+        ├── data.npy
+        └── p2i.csv
+```
+
+## Event Records
+
+Event records represent disease occurrences with sex and lifestyle tokens that the original Delphi was trained on. These should be stored in two binary files:
+
+### Required Files
+
+**`data.bin`**
+- Contains a contiguous sequence of all event tokens (`np.uint32`)
+- **Important:** Token indexing must start at 1
+
+**`time.bin`**
+- Contains a contiguous sequence of timestamps measured in days (`np.uint32`)
+- Timestamps correspond to when event tokens occurred
+- Must map one-to-one with `data.bin` entries and be exactly the same length
+
+**`p2i.csv`**
+- Maps each participant ID (`pid`) to:
+  - `start_pos`: starting index in the data files
+  - `seq_len`: sequence length for that participant
+
+**`tokenizer.yaml`**
+- Dictionary mapping event names to token indices
+- Must include these required mappings:
+  ```yaml
+  padding: 0
+  no_event: 1
+  female: 2
+  male: 3
+  ```
+- Token indexing must be consistent with `data.bin` and start at 1
+
+## Multimodal Extensions
+
+Multimodal data can be incorporated in two ways: as biomarkers or expansion packs.
+
+### Biomarkers
+
+A biomarker represents a measurement taken at a specific time point in an individual's health trajectory. Examples include HbA1c levels, polygenic risk scores, and diet quality indices.
+
+#### Required Files
+
+**`data.npy`**
+- One-dimensional, contiguous array containing biomarker measurements
+- Data type varies depending on the specific biomarker
+
+**`p2i.csv`**
+- Maps each participant ID (`pid`) to:
+  - `start_pos`: starting index in `data.npy`
+  - `seq_len`: number of measurements (e.g., 36 for polygenic risk scores covering 36 diseases)
+  - `time`: timestamp in days when the biomarker was measured
+
+#### Registering a New Biomarker
+
+Delphi includes a modality embedding layer that learns embeddings for each biomarker. To introduce a new biomarker, you must first register it in the system.
+
+**Steps to register a new biomarker:**
+
+1. **Update the Modality enum** - Navigate to `delphi/multimodal.py` and locate the `Modality` class:
+
+    ```python
+    class Modality(Enum):
+        # 0 for padding; 1 for event tokens
+        PRS = 2
+        FAMILY_HX = 3
+        BLOOD_ALL = 4
+        WBC = 5
+        LIPID = 6
+        LFT = 7
+        RENAL = 8
+        HBA1C = 9
+        CRP = 10
+        URATE = 11
+        CYSC = 12
+        APO = 13
+        VITD = 14
+        DHT = 15
+        SHBG = 16
+        IGF1 = 17
+        NAK = 18
+        CREAT = 19
+        ALBU = 20
+        MEDS = 21
+        DIET = 22
+        MET = 23
+        TELOMERE = 24
+        # SLEEP_SCORE = 25
+    ```
+
+2. **Add your biomarker** - Append your new biomarker to the end of the enum with the next sequential index. For example, to add `SLEEP_SCORE`:
+   - Use the next available index (current highest + 1)
+   - Follow the existing naming convention (uppercase with underscores)
+
+3. **Create matching directory** - The data directory name must match the enum name in lowercase. For `SLEEP_SCORE`, create a directory named `sleep_score` under `biomarkers`.
+
+**Example:**
+If adding a sleep quality biomarker, add `SLEEP_SCORE = 25` to the enum and create a `sleep_score/` directory containing the required files.
+
+### Expansion Packs
+
+An expansion pack contains additional timestamped events that enrich an individual's health trajectory. Examples include surgical operations and medical prescriptions that extend beyond Delphi's original disease occurrence vocabulary.
+
+#### Required Files
+
+**`data.npy`**
+- One-dimensional, contiguous array of all tokens (`np.uint32`)
+- **Important:** Token indexing must start at 1
+
+**`time.npy`**
+- One-dimensional, contiguous array of timestamps in days (`np.uint32`)
+- Corresponds to when event tokens occurred
+
+**`p2i.csv`**
+- Maps each participant ID (`pid`) to:
+  - `start_pos`: starting index in both `data.npy` and `time.npy`
+  - `seq_len`: sequence length for that participant
+
+**`tokenizer.yaml`**
+- Dictionary mapping event names (surgical operations, medications, etc.) to token indices
+- Token indexing must be consistent with `data.npy` and start at 1
