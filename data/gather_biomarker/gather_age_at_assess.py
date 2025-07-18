@@ -2,15 +2,15 @@ import os
 import warnings
 
 import pandas as pd
-from utils import MULTIMODAL_INPUT_DIR, all_ukb_participants
+from utils import all_ukb_participants, multimodal_dir
 
 mob_txt = os.path.join(
-    MULTIMODAL_INPUT_DIR,
+    multimodal_dir,
     "general",
     "year_and_month_of_birth.txt",
 )
 assess_date_txt = os.path.join(
-    MULTIMODAL_INPUT_DIR,
+    multimodal_dir,
     "general",
     "Date_of_attending_assessment_centre_53.txt",
 )
@@ -33,6 +33,6 @@ first_assess_age_df = pd.DataFrame(assess_age_in_days, columns=["age"])
 first_assess_age_df.index.name = "pid"
 first_assess_age_df.index = first_assess_age_df.index.astype(str)
 first_assess_age_df.to_csv(
-    os.path.join(MULTIMODAL_INPUT_DIR, "general", "age_at_assess.csv"),
+    os.path.join(multimodal_dir, "general", "age_at_assess.csv"),
     header=True,
 )

@@ -1,33 +1,16 @@
 import os
 
 import numpy as np
-import pandas as pd
 import yaml
-from utils import MULTIMODAL_INPUT_DIR, MULTIMODAL_OUTPUT_DIR, all_ukb_participants
+from tqdm import tqdm
+from utils import (
+    all_ukb_participants,
+    biomarker_dir,
+    init_p2i,
+    load_fid,
+)
 
-from delphi.data.lmdb import data_key, estimate_write_size, time_key, write_lmdb
-
-data_dtype = np.int64
-time_dtype = np.uint8
-
-family_hx_dir = os.path.join(MULTIMODAL_INPUT_DIR, "family_history")
-father_hx_txt = os.path.join(family_hx_dir, "father_illness.txt")
-mother_hx_txt = os.path.join(family_hx_dir, "mother_illness.txt")
-sibling_hx_txt = os.path.join(family_hx_dir, "sibling_illness.txt")
-
-father_hx_df = pd.read_csv(father_hx_txt, delimiter="\t", index_col="f.eid")
-mother_hx_df = pd.read_csv(mother_hx_txt, delimiter="\t", index_col="f.eid")
-sibling_hx_df = pd.read_csv(sibling_hx_txt, delimiter="\t", index_col="f.eid")
-
-assert (father_hx_df.index == mother_hx_df.index).all()
-assert (sibling_hx_df.index == mother_hx_df.index).all()
-participants_with_family_hx = father_hx_df.index.astype(int).to_numpy()
-participants = all_ukb_participants()
-n_missing = len(set(participants) - set(participants_with_family_hx))
-print(f"# participants with missing family_hx: {n_missing}")
-valid_participants = set(participants) & set(participants_with_family_hx)
-
-with open("data/gather_biomarker/family_hx/map.yaml", "r") as f:
+with open("data/ukb_real_data/biomarkers/family_hx/tokenizer.yaml", "r") as f:
     map_config = yaml.safe_load(f)
 lookup_max = max(map_config.keys())
 lookup_min = min(map_config.keys())
@@ -36,13 +19,25 @@ lookup = np.zeros((lookup_size,), dtype=np.int32)
 for key, value in map_config.items():
     lookup[int(key) - lookup_min] = int(value)
 
-hx_db = {}
-n_unknown = 0
-for pid in participants:
-    hx_db[data_key(pid)] = np.array([], dtype=data_dtype)
-    hx_db[time_key(pid)] = np.array([], dtype=time_dtype)
+father_hx_df = load_fid("20107")
+mother_hx_df = load_fid("20110")
+sibling_hx_df = load_fid("20111")
 
-for pid in valid_participants:
+participants_with_family_hx = father_hx_df.index.astype(int).to_numpy()
+ukb_participants = all_ukb_participants()
+n_missing = len(set(ukb_participants) - set(participants_with_family_hx))
+valid_participants = list(set(ukb_participants) & set(participants_with_family_hx))
+print(f"# participants with missing family_hx: {n_missing}")
+
+
+data_p2i = init_p2i()
+data_lst = []
+n_unknown = 0
+start_pos = []
+seq_len = []
+offset = 0
+truly_valid_participants = []
+for pid in tqdm(valid_participants):
 
     f = father_hx_df.loc[pid].to_numpy()
     m = mother_hx_df.loc[pid].to_numpy()
@@ -56,11 +51,25 @@ for pid in valid_participants:
         continue
     if H.max() > 1:
         H = H[H > 1]
-    hx_db[data_key(pid)] = H[np.newaxis, :].astype(data_dtype)
-    hx_db[time_key(pid)] = np.array([0]).astype(time_dtype)
+
+    truly_valid_participants.append(pid)
+    data_lst.extend(H.tolist())
+    start_pos.append(offset)
+    seq_len.append(H.size)
+    offset += H.size
 
 print(f"# participants with unknown family_hx: {n_unknown}")
+data_p2i.loc[truly_valid_participants, "start_pos"] = np.array(
+    start_pos, dtype=np.int32
+)
+data_p2i.loc[truly_valid_participants, "seq_len"] = np.array(seq_len, dtype=np.int32)
+data_p2i.loc[truly_valid_participants, "time"] = 0.0
+data_np = np.array(data_lst, dtype=np.int64)
 
-db_path = os.path.join(MULTIMODAL_OUTPUT_DIR, "family_hx.lmdb")
-map_size = estimate_write_size(db=hx_db)
-write_lmdb(db=hx_db, db_path=db_path, map_size=map_size)
+odir = os.path.join(biomarker_dir, "family_hx")
+os.makedirs(odir, exist_ok=True)
+np.save(os.path.join(odir, "data.npy"), data_np)
+data_p2i.to_csv(
+    os.path.join(odir, "p2i.csv"),
+    index_label="pid",
+)
