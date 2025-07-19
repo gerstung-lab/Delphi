@@ -88,6 +88,7 @@ def train(cfg: TrainConfig):
     if cfg.infer_train_biomarkers:
         cfg.train_data.biomarkers = list(cfg.model.biomarkers.keys())
     assert set(cfg.train_data.biomarkers).issubset(set(cfg.model.biomarkers.keys()))
+    print("training dataset")
     train_ds = Dataset(cfg.train_data)
     train_it = train_iter(rng=rng, total_size=len(train_ds), batch_size=cfg.batch_size)
     train_loader = load_sequences(it=train_it, dataset=train_ds)
@@ -100,12 +101,13 @@ def train(cfg: TrainConfig):
     assert set(cfg.val_data.expansion_packs).issubset(
         set(cfg.train_data.expansion_packs)
     )
+    print("validation dataset")
     val_ds = Dataset(cfg.val_data)
 
     if cfg.model.vocab_size is None:
         cfg.model.vocab_size = train_ds.vocab_size
         print(
-            f"vocab_size not set, using vocab size of training dataset's tokenizer: {cfg.model.vocab_size}"
+            f"\nvocab_size not set, using vocab size of training dataset's tokenizer: {cfg.model.vocab_size}"
         )
     else:
         print(f"vocab_size: {cfg.model.vocab_size}")

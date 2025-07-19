@@ -297,7 +297,7 @@ class Dataset:
         cfg: UKBDataConfig,
     ):
         self.data_dir = os.path.join(DELPHI_DATA_DIR, cfg.data_dir)
-        print(f"\nbuilding dataset at {self.data_dir}")
+        print(f"building dataset at {self.data_dir}")
         tokenizer_path = os.path.join(self.data_dir, "tokenizer.yaml")
         print(f"\t– loading tokenizer from {tokenizer_path}")
         with open(tokenizer_path, "r") as f:
