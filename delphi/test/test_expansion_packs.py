@@ -73,6 +73,15 @@ def data_and_time_size_match(tokens: np.ndarray, time_steps: np.ndarray) -> bool
     return tokens.size == time_steps.size
 
 
+def tokenizer_contiguous(tokenizer: dict):
+
+    token_vals = list(tokenizer.values())
+
+    return (len(token_vals) == len(set(token_vals))) and (
+        max(token_vals) == len(token_vals)
+    )
+
+
 _, expansion_packs, _ = next(os.walk(expansion_pack_path))
 
 
@@ -115,3 +124,4 @@ def test_expansion_pack(expansion_pack_path):
     assert no_nan_tokens(tokens=tokens)
     assert no_nan_time_steps(time_steps=time_steps)
     assert time_steps_within_range(time_steps=time_steps)
+    assert tokenizer_contiguous(tokenizer=tokenizer)

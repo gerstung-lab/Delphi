@@ -4,8 +4,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import polars as pl
-import yaml
-from utils import all_ukb_participants, multimodal_dir
+from utils import (
+    all_ukb_participants,
+    build_expansion_pack,
+    multimodal_dir,
+    token_list_dir,
+)
 
 idir = Path("data/multimodal/summary_operations")
 odir = Path("data/ukb_real_data/expansion_packs") / "summary_ops"
@@ -30,32 +34,14 @@ vocab = vocab[~vocab["parent_id"].isna()]
 vocab = vocab.set_index("coding")
 mapping = vocab["parent_id"].astype(int).to_dict()
 
-os.makedirs(odir, exist_ok=True)
-with open(odir / "tokenizer.yaml", "w") as f:
-    tokenizer_keys = (
-        vocab.loc[vocab["parent"].unique(), "meaning"]
-        .str.replace(" ", "_")
-        .str.lower()
-        .tolist()
-    )
-    tokenizer_values = (
-        vocab.loc[vocab["parent"].unique(), "parent_id"].astype(int).tolist()
-    )
-    tokenizer = dict(zip(tokenizer_keys, tokenizer_values))
-    yaml.dump(
-        tokenizer,
-        f,
-        default_flow_style=False,
-        sort_keys=False,
-    )
-token_list_dir = Path("config/disease_list")
-with open(token_list_dir / "summary_ops.yaml", "w") as f:
-    yaml.dump(
-        tokenizer_keys,
-        f,
-        default_flow_style=False,
-        sort_keys=False,
-    )
+tokenizer_keys = (
+    vocab.loc[vocab["parent"].unique(), "meaning"]
+    .str.replace(" ", "_")
+    .str.lower()
+    .tolist()
+)
+tokenizer_values = vocab.loc[vocab["parent"].unique(), "parent_id"].astype(int).tolist()
+tokenizer = dict(zip(tokenizer_keys, tokenizer_values))
 
 token_df = pl.read_csv(
     idir / "main_opcs4_41200.txt",
@@ -91,28 +77,18 @@ time_np = time_df.to_numpy().astype(np.float32)
 
 ukb_participants = all_ukb_participants()
 is_valid = np.isin(summary_ops_participants, ukb_participants)
+valid_participants = summary_ops_participants[is_valid]
 
-# accept_mask = np.ones(token_np.shape, dtype=int)
-# accept_mask = accept_mask[is_valid, :]
 accept_mask = (token_np > 0) * (~np.isnan(time_np))
 count_np = np.sum(accept_mask[is_valid], axis=1)
 token_np = token_np[accept_mask].ravel()
 time_np = time_np[accept_mask].ravel()
 
-valid_participants = summary_ops_participants[is_valid]
-p2i = pd.DataFrame(
-    {
-        "pid": ukb_participants,
-        "start_pos": 0,
-        "seq_len": 0,
-    }
+build_expansion_pack(
+    token_np=token_np,
+    time_np=time_np,
+    count_np=count_np,
+    subjects=valid_participants,
+    tokenizer=tokenizer,
+    expansion_pack="summary_ops",
 )
-p2i.set_index("pid", inplace=True)
-p2i.loc[valid_participants, "seq_len"] = count_np
-p2i.loc[valid_participants, "start_pos"] = np.cumsum(count_np) - count_np
-p2i.loc[p2i["seq_len"] == 0, "start_pos"] = 0
-
-os.makedirs(odir, exist_ok=True)
-p2i.to_csv(odir / "p2i.csv")
-np.save(odir / "data.npy", token_np)
-np.save(odir / "time.npy", time_np)

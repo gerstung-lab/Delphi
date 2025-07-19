@@ -1,18 +1,15 @@
-import os
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import polars as pl
-import yaml
 from utils import (
     all_ukb_participants,
     assessment_age,
+    build_expansion_pack,
 )
 
 idir = Path("data/multimodal/medications")
-odir = Path("data/ukb_real_data/biomarkers") / "medications"
-
 
 vocab = pd.read_csv(
     idir / "coding.txt",
@@ -46,6 +43,13 @@ vocab = vocab[vocab["counts"] > 100]
 vocab = vocab[vocab["coding"] != 99999]
 vocab["id"] = np.arange(1, len(vocab) + 1)
 token_map = vocab.set_index("coding")
+vocab["meaning"] = (
+    vocab["coding"].astype(str)
+    + "_"
+    + vocab["meaning"].str.replace(" ", "_").str.lower()
+)
+tokenizer = vocab.set_index("meaning")
+tokenizer = tokenizer["id"].to_dict()
 
 ukb_participants = all_ukb_participants()
 assessment_participants = list(assessment_age.index.astype(int))
@@ -55,6 +59,7 @@ missing_age = len(set(ukb_participants) - set(assessment_participants))
 print(f"# participants with missing age data: {missing_age}")
 is_valid = np.isin(medication_participants, ukb_participants)
 is_valid &= np.isin(medication_participants, assessment_participants)
+valid_participants = medication_participants[is_valid]
 
 token_df = orig_token_df.select(
     pl.all().replace_strict(token_map["id"].to_dict(), default=0)
@@ -63,32 +68,14 @@ token_np = token_df.to_numpy().astype(int)
 accept_mask = token_np > 0
 count_np = np.sum(accept_mask[is_valid], axis=1).astype(np.int32)
 token_np = token_np[is_valid[:, np.newaxis] * accept_mask]
+time_np = assessment_age.loc[valid_participants].to_numpy()
+time_np = np.repeat(time_np, count_np)
 
-p2i = pd.DataFrame(
-    {
-        "pid": ukb_participants,
-        "start_pos": np.zeros(len(ukb_participants), dtype=np.int32),
-        "seq_len": np.zeros(len(ukb_participants), dtype=np.int32),
-        "time": np.full(len(ukb_participants), -1e4, dtype=np.float32),
-    },
+build_expansion_pack(
+    token_np=token_np,
+    time_np=time_np,
+    count_np=count_np,
+    subjects=valid_participants,
+    tokenizer=tokenizer,
+    expansion_pack="meds",
 )
-p2i = p2i.set_index("pid")
-valid_participants = medication_participants[is_valid]
-p2i.loc[valid_participants, "seq_len"] = count_np
-p2i.loc[valid_participants, "start_pos"] = (np.cumsum(count_np) - count_np).astype(
-    np.int32
-)
-p2i.loc[p2i["seq_len"] == 0, "start_pos"] = 0
-p2i.loc[valid_participants, "time"] = assessment_age.loc[valid_participants].to_numpy()
-p2i.loc[p2i["seq_len"] == 0, "time"] = -1e4
-
-os.makedirs(odir, exist_ok=True)
-p2i.to_csv(odir / "p2i.csv")
-np.save(odir / "data.npy", token_np)
-with open(odir / "tokenizer.yaml", "w") as f:
-    yaml.dump(
-        token_map["id"].to_dict(),
-        f,
-        default_flow_style=False,
-        sort_keys=False,
-    )

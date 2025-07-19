@@ -1,0 +1,17 @@
+- c61_malignant_neoplasm_of_prostate
+- f32_(depressive_episode)
+- g20_(parkinson's_disease)
+- g30_(alzheimer's_disease)
+- e11_(non-insulin-dependent_diabetes_mellitus)
+- e10_(insulin-dependent_diabetes_mellitus)
+- i10_(essential_(primary)_hypertension)
+- i11_(hypertensive_heart_disease)
+- c18_malignant_neoplasm_of_colon
+- c50_malignant_neoplasm_of_breast
+- j43_(emphysema)
+- i63_(cerebral_infarction)
+- i65_(occlusion_and_stenosis_of_precerebral_arteries,_not_resulting_in_cerebral_infarction)
+- i66_(occlusion_and_stenosis_of_cerebral_arteries,_not_resulting_in_cerebral_infarction)
+- c34_malignant_neoplasm_of_bronchus_and_lung
+- i21_(acute_myocardial_infarction)
+- i20_(angina_pectoris)

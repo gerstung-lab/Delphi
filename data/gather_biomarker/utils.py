@@ -4,6 +4,7 @@ from typing import Union
 
 import numpy as np
 import pandas as pd
+import yaml
 
 from delphi.env import DELPHI_DATA_DIR
 
@@ -18,6 +19,7 @@ for file in tab_dir.rglob("*"):
 ukb_dir = Path(DELPHI_DATA_DIR) / "ukb_real_data"
 expansion_pack_dir = ukb_dir / "expansion_packs"
 biomarker_dir = ukb_dir / "biomarkers"
+token_list_dir = Path("config/disease_list")
 
 
 def all_ukb_participants():
@@ -68,6 +70,61 @@ def init_p2i():
     data_p2i = data_p2i.set_index("pid")
 
     return data_p2i
+
+
+def init_expansion_pack_p2i():
+
+    ukb_subjects = all_ukb_participants()
+    p2i = pd.DataFrame(
+        {
+            "pid": ukb_subjects,
+            "start_pos": 0,
+            "seq_len": 0,
+        }
+    )
+    p2i = p2i.set_index("pid")
+
+    return p2i
+
+
+def build_expansion_pack(
+    token_np: np.ndarray,
+    time_np: np.ndarray,
+    count_np: np.ndarray,
+    subjects: np.ndarray,
+    tokenizer: dict,
+    expansion_pack: str,
+):
+    assert token_np.size == time_np.size
+    assert count_np.sum() == token_np.size
+    assert subjects.size == count_np.size
+
+    p2i = init_expansion_pack_p2i()
+    p2i.loc[subjects, "seq_len"] = count_np
+    p2i.loc[subjects, "start_pos"] = np.cumsum(count_np) - count_np
+    p2i.loc[p2i["seq_len"] == 0, "start_pos"] = 0
+
+    odir = Path(expansion_pack_dir) / expansion_pack
+    os.makedirs(odir, exist_ok=True)
+    p2i.to_csv(odir / "p2i.csv")
+    np.save(odir / "data.npy", token_np)
+    np.save(odir / "time.npy", time_np)
+
+    with open(odir / "tokenizer.yaml", "w") as f:
+        yaml.dump(
+            tokenizer,
+            f,
+            default_flow_style=False,
+            sort_keys=False,
+        )
+
+    with open(token_list_dir / f"{expansion_pack}.yaml", "w") as f:
+        yaml.dump(
+            list(tokenizer.keys()),
+            f,
+            default_flow_style=False,
+            sort_keys=False,
+        )
 
 
 def build_biomarker(
