@@ -7,7 +7,6 @@ import yaml
 @dataclass
 class BiomarkerEmbedConfig:
     projector: str = "linear"  # "linear", "mlp", or "embed"
-    n_token: Optional[int] = 1
     n_layers: Optional[int] = None
     n_hidden: Optional[int] = None
     input_size: Optional[int] = None

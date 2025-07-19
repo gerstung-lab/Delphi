@@ -40,11 +40,6 @@ class BiomarkerEmbedding(nn.Module):
 
         super().__init__()
         self.config = config
-        if config.n_token is not None and config.n_token > 1:
-            raise NotImplementedError(
-                "n_token > 1 is not yet implemented for BiomarkerEmbedding"
-            )
-
         if config.projector == "linear":
             assert (
                 config.input_size is not None

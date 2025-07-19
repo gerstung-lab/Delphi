@@ -221,16 +221,15 @@ class UKBDataConfig:
     expansion_pack_dir: str = "ukb_real_data/expansion_packs"
     expansion_packs: list[str] = field(default_factory=list)
     biomarker_dir: str = "ukb_real_data/biomarkers"
-    biomarkers: dict[str, Optional[int]] = field(default_factory=dict)
+    biomarkers: list[str] = field(default_factory=list)
     seed: int = 42
     transforms: Optional[List[TransformArgs]] = None
 
 
 class Biomarker:
 
-    def __init__(self, path: str, n_token: Optional[int] = None):
+    def __init__(self, path: str):
         self.path = path
-        self.n_token = n_token
         self.data = np.load(
             os.path.join(path, "data.npy"),
             allow_pickle=True,
@@ -244,7 +243,7 @@ class Biomarker:
         self.time_steps = p2i["time"].to_dict()
 
     def __repr__(self):
-        return f"Biomarker(path={self.path}, n_token={self.n_token})"
+        return f"Biomarker(path={self.path})"
 
     def get_raw_batch(
         self, pids: np.ndarray
@@ -262,8 +261,6 @@ class Biomarker:
             if l > 0:
                 x = self.data[i : i + l]
                 batch_data.append(x)
-                n_token = x.size if self.n_token is None else self.n_token
-                t = np.repeat(t, n_token)
             batch_time.append(np.array(t))
 
         batch_data = collate_batch_data(batch_data)
@@ -340,11 +337,11 @@ class Dataset:
 
         self.biomarker_dir = os.path.join(DELPHI_DATA_DIR, cfg.biomarker_dir)
         self.mod_ds = {}
-        for modality, n_token in cfg.biomarkers.items():
+        for modality in cfg.biomarkers:
             modality = Modality[modality.upper()]
             print(f"\t– loading biomarker: {modality.name}")
             biomarker_path = os.path.join(self.biomarker_dir, modality.name.lower())
-            dataset = Biomarker(path=biomarker_path, n_token=n_token)
+            dataset = Biomarker(path=biomarker_path)
             self.mod_ds[modality] = dataset
 
         self.transforms = []

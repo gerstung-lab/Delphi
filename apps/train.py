@@ -53,10 +53,7 @@ class TrainConfig:
 
 def validate_train_config(cfg: TrainConfig) -> None:
 
-    train_modalities = []
-    for modality in cfg.train_data.biomarkers.keys():
-        train_modalities.append(modality)
-    train_modalities = set(train_modalities)
+    train_modalities = set(cfg.train_data.biomarkers)
     print(f"biomarker modalities to load for training: {train_modalities}")
 
     model_modalities = set(cfg.model.biomarkers.keys())
@@ -65,10 +62,7 @@ def validate_train_config(cfg: TrainConfig) -> None:
         train_modalities == model_modalities
     ), "train modalities must match model modalities"
 
-    val_modalities = []
-    for modality in cfg.val_data.biomarkers.keys():
-        val_modalities.append(modality)
-    val_modalities = set(val_modalities)
+    val_modalities = set(cfg.val_data.biomarkers)
     print(f"biomarker modalities to load for validation: {val_modalities}")
     assert val_modalities.issubset(train_modalities)
 
