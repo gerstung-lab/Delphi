@@ -116,9 +116,11 @@ def train(cfg: TrainConfig):
             cfg.model.vocab_size == train_ds.vocab_size
         ), f"inconsistent vocab size between tokenizer ({train_ds.vocab_size}) and model"
 
-    print(f"ignored tokens: {cfg.model.ignore_tokens}")
+    print(f"ignored tokens:")
+    print(f"\t- {cfg.model.ignore_tokens}")
     ignore_tokens = parse_ignore_tokens(cfg.model.ignore_tokens)
     if cfg.ignore_expansion_tokens:
+        print(f"\t- all expansion pack tokens")
         ignore_tokens = set(ignore_tokens).union(set(train_ds.expansion_tokens))
         ignore_tokens = list(ignore_tokens)
     cfg.model.ignore_tokens = train_ds.tokenizer.encode(ignore_tokens)  # type: ignore
