@@ -8,33 +8,12 @@ gradient_accumulation_steps: 1
 batch_size: 128
 device: cuda
 
+infer_train_biomarkers: true
 train_data:
   data_dir: ukb_real_data
   subject_list: ukb_real_data/participants/train_fold.bin
   seed: 42
   biomarker_dir: ukb_real_data/biomarkers
-  biomarkers:
-    - prs
-    - blood_all
-    # - wbc
-    # - lipid
-    # - lft
-    # - renal
-    # - hba1c
-    # - crp
-    # - urate
-    # - cysc
-    # - apo
-    # - vitd
-    # - dht
-    # - shbg
-    # - igf1
-    - nak
-    - albu
-    - creat
-    - diet
-    - met
-    - telomere
   expansion_pack_dir: ukb_real_data/expansion_packs
   expansion_packs:
     - fsf
@@ -46,41 +25,14 @@ train_data:
       args:
         interval_in_years: 5
         mode: random
+infer_val_biomarkers: true
+infer_val_expansion_packs: true
 val_data:
   data_dir: ukb_real_data
   subject_list: ukb_real_data/participants/val_fold.bin
   seed: 42
   biomarker_dir: ukb_real_data/biomarkers
-  biomarkers:
-    - prs
-    - blood_all
-    # - wbc
-    # - lipid
-    # - lft
-    # - renal
-    # - hba1c
-    # - crp
-    # - urate
-    # - cysc
-    # - apo
-    # - vitd
-    # - dht
-    # - shbg
-    # - igf1
-    - nak
-    - albu
-    - creat
-    - diet
-    - met
-    - telomere
   expansion_pack_dir: ukb_real_data/expansion_packs
-  expansion_packs:
-    # - family_hx
-    # - meds
-    - fsf
-    - summary_ops
-    - ops
-    - prescriptions
   transforms:
     - name: no-event
       args:

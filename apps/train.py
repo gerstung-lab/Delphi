@@ -42,7 +42,10 @@ class TrainConfig:
     # data
     data_fraction: float = 1.0
     train_data: UKBDataConfig = field(default_factory=UKBDataConfig)
+    infer_train_biomarkers: bool = True
     val_data: UKBDataConfig = field(default_factory=UKBDataConfig)
+    infer_val_biomarkers: bool = True
+    infer_val_expansion_packs: bool = True
 
     model: DelphiConfig = field(default_factory=DelphiConfig)
 
@@ -51,25 +54,8 @@ class TrainConfig:
     log: TrainLogConfig = field(default_factory=TrainLogConfig)
 
 
-def validate_train_config(cfg: TrainConfig) -> None:
-
-    train_modalities = set(cfg.train_data.biomarkers)
-    print(f"biomarker modalities to load for training: {train_modalities}")
-
-    model_modalities = set(cfg.model.biomarkers.keys())
-    print(f"biomarker modules in model: {model_modalities}")
-    assert (
-        train_modalities == model_modalities
-    ), "train modalities must match model modalities"
-
-    val_modalities = set(cfg.val_data.biomarkers)
-    print(f"biomarker modalities to load for validation: {val_modalities}")
-    assert val_modalities.issubset(train_modalities)
-
-
 def train(cfg: TrainConfig):
 
-    validate_train_config(cfg)
     validate_model_config(cfg.model)
 
     run_dir = os.path.normpath(
@@ -99,10 +85,21 @@ def train(cfg: TrainConfig):
     # https://pytorch.org/docs/stable/generated/torch.set_default_dtype.html
     torch.set_default_dtype(ptdtype)
 
+    if cfg.infer_train_biomarkers:
+        cfg.train_data.biomarkers = list(cfg.model.biomarkers.keys())
+    assert set(cfg.train_data.biomarkers).issubset(set(cfg.model.biomarkers.keys()))
     train_ds = Dataset(cfg.train_data)
     train_it = train_iter(rng=rng, total_size=len(train_ds), batch_size=cfg.batch_size)
     train_loader = load_sequences(it=train_it, dataset=train_ds)
 
+    if cfg.infer_val_biomarkers:
+        cfg.val_data.biomarkers = cfg.train_data.biomarkers
+    assert set(cfg.val_data.biomarkers).issubset(set(cfg.train_data.biomarkers))
+    if cfg.infer_val_expansion_packs:
+        cfg.val_data.expansion_packs = cfg.train_data.expansion_packs
+    assert set(cfg.val_data.expansion_packs).issubset(
+        set(cfg.train_data.expansion_packs)
+    )
     val_ds = Dataset(cfg.val_data)
 
     if cfg.model.vocab_size is None:
