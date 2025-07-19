@@ -1,5 +1,5 @@
 ckpt_dir: multimodal
-eval_interval: 250
+eval_interval: 25
 eval_iters: 25
 eval_only: false
 init_from: scratch
@@ -8,35 +8,28 @@ gradient_accumulation_steps: 1
 batch_size: 128
 device: cuda
 
+infer_train_biomarkers: true
 train_data:
   data_dir: ukb_real_data
   subject_list: ukb_real_data/participants/train_fold.bin
   seed: 42
   biomarker_dir: ukb_real_data/biomarkers
-  biomarkers:
-    meds: ${model.biomarkers.meds.n_token}
   expansion_pack_dir: ukb_real_data/expansion_packs
   expansion_packs:
-    - summary_ops
-    - ops
-    - prescriptions
+    - family_hx
   transforms:
     - name: no-event
       args:
         interval_in_years: 5
         mode: random
+infer_val_biomarkers: true
+infer_val_expansion_packs: true
 val_data:
   data_dir: ukb_real_data
   subject_list: ukb_real_data/participants/val_fold.bin
   seed: 42
   biomarker_dir: ukb_real_data/biomarkers
-  biomarkers:
-    meds: ${model.biomarkers.meds.n_token}
   expansion_pack_dir: ukb_real_data/expansion_packs
-  expansion_packs:
-    - summary_ops
-    - ops
-    - prescriptions
   transforms:
     - name: no-event
       args:
@@ -57,14 +50,10 @@ model:
     - male
     - female
     - config/disease_list/lifestyle.yaml
-    - config/disease_list/ops.yaml
-    - config/disease_list/summary_ops.yaml
-    - config/disease_list/prescriptions.yaml
   biomarkers:
-    meds:
-      projector: embed
-      vocab_size: 745
-      n_token: null
+    prs:
+      projector: linear
+      input_size: 36
   modality_emb: true
   loss:
     ce_beta: 1.0
@@ -73,7 +62,7 @@ model:
 log:
   wandb_log: true
   wandb_project: ${ckpt_dir}
-  run_name: delphi+prescriptions+summary_ops+meds+ops
+  run_name: family_hx+prs
   log_interval: 25
   always_ckpt_after_eval: true
   ckpt_interval: null

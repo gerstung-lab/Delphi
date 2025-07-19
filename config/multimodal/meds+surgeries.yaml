@@ -1,5 +1,5 @@
 ckpt_dir: multimodal
-eval_interval: 250
+eval_interval: 25
 eval_iters: 25
 eval_only: false
 init_from: scratch
@@ -8,27 +8,28 @@ gradient_accumulation_steps: 1
 batch_size: 128
 device: cuda
 
+infer_train_biomarkers: true
 train_data:
   data_dir: ukb_real_data
   subject_list: ukb_real_data/participants/train_fold.bin
   seed: 42
   expansion_pack_dir: ukb_real_data/expansion_packs
   expansion_packs:
+    - meds
+    - ops
     - summary_ops
-    - prescriptions
   transforms:
     - name: no-event
       args:
         interval_in_years: 5
         mode: random
+infer_val_biomarkers: true
+infer_val_expansion_packs: true
 val_data:
   data_dir: ukb_real_data
   subject_list: ukb_real_data/participants/val_fold.bin
   seed: 42
   expansion_pack_dir: ukb_real_data/expansion_packs
-  expansion_packs:
-    - summary_ops
-    - prescriptions
   transforms:
     - name: no-event
       args:
@@ -49,8 +50,6 @@ model:
     - male
     - female
     - config/disease_list/lifestyle.yaml
-    - config/disease_list/summary_ops.yaml
-    - config/disease_list/prescriptions.yaml
   modality_emb: true
   loss:
     ce_beta: 1.0
@@ -59,7 +58,7 @@ model:
 log:
   wandb_log: true
   wandb_project: ${ckpt_dir}
-  run_name: delphi+prescriptions+summary_ops
+  run_name: meds+surgeries
   log_interval: 25
   always_ckpt_after_eval: true
   ckpt_interval: null

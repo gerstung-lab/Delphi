@@ -1,4 +1,4 @@
-ckpt_dir: debug
+ckpt_dir: multimodal
 eval_interval: 25
 eval_iters: 25
 eval_only: false
@@ -14,14 +14,6 @@ train_data:
   subject_list: ukb_real_data/participants/train_fold.bin
   seed: 42
   biomarker_dir: ukb_real_data/biomarkers
-  expansion_pack_dir: ukb_real_data/expansion_packs
-  expansion_packs:
-    - family_hx
-    - fsf
-    - meds
-    - ops
-    - prescriptions
-    - summary_ops
   transforms:
     - name: no-event
       args:
@@ -34,20 +26,13 @@ val_data:
   subject_list: ukb_real_data/participants/val_fold.bin
   seed: 42
   biomarker_dir: ukb_real_data/biomarkers
-  expansion_pack_dir: ukb_real_data/expansion_packs
   transforms:
     - name: no-event
       args:
         interval_in_years: 5
         mode: random
-ignore_expansion_tokens: true
 model:
   block_size: 48
-  # delphi-2m vocab_size: 1270
-  # fsf vocab size: 9
-  # summary_ops vocab size: 1565
-  # ops vocab size: 253
-  # prescriptions vocab size: 351
   n_layer: 12
   n_head: 12
   n_embd: 120
@@ -62,12 +47,6 @@ model:
     - female
     - config/disease_list/lifestyle.yaml
   biomarkers:
-    prs:
-      projector: linear
-      input_size: 36
-    # blood_all:
-    #   projector: linear
-    #   input_size: 57
     wbc:
       projector: linear
       input_size: 31
@@ -116,15 +95,6 @@ model:
     albu:
       projector: linear
       input_size: 1
-    diet:
-      projector: linear
-      input_size: 16
-    met:
-      projector: linear
-      input_size: 3
-    telomere:
-      projector: linear
-      input_size: 1
   modality_emb: true
   loss:
     ce_beta: 1.0
@@ -133,15 +103,15 @@ model:
 log:
   wandb_log: true
   wandb_project: ${ckpt_dir}
-  run_name: debug
+  run_name: blood+urine
   log_interval: 25
   always_ckpt_after_eval: true
   ckpt_interval: null
 optim:
-  learning_rate: 6e-4 # with baby networks can afford to go a bit higher
+  learning_rate: 6e-4
   max_iters: 100000
   weight_decay: 2e-1
-  lr_decay_iters: 100000 # make equal to max_iters usually
-  min_lr: 6e-5 # learning_rate / 10 usually
-  beta2: 0.99 # make a bit bigger because number of tokens per iter is small
-  warmup_iters: 1000 # not super necessary potentially
+  lr_decay_iters: 100000
+  min_lr: 6e-5
+  beta2: 0.99
+  warmup_iters: 1000

@@ -1,5 +1,5 @@
 ckpt_dir: multimodal
-eval_interval: 250 # keep frequent because we'll overfit
+eval_interval: 25
 eval_iters: 25
 eval_only: false
 init_from: scratch
@@ -8,33 +8,24 @@ gradient_accumulation_steps: 1
 batch_size: 128
 device: cuda
 
+infer_train_biomarkers: true
 train_data:
   data_dir: ukb_real_data
   subject_list: ukb_real_data/participants/train_fold.bin
   seed: 42
   biomarker_dir: ukb_real_data/biomarkers
-  biomarkers:
-    blood_all: ${model.biomarkers.blood_all.n_token}
-    nak: ${model.biomarkers.nak.n_token}
-    albu: ${model.biomarkers.albu.n_token}
-    creat: ${model.biomarkers.creat.n_token}
-    telomere: ${model.biomarkers.telomere.n_token}
   transforms:
     - name: no-event
       args:
         interval_in_years: 5
         mode: random
+infer_val_biomarkers: true
+infer_val_expansion_packs: true
 val_data:
   data_dir: ukb_real_data
   subject_list: ukb_real_data/participants/val_fold.bin
   seed: 42
   biomarker_dir: ukb_real_data/biomarkers
-  biomarkers:
-    blood_all: ${model.biomarkers.blood_all.n_token}
-    nak: ${model.biomarkers.nak.n_token}
-    albu: ${model.biomarkers.albu.n_token}
-    creat: ${model.biomarkers.creat.n_token}
-    telomere: ${model.biomarkers.telomere.n_token}
   transforms:
     - name: no-event
       args:
@@ -56,26 +47,12 @@ model:
     - female
     - config/disease_list/lifestyle.yaml
   biomarkers:
-    blood_all:
+    diet:
       projector: linear
-      input_size: 57
-      n_token: 1
-    nak:
+      input_size: 16
+    met:
       projector: linear
-      input_size: 2
-      n_token: 1
-    creat:
-      projector: linear
-      input_size: 1
-      n_token: 1
-    albu:
-      projector: linear
-      input_size: 1
-      n_token: 1
-    telomere:
-      projector: linear
-      input_size: 1
-      n_token: 1
+      input_size: 3
   modality_emb: true
   loss:
     ce_beta: 1.0
@@ -84,7 +61,7 @@ model:
 log:
   wandb_log: true
   wandb_project: ${ckpt_dir}
-  run_name: delphi+blood_all+nak+albu+creat+telomere
+  run_name: diet+exercise
   log_interval: 25
   always_ckpt_after_eval: true
   ckpt_interval: null
