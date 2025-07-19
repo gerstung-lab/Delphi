@@ -48,6 +48,7 @@ class TrainConfig:
     infer_val_expansion_packs: bool = True
 
     model: DelphiConfig = field(default_factory=DelphiConfig)
+    ignore_expansion_tokens: bool = True
 
     optim: OptimConfig = field(default_factory=OptimConfig)
 
@@ -117,6 +118,9 @@ def train(cfg: TrainConfig):
 
     print(f"ignored tokens: {cfg.model.ignore_tokens}")
     ignore_tokens = parse_ignore_tokens(cfg.model.ignore_tokens)
+    if cfg.ignore_expansion_tokens:
+        ignore_tokens = set(ignore_tokens).union(set(train_ds.expansion_tokens))
+        ignore_tokens = list(ignore_tokens)
     cfg.model.ignore_tokens = train_ds.tokenizer.encode(ignore_tokens)  # type: ignore
 
     iter_num = 0

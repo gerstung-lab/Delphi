@@ -1,6 +1,5 @@
 import os
 from dataclasses import dataclass, field
-from turtle import st
 from typing import Iterator, List, Optional
 
 import numpy as np
@@ -319,6 +318,7 @@ class Dataset:
         )
         cfg.expansion_packs.sort()
         self.expansion_packs = []
+        self.expansion_pack_tokenizers = []
         for pack in cfg.expansion_packs:
             print(f"\t– loading expansion pack: {pack}")
             pack_path = os.path.join(DELPHI_DATA_DIR, cfg.expansion_pack_dir, pack)
@@ -332,6 +332,7 @@ class Dataset:
             base_tokenizer, offset = update_tokenizer(
                 base_tokenizer=base_tokenizer, add_tokenizer=add_tokenizer
             )
+            self.expansion_pack_tokenizers.append(add_tokenizer)
             self.expansion_packs.append(ExpansionPack(path=pack_path, offset=offset))
         self.tokenizer = Tokenizer(base_tokenizer)
 
@@ -361,6 +362,13 @@ class Dataset:
     @property
     def vocab_size(self):
         return self.tokenizer.vocab_size
+
+    @property
+    def expansion_tokens(self):
+        token_keys = [
+            k for tokenizer in self.expansion_pack_tokenizers for k in tokenizer.keys()
+        ]
+        return token_keys
 
     def get_raw_batch(self, batch_idx: np.ndarray):
 
