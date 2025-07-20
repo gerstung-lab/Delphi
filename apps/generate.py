@@ -9,7 +9,6 @@ from omegaconf import OmegaConf
 from delphi.data.dataset import (
     PromptDataset,
     UKBDataConfig,
-    build_prefetch_loader,
     eval_iter,
     load_sequences,
 )
@@ -70,7 +69,6 @@ def gen(
     it = eval_iter(total_size=n_participants, batch_size=gen_cfg.batch_size)
     total_batch = math.ceil(n_participants / gen_cfg.batch_size)
     loader = load_sequences(it=it, dataset=ds)
-    loader = build_prefetch_loader(loader=loader)
 
     n_max_token = n_participants * gen_cfg.sampler.max_new_tokens
     logger.init_memmaps(

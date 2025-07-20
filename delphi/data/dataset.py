@@ -175,18 +175,6 @@ def load_sequences(
         yield P, multi_X, multi_T, M, biomarker_X, biomarker_T, biomarker_C
 
 
-def build_prefetch_loader(loader: Iterator) -> Iterator:
-
-    sentinel = object()
-    next_batch = next(loader)
-
-    while True:
-        yield next_batch
-        next_batch = next(loader, sentinel)
-        if next_batch is sentinel:
-            return
-
-
 def collate_batch_data(batch_data: list[np.ndarray]) -> np.ndarray:
 
     max_len = max([bd.size for bd in batch_data])
