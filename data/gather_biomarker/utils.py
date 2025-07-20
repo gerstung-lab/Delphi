@@ -32,7 +32,40 @@ def all_ukb_participants():
 
 def load_fid(fid: str) -> pd.DataFrame:
 
-    return pd.read_csv(ukb_tab[fid], delimiter="\t", index_col="f.eid")
+    return pd.read_csv(ukb_tab[str(fid)], delimiter="\t", index_col="f.eid")
+
+
+def convert_to_longitudinal(df) -> pd.DataFrame:
+
+    n = df.shape[0]
+    l = df.shape[1]
+    vals = np.concatenate([df[col].to_numpy() for col in df.columns], axis=0)
+    visits = np.repeat(np.arange(l), n)
+    subjects = np.tile(df.index.to_numpy(), l)
+
+    long_df = pd.DataFrame(
+        columns=["placeholder", "pid", "visit"],
+        data=np.stack([vals, subjects, visits], axis=-1),
+    )
+    long_df = long_df.set_index(["pid", "visit"])
+
+    return long_df
+
+
+def load_longitudinal_fid(fid: str) -> pd.Series:
+
+    df = load_fid(fid=fid)
+    long_df = convert_to_longitudinal(df=df)
+    long_df = long_df.rename(columns={"placeholder": fid})
+
+    return long_df[fid]
+
+
+def build_longitudinal_df(fids: list):
+
+    long_df = pd.concat([load_longitudinal_fid(fid=str(fid)) for fid in fids], axis=1)
+
+    return long_df
 
 
 def load_visit(fid: str, visit_idx: int = 0) -> dict:
@@ -40,36 +73,10 @@ def load_visit(fid: str, visit_idx: int = 0) -> dict:
     return a dictionary that maps participant IDs to a measurement from a given visit specified by visit_idx
     """
 
-    df = pd.read_csv(ukb_tab[fid], delimiter="\t", index_col="f.eid")
+    df = load_fid(fid=fid)
     assert visit_idx < df.shape[1], "visit index out of bounds"
 
     return df.iloc[:, visit_idx].to_dict()
-
-
-def build_dataframe(fids: list, visit_idx: int = 0) -> pd.DataFrame:
-
-    df = {}
-    for fid in fids:
-        df[str(fid)] = load_visit(fid=str(fid), visit_idx=visit_idx)
-
-    return pd.DataFrame(df)
-
-
-def init_p2i():
-
-    ukb_subjects = all_ukb_participants()
-
-    data_p2i = pd.DataFrame(
-        {
-            "pid": ukb_subjects,
-            "start_pos": np.zeros(len(ukb_subjects), dtype=np.int32),
-            "seq_len": np.zeros(len(ukb_subjects), dtype=np.int32),
-            "time": np.full(len(ukb_subjects), -1e4, dtype=np.float32),
-        },
-    )
-    data_p2i = data_p2i.set_index("pid")
-
-    return data_p2i
 
 
 def init_expansion_pack_p2i():
@@ -129,43 +136,76 @@ def build_expansion_pack(
 
 def build_biomarker(
     biomarker_df: pd.DataFrame,
-    time_df: pd.Series,
+    time_series: pd.Series,
     biomarker: str,
     data_dtype=np.float32,
 ):
 
-    nan_free = biomarker_df.notna().all(axis=1)
-    print(
-        f"# participants with NaN in biomarker data: {len(biomarker_df) - nan_free.sum()}"
-    )
-
-    biomarker_subjects = biomarker_df.index.astype(int).to_numpy()
-    biomarker_subjects = biomarker_subjects[nan_free]
-
-    time_subjects = time_df.index.astype(int).to_numpy()
+    print(biomarker)
+    subjects = biomarker_df.reset_index()["pid"].to_numpy().astype(np.int32)
+    visits = biomarker_df.reset_index()["visit"].to_numpy().astype(np.int32)
 
     ukb_subjects = all_ukb_participants()
+    not_in_ukb_subjects = ~np.isin(subjects, ukb_subjects)
+    print(f"\t - not found in Delphi cohort: {not_in_ukb_subjects.sum()}")
+    is_valid = ~not_in_ukb_subjects
 
-    valid_subjects = list(
-        set(biomarker_subjects) & set(time_subjects) & set(ukb_subjects)
+    time_np = time_series[biomarker_df.index].to_numpy().astype(np.float32)
+    has_nan_time = np.isnan(time_np)
+    print(f"\t - has NaN in time: {has_nan_time.sum()}")
+    is_valid *= ~has_nan_time
+
+    data_np = biomarker_df.to_numpy().astype(data_dtype)
+    has_nan_data = biomarker_df.isna().any(axis=1)
+    print(f"\t - has NaN in data: {has_nan_data.sum()}")
+    is_valid *= ~has_nan_data
+
+    print(f"\t - total remaining: {is_valid.sum()}")
+    histogram = (
+        biomarker_df.loc[is_valid]
+        .reset_index()["pid"]
+        .value_counts()
+        .value_counts()
+        .to_dict()
     )
+    print(f"\t - histogram: {histogram}")
 
-    data_np = biomarker_df.loc[valid_subjects].to_numpy().astype(data_dtype)
+    data_np = data_np[is_valid]
+    time_np = time_np[is_valid]
+    subjects = subjects[is_valid]
+    visits = visits[is_valid]
 
-    data_p2i = init_p2i()
     seq_len = data_np.shape[1]
-    data_p2i.loc[valid_subjects, "start_pos"] = (
-        np.cumsum(np.full(len(valid_subjects), seq_len)) - seq_len
-    ).astype(np.int32)
-    data_p2i.loc[valid_subjects, "seq_len"] = seq_len
-    data_p2i.loc[valid_subjects, "time"] = (
-        time_df.loc[valid_subjects].to_numpy().astype(np.float32)
+    p2i = pd.DataFrame.from_dict(
+        data={
+            "pid": subjects,
+            "visit": visits,
+            "start_pos": (np.cumsum(np.full(is_valid.sum(), seq_len)) - seq_len).astype(
+                np.int32
+            ),
+            "seq_len": seq_len,
+            "time": time_np,
+        }
     )
+
+    miss_subjects = list(set(ukb_subjects) - set(subjects))
+    miss_p2i = pd.DataFrame.from_dict(
+        data={
+            "pid": miss_subjects,
+            "visit": 0,
+            "start_pos": 0,
+            "seq_len": 0,
+            "time": -1e4,
+        }
+    )
+
+    p2i = pd.concat([p2i, miss_p2i], axis=0)
+    p2i = p2i.set_index("pid")
 
     odir = biomarker_dir / biomarker
     os.makedirs(odir, exist_ok=True)
     np.save(odir / "data.npy", data_np.ravel())
-    data_p2i.to_csv(odir / "p2i.csv", index_label="pid")
+    p2i.to_csv(odir / "p2i.csv")
 
 
 def data_key(pid: Union[int, str]) -> str:
@@ -176,13 +216,42 @@ def time_key(pid: Union[int, str]) -> str:
     return f"{pid}.time"
 
 
-assessment_age = pd.read_csv(
-    os.path.join(DELPHI_DATA_DIR, "multimodal/general/age_at_assess.csv"),
-    index_col="pid",
-)["age"]
+def assessment_age(visits: list) -> pd.DataFrame:
+
+    mob = pd.read_csv(
+        multimodal_dir / "year_and_month_of_birth.txt", sep="\t", index_col="eid"
+    )
+    mob["year_month"] = pd.to_datetime(mob["year_month"], format="%Y%m")
+
+    assess_date = load_fid(fid="53")
+    assess_date = assess_date.rename(
+        columns={
+            "f.53.0.0": "init_assess",
+            "f.53.1.0": "1st_repeat_assess",
+            "f.53.2.0": "img",
+            "f.53.3.0": "1st_repeat_img",
+        }
+    )
+
+    assess_age = pd.DataFrame(columns=assess_date.columns, index=assess_date.index)
+    for col in visits:
+        assess_date[col] = pd.to_datetime(assess_date[col], format="%Y-%m-%d")
+        assess_age[col] = (assess_date[col] - mob["year_month"]).dt.days.astype(float)
+
+    return assess_age
+
+
+def longitudinal_assessment_age(visits: list) -> pd.Series:
+
+    assess_age = assessment_age(visits=visits)
+    assess_age = convert_to_longitudinal(assess_age)
+    assess_age = assess_age.rename(columns={"placeholder": "age"})
+
+    return assess_age["age"]
+
 
 sex = pd.read_csv(
-    os.path.join(DELPHI_DATA_DIR, "multimodal/general/sex_31.txt"),
+    os.path.join(DELPHI_DATA_DIR, "multimodal/tab/sex_31.txt"),
     delimiter="\t",
     index_col="f.eid",
 )["f.31.0.0"].to_dict()

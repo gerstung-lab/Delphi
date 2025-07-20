@@ -61,7 +61,7 @@ df = pd.read_csv(
     },
 )
 
-mob_txt = Path(multimodal_dir) / "general" / "year_and_month_of_birth.txt"
+mob_txt = Path(multimodal_dir) / "year_and_month_of_birth.txt"
 mob_df = pd.read_csv(mob_txt, sep="\t", index_col="eid")
 mob_df["year_month"] = pd.to_datetime(mob_df["year_month"], format="%Y%m")
 mob_participants = mob_df.index.astype(int).to_numpy()

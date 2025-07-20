@@ -63,7 +63,6 @@ time_df = time_df.with_columns(
 
 mob_txt = os.path.join(
     multimodal_dir,
-    "general",
     "year_and_month_of_birth.txt",
 )
 mob_df = pd.read_csv(mob_txt, sep="\t", index_col="eid")
