@@ -223,11 +223,8 @@ class Biomarker:
         )
         p2i = pd.read_csv(
             os.path.join(path, "p2i.csv"),
-            index_col="pid",
         )
-        self.start_pos = p2i["start_pos"].to_dict()
-        self.seq_len = p2i["seq_len"].to_dict()
-        self.time_steps = p2i["time"].to_dict()
+        self.p2i = p2i.groupby("pid")
 
     def __repr__(self):
         return f"Biomarker(path={self.path})"
@@ -241,16 +238,19 @@ class Biomarker:
         batch_count = []
 
         for pid in pids:
-            i = self.start_pos[pid]
-            l = self.seq_len[pid]
-            t = self.time_steps[pid]
-            if l > 0:
-                x = self.data[i : i + l]
-                batch_data.append(x)
-                batch_count.append(1)
-            else:
-                batch_count.append(0)
-            batch_time.append(np.array(t))
+            pid_grp = self.p2i.get_group(pid)
+            pid_time = []
+            for i, l, t in zip(
+                pid_grp["start_pos"], pid_grp["seq_len"], pid_grp["time"]
+            ):
+                if l > 0:
+                    x = self.data[i : i + l]
+                    batch_data.append(x)
+                    batch_count.append(1)
+                else:
+                    batch_count.append(0)
+                pid_time.append(t)
+            batch_time.append(np.array(pid_time))
 
         batch_data = collate_batch_data(batch_data)
         batch_time = collate_batch_time(batch_time)
