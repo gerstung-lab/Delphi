@@ -214,7 +214,7 @@ def build_biomarker(
 
     odir = biomarker_dir / biomarker
     os.makedirs(odir, exist_ok=True)
-    np.save(odir / "data.npy", data_np.ravel())
+    data_np.ravel().astype(np.float32).tofile(odir / "data.bin")
     p2i.to_csv(odir / "p2i.csv")
 
 

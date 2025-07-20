@@ -3,7 +3,6 @@ import os
 import numpy as np
 import pandas as pd
 import pytest
-import yaml
 
 from data.gather_biomarker.utils import all_ukb_participants
 from delphi.env import DELPHI_DATA_DIR
@@ -69,9 +68,7 @@ def real_time_where_data_exists(
 )
 def test_biomarkers(biomarker_path):
 
-    data = np.load(
-        os.path.join(biomarker_path, "data.npy"), allow_pickle=True, mmap_mode="r"
-    )
+    data = np.fromfile(os.path.join(biomarker_path, "data.bin"), dtype=np.float32)
     p2i = pd.read_csv(
         os.path.join(biomarker_path, "p2i.csv"),
         index_col="pid",
