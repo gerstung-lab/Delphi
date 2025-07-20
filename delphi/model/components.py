@@ -74,6 +74,7 @@ class DelphiEmbedding(nn.Module):
     def __init__(self, config: DelphiConfig) -> None:
         super().__init__()
         self.config = config
+        assert config.vocab_size is not None
         self.token_embedding = nn.Embedding(
             config.vocab_size, config.n_embd, padding_idx=0
         )
@@ -158,6 +159,7 @@ class DelphiEmbedding(nn.Module):
 class ZeroInflateProjector(nn.Module):
     def __init__(self, config: DelphiConfig) -> None:
         super().__init__()
+        assert config.vocab_size is not None
         self.linears = nn.ModuleList(
             [
                 nn.Linear(config.vocab_size, 32, bias=False),
@@ -175,6 +177,7 @@ class ZeroInflateProjector(nn.Module):
 
 def build_zero_inflate_projector(config: DelphiConfig):
 
+    assert config.vocab_size is not None
     if config.loss.zero_inflate_projector == "linear":
         return nn.Linear(config.vocab_size, 1, bias=False)
     elif config.loss.zero_inflate_projector == "mlp":
