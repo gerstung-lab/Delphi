@@ -215,12 +215,13 @@ class UKBDataConfig:
 
 class Biomarker:
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, memmap: bool = False):
         self.path = path
-        self.data = np.load(
-            os.path.join(path, "data.npy"),
-            allow_pickle=True,
-        )
+        data_path = os.path.join(path, "data.bin")
+        if memmap:
+            self.data = np.memmap(data_path, dtype=np.float32, mode="r")
+        else:
+            self.data = np.fromfile(data_path, dtype=np.float32)
         p2i = pd.read_csv(
             os.path.join(path, "p2i.csv"),
         )
@@ -261,14 +262,20 @@ class Biomarker:
 
 class ExpansionPack:
 
-    def __init__(self, path: str, offset: int):
+    def __init__(self, path: str, offset: int, memmap: bool = False):
 
         p2i = pd.read_csv(os.path.join(path, "p2i.csv"), index_col="pid")
         self.offset = offset
         self.start_pos = p2i["start_pos"].to_dict()
         self.seq_len = p2i["seq_len"].to_dict()
-        self.tokens = np.load(os.path.join(path, "data.npy"))
-        self.time_steps = np.load(os.path.join(path, "time.npy"))
+        data_path = os.path.join(path, "data.bin")
+        time_path = os.path.join(path, "time.bin")
+        if memmap:
+            self.tokens = np.memmap(data_path, dtype=np.uint32, mode="r")
+            self.time_steps = np.memmap(time_path, dtype=np.uint32, mode="r")
+        else:
+            self.tokens = np.fromfile(data_path, dtype=np.uint32)
+            self.time_steps = np.fromfile(data_path, dtype=np.uint32)
 
     def get_expansion(self, pid: int) -> tuple[np.ndarray, np.ndarray]:
 
@@ -282,10 +289,7 @@ class ExpansionPack:
 
 class Dataset:
 
-    def __init__(
-        self,
-        cfg: UKBDataConfig,
-    ):
+    def __init__(self, cfg: UKBDataConfig, memmap: bool = False):
         self.data_dir = os.path.join(DELPHI_DATA_DIR, cfg.data_dir)
         print(f"building dataset at {self.data_dir}")
         tokenizer_path = os.path.join(self.data_dir, "tokenizer.yaml")
@@ -293,20 +297,22 @@ class Dataset:
         with open(tokenizer_path, "r") as f:
             base_tokenizer = yaml.safe_load(f)
 
-        self.participants = np.memmap(
-            os.path.join(DELPHI_DATA_DIR, cfg.subject_list), dtype=np.uint32, mode="r"
-        )
-
         p2i_path = os.path.join(self.data_dir, "p2i.csv")
         self.p2i = pd.read_csv(p2i_path, index_col="pid")
         self.start_pos = self.p2i["start_pos"].to_dict()
         self.seq_len = self.p2i["seq_len"].to_dict()
-        self.tokens = np.memmap(
-            os.path.join(self.data_dir, "data.bin"), dtype=np.uint32, mode="r"
-        )
-        self.time_steps = np.memmap(
-            os.path.join(self.data_dir, "time.bin"), dtype=np.uint32, mode="r"
-        )
+        participants_path = os.path.join(DELPHI_DATA_DIR, cfg.subject_list)
+        tokens_path = os.path.join(self.data_dir, "data.bin")
+        time_steps_path = os.path.join(self.data_dir, "time.bin")
+        if memmap:
+            self.participants = np.memmap(participants_path, dtype=np.uint32, mode="r")
+            self.tokens = np.memmap(tokens_path, dtype=np.uint32, mode="r")
+            self.time_steps = np.memmap(time_steps_path, dtype=np.uint32, mode="r")
+        else:
+            self.participants = np.fromfile(participants_path, dtype=np.uint32)
+            self.tokens = np.fromfile(tokens_path, dtype=np.uint32)
+            self.time_steps = np.fromfile(time_steps_path, dtype=np.uint32)
+
         cfg.expansion_packs.sort()
         self.expansion_packs = []
         self.expansion_pack_tokenizers = []
@@ -324,7 +330,9 @@ class Dataset:
                 base_tokenizer=base_tokenizer, add_tokenizer=add_tokenizer
             )
             self.expansion_pack_tokenizers.append(add_tokenizer)
-            self.expansion_packs.append(ExpansionPack(path=pack_path, offset=offset))
+            self.expansion_packs.append(
+                ExpansionPack(path=pack_path, offset=offset, memmap=memmap)
+            )
         self.tokenizer = Tokenizer(base_tokenizer)
 
         self.biomarker_dir = os.path.join(DELPHI_DATA_DIR, cfg.biomarker_dir)
@@ -333,7 +341,7 @@ class Dataset:
             modality = Modality[modality.upper()]
             print(f"\t– loading biomarker: {modality.name}")
             biomarker_path = os.path.join(self.biomarker_dir, modality.name.lower())
-            dataset = Biomarker(path=biomarker_path)
+            dataset = Biomarker(path=biomarker_path, memmap=memmap)
             self.mod_ds[modality] = dataset
 
         self.transforms = []

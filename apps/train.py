@@ -41,6 +41,7 @@ class TrainConfig:
 
     # data
     data_fraction: float = 1.0
+    memmap: bool = False
     train_data: UKBDataConfig = field(default_factory=UKBDataConfig)
     infer_train_biomarkers: bool = True
     val_data: UKBDataConfig = field(default_factory=UKBDataConfig)
@@ -89,8 +90,9 @@ def train(cfg: TrainConfig):
     if cfg.infer_train_biomarkers:
         cfg.train_data.biomarkers = list(cfg.model.biomarkers.keys())
     assert set(cfg.train_data.biomarkers).issubset(set(cfg.model.biomarkers.keys()))
+    print(f"using memmap mode: {cfg.memmap}")
     print("training dataset")
-    train_ds = Dataset(cfg.train_data)
+    train_ds = Dataset(cfg=cfg.train_data, memmap=cfg.memmap)
     train_it = train_iter(rng=rng, total_size=len(train_ds), batch_size=cfg.batch_size)
     train_loader = load_sequences(it=train_it, dataset=train_ds)
 
@@ -103,7 +105,7 @@ def train(cfg: TrainConfig):
         set(cfg.train_data.expansion_packs)
     )
     print("validation dataset")
-    val_ds = Dataset(cfg.val_data)
+    val_ds = Dataset(cfg=cfg.val_data, memmap=cfg.memmap)
 
     if cfg.model.vocab_size is None:
         cfg.model.vocab_size = train_ds.vocab_size
