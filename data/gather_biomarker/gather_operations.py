@@ -2,14 +2,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yaml
-from utils import all_ukb_participants
+from utils import all_ukb_participants, build_expansion_pack
 
 from delphi import DAYS_PER_YEAR
 
 idir = Path("data/multimodal/operations")
-odir = Path("data/ukb_real_data/expansion_packs") / "ops"
-tokenizer_path = odir / "tokenizer.yaml"
 
 vocab = pd.read_csv(
     idir / "coding.txt",
@@ -20,26 +17,11 @@ vocab = vocab.loc[~vocab["coding"].isin(reject_vals)]
 code_vals = vocab["coding"].unique()
 code_map = {code: i + 1 for i, code in enumerate(code_vals)}
 vocab = vocab.set_index("coding")
-with open(tokenizer_path, "w") as f:
-    tokenizer_keys = (
-        vocab.loc[code_vals, "meaning"].str.replace(" ", "_").str.lower().tolist()
-    )
-    tokenizer_values = code_map.values()
-    tokenizer = dict(zip(tokenizer_keys, tokenizer_values))
-    yaml.dump(
-        tokenizer,
-        f,
-        default_flow_style=False,
-        sort_keys=False,
-    )
-token_list_dir = Path("config/disease_list")
-with open(token_list_dir / "ops.yaml", "w") as f:
-    yaml.dump(
-        tokenizer_keys,
-        f,
-        default_flow_style=False,
-        sort_keys=False,
-    )
+tokenizer_keys = (
+    vocab.loc[code_vals, "meaning"].str.replace(" ", "_").str.lower().tolist()
+)
+tokenizer_values = code_map.values()
+tokenizer = dict(zip(tokenizer_keys, tokenizer_values))
 
 max_key = max(code_map.keys())
 lookup = np.zeros((max_key + 1,), dtype=int)
@@ -73,18 +55,11 @@ token_np = token_np[accept_mask].ravel()
 time_np = time_np[accept_mask].ravel()
 token_np = lookup[token_np]
 
-p2i = pd.DataFrame(
-    {
-        "pid": ukb_participants,
-        "start_pos": 0,
-        "seq_len": 0,
-    }
+build_expansion_pack(
+    token_np=token_np,
+    time_np=time_np,
+    count_np=count_np,
+    subjects=valid_participants,
+    tokenizer=tokenizer,
+    expansion_pack="ops",
 )
-p2i.set_index("pid", inplace=True)
-p2i.loc[valid_participants, "seq_len"] = count_np
-p2i.loc[valid_participants, "start_pos"] = np.cumsum(count_np) - count_np
-p2i.loc[p2i["seq_len"] == 0, "start_pos"] = 0
-
-p2i.to_csv(odir / "p2i.csv")
-np.save(odir / "data.npy", token_np)
-np.save(odir / "time.npy", time_np)

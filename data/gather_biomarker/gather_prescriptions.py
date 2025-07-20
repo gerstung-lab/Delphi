@@ -1,14 +1,11 @@
-import os
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yaml
 from tqdm import tqdm
-from utils import all_ukb_participants, expansion_pack_dir, multimodal_dir
+from utils import build_expansion_pack, multimodal_dir
 
 idir = Path(multimodal_dir) / "primary_care"
-odir = Path(expansion_pack_dir) / "prescriptions"
 
 bnf_lkp = pd.read_csv(idir / "bnf_lkp.csv")
 is_dummy = bnf_lkp["BNF_Subparagraph"].str.contains("DUMMY", na=False)
@@ -20,20 +17,11 @@ unique_bnf_codes = bnf_codes.loc[~is_duplicate].values
 tokenizer_keys = bnf_lkp.loc[~is_duplicate, "BNF_Subparagraph"]
 tokenizer_values = np.arange(len(tokenizer_keys.unique()), dtype=np.int32) + 1
 tokenizer = pd.Series(tokenizer_values, index=tokenizer_keys.unique())
-with open(odir / "tokenizer.yaml", "w") as f:
-    saved_tokenizer = {}
-    for key, value in tokenizer.to_dict().items():
-        key = key.lower().replace(" ", "_")
-        saved_tokenizer[key] = int(value)
-    yaml.dump(saved_tokenizer, f, default_flow_style=False)
-token_list_dir = Path("config/disease_list")
-with open(token_list_dir / "prescriptions.yaml", "w") as f:
-    yaml.dump(
-        list(saved_tokenizer.keys()),
-        f,
-        default_flow_style=False,
-        sort_keys=False,
-    )
+
+saved_tokenizer = {}
+for key, value in tokenizer.to_dict().items():
+    key = key.lower().replace(" ", "_")
+    saved_tokenizer[key] = int(value)
 
 code2token = pd.Series(
     tokenizer[tokenizer_keys].values,
@@ -66,19 +54,10 @@ mob_df = pd.read_csv(mob_txt, sep="\t", index_col="eid")
 mob_df["year_month"] = pd.to_datetime(mob_df["year_month"], format="%Y%m")
 mob_participants = mob_df.index.astype(int).to_numpy()
 
-ukb_participants = all_ukb_participants()
-p2i = pd.DataFrame(
-    {
-        "pid": ukb_participants,
-        "start_pos": 0,
-        "seq_len": 0,
-    }
-)
-p2i = p2i.set_index("pid")
+subjects = []
+count_list = []
 all_tokens = []
 all_timesteps = []
-offset = 0
-n_unmapped = 0
 hold_out_chunk = None
 for chunk in tqdm(df, leave=False):
     is_last_chunk = len(chunk) < int(1e6)
@@ -122,21 +101,20 @@ for chunk in tqdm(df, leave=False):
     tokens = code2token.loc[bnf_codes[are_valid]].values.tolist()  # type: ignore
     timesteps = chunk.loc[are_valid, "timesteps"].values.tolist()
 
-    unique_subs = chunk.loc[are_valid, "eid"].unique()
+    unique_subs = chunk.loc[are_valid, "eid"].unique().tolist()
+    subjects.extend(unique_subs)
     seq_len = chunk.loc[are_valid, "eid"].value_counts()
-    seq_len = seq_len.loc[unique_subs].values
-    start_pos = np.cumsum(np.concatenate(([0], seq_len[:-1]))) + offset  # type: ignore
-    p2i.loc[unique_subs, "start_pos"] = start_pos
-    p2i.loc[unique_subs, "seq_len"] = seq_len
-    n_unmapped += (~are_valid).sum()
-    offset += len(tokens)
+    seq_len = seq_len.loc[unique_subs].to_list()
+    count_list.extend(seq_len)
     all_tokens.extend(tokens)
     all_timesteps.extend(timesteps)
 
-all_tokens = np.array(all_tokens, dtype=np.int64)
-all_timesteps = np.array(all_timesteps, dtype=np.float32)
 
-os.makedirs(odir, exist_ok=True)
-np.save(odir / "data.npy", all_tokens)
-np.save(odir / "time.npy", all_timesteps)
-p2i.to_csv(odir / "p2i.csv", index_label="pid")
+build_expansion_pack(
+    token_np=np.array(all_tokens),
+    time_np=np.array(all_timesteps),
+    count_np=np.array(count_list),
+    subjects=np.array(subjects),
+    tokenizer=saved_tokenizer,
+    expansion_pack="prescriptions",
+)

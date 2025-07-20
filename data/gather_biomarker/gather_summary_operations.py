@@ -8,11 +8,9 @@ from utils import (
     all_ukb_participants,
     build_expansion_pack,
     multimodal_dir,
-    token_list_dir,
 )
 
 idir = Path("data/multimodal/summary_operations")
-odir = Path("data/ukb_real_data/expansion_packs") / "summary_ops"
 
 vocab = pd.read_csv(
     idir / "coding.txt",

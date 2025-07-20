@@ -52,7 +52,8 @@ tokenizer = vocab.set_index("meaning")
 tokenizer = tokenizer["id"].to_dict()
 
 ukb_participants = all_ukb_participants()
-assessment_participants = list(assessment_age.index.astype(int))
+first_assess_age = assessment_age(visits=["init_assess"])["init_assess"]
+assessment_participants = list(first_assess_age.index.astype(int))
 missing_meds = len(set(ukb_participants) - set(medication_participants))
 print(f"# participants with missing medication data: {missing_meds}")
 missing_age = len(set(ukb_participants) - set(assessment_participants))
@@ -68,7 +69,7 @@ token_np = token_df.to_numpy().astype(int)
 accept_mask = token_np > 0
 count_np = np.sum(accept_mask[is_valid], axis=1).astype(np.int32)
 token_np = token_np[is_valid[:, np.newaxis] * accept_mask]
-time_np = assessment_age.loc[valid_participants].to_numpy()
+time_np = first_assess_age.loc[valid_participants].to_numpy()
 time_np = np.repeat(time_np, count_np)
 
 build_expansion_pack(
