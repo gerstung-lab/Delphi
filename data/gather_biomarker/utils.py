@@ -208,14 +208,6 @@ def build_biomarker(
     p2i.to_csv(odir / "p2i.csv")
 
 
-def data_key(pid: Union[int, str]) -> str:
-    return f"{pid}.data"
-
-
-def time_key(pid: Union[int, str]) -> str:
-    return f"{pid}.time"
-
-
 def assessment_age(visits: list) -> pd.DataFrame:
 
     mob = pd.read_csv(
@@ -248,10 +240,3 @@ def longitudinal_assessment_age(visits: list) -> pd.Series:
     assess_age = assess_age.rename(columns={"placeholder": "age"})
 
     return assess_age["age"]
-
-
-sex = pd.read_csv(
-    os.path.join(DELPHI_DATA_DIR, "multimodal/tab/sex_31.txt"),
-    delimiter="\t",
-    index_col="f.eid",
-)["f.31.0.0"].to_dict()
