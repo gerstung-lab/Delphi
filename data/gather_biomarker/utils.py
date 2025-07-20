@@ -1,11 +1,11 @@
 import os
 from pathlib import Path
-from typing import Union
 
 import numpy as np
 import pandas as pd
 import yaml
 
+from delphi import DAYS_PER_YEAR
 from delphi.env import DELPHI_DATA_DIR
 
 multimodal_dir = Path(DELPHI_DATA_DIR) / "multimodal"
@@ -102,9 +102,15 @@ def build_expansion_pack(
     tokenizer: dict,
     expansion_pack: str,
 ):
+    print(expansion_pack)
     assert token_np.size == time_np.size
     assert count_np.sum() == token_np.size
     assert subjects.size == count_np.size
+    print(f"\t - total tokens: {token_np.size}")
+    print(f"\t - subjects: {subjects.size}")
+    print(f"\t - avg tokens per subject: {count_np.mean()}")
+    print(f"\t - max tokens per subject: {count_np.max()}")
+    print(f"\t - vocab size: {len(tokenizer)}")
 
     p2i = init_expansion_pack_p2i()
     p2i.loc[subjects, "seq_len"] = count_np
@@ -114,8 +120,12 @@ def build_expansion_pack(
     odir = Path(expansion_pack_dir) / expansion_pack
     os.makedirs(odir, exist_ok=True)
     p2i.to_csv(odir / "p2i.csv")
-    np.save(odir / "data.npy", token_np)
-    np.save(odir / "time.npy", time_np)
+    token_np.astype(np.uint32).tofile(odir / "data.bin")
+    time_np = time_np.astype(np.uint32)
+    print(
+        f"\t - time points from {time_np.min() / DAYS_PER_YEAR} to {time_np.max() / DAYS_PER_YEAR}"
+    )
+    time_np.tofile(odir / "time.bin")
 
     with open(odir / "tokenizer.yaml", "w") as f:
         yaml.dump(

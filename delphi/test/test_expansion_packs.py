@@ -97,10 +97,10 @@ def test_expansion_pack(expansion_pack_path):
     tokenizer_path = os.path.join(expansion_pack_path, "tokenizer.yaml")
     assert os.path.exists(tokenizer_path)
 
-    data_path = os.path.join(expansion_pack_path, "data.npy")
+    data_path = os.path.join(expansion_pack_path, "data.bin")
     assert os.path.exists(data_path)
 
-    time_path = os.path.join(expansion_pack_path, "time.npy")
+    time_path = os.path.join(expansion_pack_path, "time.bin")
     assert os.path.exists(time_path)
 
     lookup_path = os.path.join(expansion_pack_path, "p2i.csv")
@@ -112,8 +112,8 @@ def test_expansion_pack(expansion_pack_path):
 
         tokenizer = yaml.safe_load(f)
     p2i = pd.read_csv(lookup_path, index_col="pid")
-    tokens = np.load(data_path)
-    time_steps = np.load(time_path)
+    tokens = np.fromfile(data_path, dtype=np.uint32)
+    time_steps = np.fromfile(time_path, dtype=np.uint32)
 
     assert data_and_time_size_match(tokens=tokens, time_steps=time_steps)
     assert tokens_within_range(tokens=tokens, tokenizer=tokenizer)
