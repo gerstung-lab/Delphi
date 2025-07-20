@@ -209,13 +209,14 @@ class UKBDataConfig:
     expansion_packs: list[str] = field(default_factory=list)
     biomarker_dir: str = "ukb_real_data/biomarkers"
     biomarkers: list[str] = field(default_factory=list)
+    first_time_only: bool = True
     seed: int = 42
     transforms: Optional[List[TransformArgs]] = None
 
 
 class Biomarker:
 
-    def __init__(self, path: str, memmap: bool = False):
+    def __init__(self, path: str, memmap: bool = False, first_time_only: bool = True):
         self.path = path
         data_path = os.path.join(path, "data.bin")
         if memmap:
@@ -226,6 +227,7 @@ class Biomarker:
             os.path.join(path, "p2i.csv"),
         )
         self.p2i = p2i.groupby("pid")
+        self.first_time_only = first_time_only
 
     def __repr__(self):
         return f"Biomarker(path={self.path})"
@@ -251,6 +253,8 @@ class Biomarker:
                 else:
                     batch_count.append(0)
                 pid_time.append(t)
+                if self.first_time_only:
+                    continue
             batch_time.append(np.array(pid_time))
 
         batch_data = collate_batch_data(batch_data)
@@ -341,8 +345,11 @@ class Dataset:
             modality = Modality[modality.upper()]
             print(f"\t– loading biomarker: {modality.name}")
             biomarker_path = os.path.join(self.biomarker_dir, modality.name.lower())
-            dataset = Biomarker(path=biomarker_path, memmap=memmap)
+            dataset = Biomarker(
+                path=biomarker_path, memmap=memmap, first_time_only=cfg.first_time_only
+            )
             self.mod_ds[modality] = dataset
+        print(f"only using first occurrence of biomarkers: {cfg.first_time_only}")
 
         self.transforms = []
         if cfg.transforms is not None:
