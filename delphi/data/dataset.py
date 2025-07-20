@@ -236,22 +236,25 @@ class Biomarker:
         self, pids: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
-        time_steps = np.array([self.time_steps[pid] for pid in pids])
-        start_pos = np.array([self.start_pos[pid] for pid in pids])
-        seq_len = np.array([self.seq_len[pid] for pid in pids])
-
         batch_data = []
         batch_time = []
-        batch_count = (seq_len == 0).astype(np.int32)
+        batch_count = []
 
-        for i, l, t in zip(start_pos, seq_len, time_steps):
+        for pid in pids:
+            i = self.start_pos[pid]
+            l = self.seq_len[pid]
+            t = self.time_steps[pid]
             if l > 0:
                 x = self.data[i : i + l]
                 batch_data.append(x)
+                batch_count.append(1)
+            else:
+                batch_count.append(0)
             batch_time.append(np.array(t))
 
         batch_data = collate_batch_data(batch_data)
         batch_time = collate_batch_time(batch_time)
+        batch_count = np.array(batch_count)
 
         return batch_data, batch_time, batch_count
 
