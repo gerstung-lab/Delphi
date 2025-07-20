@@ -222,20 +222,3 @@ def target_mask(
         is_valid_target *= x1 != k
 
     return is_valid_target
-
-
-def mask_biomarker_only_predicate(
-    x1: torch.Tensor,
-    m0: torch.Tensor,
-):
-
-    first_non_pad = torch.argmax(m0 > 0, dim=1)
-    first_biomarker = torch.argmax(m0 > 1, dim=1)
-
-    biomarker_only_predicate = first_non_pad == first_biomarker
-    mask_positions = first_biomarker[biomarker_only_predicate]
-
-    is_valid_target = torch.ones_like(x1, dtype=torch.bool)
-    is_valid_target[torch.arange(mask_positions.shape[0]), mask_positions] = False
-
-    return is_valid_target
