@@ -40,16 +40,11 @@ class BiomarkerEmbedding(nn.Module):
 
         super().__init__()
         self.config = config
+        assert config.input_size is not None, "input_size must be specified"
         if config.projector == "linear":
-            assert (
-                config.input_size is not None
-            ), "input_size must be specified for linear projector"
             self.projector = nn.Linear(config.input_size, n_embed, bias=False)
         elif config.projector == "mlp":
             layers = []
-            assert (
-                config.input_size is not None
-            ), "input_size must be specified for mlp projector"
             assert (
                 config.n_layers is not None
             ), "n_layers must be specified for mlp projector"
@@ -63,11 +58,6 @@ class BiomarkerEmbedding(nn.Module):
                 if i < config.n_layers - 1:
                     layers.append(nn.ReLU())
             self.projector = nn.Sequential(*layers)
-        elif config.projector == "embed":
-            assert (
-                config.vocab_size is not None
-            ), "vocab_size must be specified for embed projector"
-            self.projector = nn.Embedding(config.vocab_size, n_embed, padding_idx=0)
         else:
             raise ValueError(f"unknown projector type: {config.projector}")
 

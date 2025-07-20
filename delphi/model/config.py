@@ -10,7 +10,6 @@ class BiomarkerEmbedConfig:
     n_layers: Optional[int] = None
     n_hidden: Optional[int] = None
     input_size: Optional[int] = None
-    vocab_size: Optional[int] = None
 
 
 @dataclass
