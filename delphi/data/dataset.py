@@ -384,7 +384,7 @@ class Dataset:
         for i, pid in enumerate(P):
             i = self.start_pos[pid]
             l = self.seq_len[pid]
-            x_pid = self.tokens[i : i + l] + 1
+            x_pid = self.tokens[i : i + l]
             t_pid = self.time_steps[i : i + l]
             for expansion_pack in self.expansion_packs:
                 pack_x_pid, pack_t_pid = expansion_pack.get_expansion(pid)
