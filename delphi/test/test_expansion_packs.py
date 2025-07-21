@@ -2,21 +2,23 @@ import os
 
 import numpy as np
 import pandas as pd
-import pytest
 
-from delphi.env import DELPHI_DATA_DIR
-
-expansion_pack_path = os.path.join(DELPHI_DATA_DIR, "ukb_real_data", "expansion_packs")
+from delphi.test.test_biomarkers import has_all_participants
 
 
-def expansion_pack_has_all_participants(p2i: pd.DataFrame) -> bool:
+def required_files_exist(expansion_pack_path: str):
 
-    from data.gather_biomarker.utils import all_ukb_participants
+    tokenizer_path = os.path.join(expansion_pack_path, "tokenizer.yaml")
+    data_path = os.path.join(expansion_pack_path, "data.bin")
+    time_path = os.path.join(expansion_pack_path, "time.bin")
+    lookup_path = os.path.join(expansion_pack_path, "p2i.csv")
 
-    participants_in_lookup = p2i.index.astype(int).to_numpy()
-    all_participants = all_ukb_participants()
-
-    return bool(np.isin(all_participants, participants_in_lookup).all())
+    return (
+        os.path.exists(tokenizer_path)
+        and os.path.exists(data_path)
+        and os.path.exists(time_path)
+        and os.path.exists(lookup_path)
+    )
 
 
 def all_start_pos_within_range(p2i: pd.DataFrame, tokens: np.ndarray) -> bool:
@@ -82,42 +84,25 @@ def tokenizer_contiguous(tokenizer: dict):
     )
 
 
-_, expansion_packs, _ = next(os.walk(expansion_pack_path))
+def test_expansion_pack(expansion_pack_path, all_participants):
 
-
-@pytest.mark.parametrize(
-    "expansion_pack_path",
-    [
-        os.path.join(expansion_pack_path, expansion_pack)
-        for expansion_pack in expansion_packs
-    ],
-)
-def test_expansion_pack(expansion_pack_path):
-
-    tokenizer_path = os.path.join(expansion_pack_path, "tokenizer.yaml")
-    assert os.path.exists(tokenizer_path)
-
-    data_path = os.path.join(expansion_pack_path, "data.bin")
-    assert os.path.exists(data_path)
-
-    time_path = os.path.join(expansion_pack_path, "time.bin")
-    assert os.path.exists(time_path)
-
-    lookup_path = os.path.join(expansion_pack_path, "p2i.csv")
-    assert os.path.exists(lookup_path)
+    assert required_files_exist(expansion_pack_path)
 
     tokenizer_path = os.path.join(expansion_pack_path, "tokenizer.yaml")
     with open(tokenizer_path, "r") as f:
         import yaml
 
         tokenizer = yaml.safe_load(f)
+    lookup_path = os.path.join(expansion_pack_path, "p2i.csv")
     p2i = pd.read_csv(lookup_path, index_col="pid")
+    data_path = os.path.join(expansion_pack_path, "data.bin")
     tokens = np.fromfile(data_path, dtype=np.uint32)
+    time_path = os.path.join(expansion_pack_path, "time.bin")
     time_steps = np.fromfile(time_path, dtype=np.uint32)
 
     assert data_and_time_size_match(tokens=tokens, time_steps=time_steps)
     assert tokens_within_range(tokens=tokens, tokenizer=tokenizer)
-    assert expansion_pack_has_all_participants(p2i=p2i)
+    assert has_all_participants(p2i=p2i, pids=all_participants)
     assert all_start_pos_within_range(p2i=p2i, tokens=tokens)
     assert no_duplicate_start_pos(p2i=p2i)
     assert total_seq_len_add_up(p2i=p2i, tokens=tokens)

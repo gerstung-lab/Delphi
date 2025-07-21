@@ -4,15 +4,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from data.gather_biomarker.utils import all_ukb_participants
-from delphi.env import DELPHI_DATA_DIR
 from delphi.multimodal import Modality
 
-biomarker_path = os.path.join(DELPHI_DATA_DIR, "ukb_real_data", "biomarkers")
 all_biomarkers = [modality.lower() for modality in Modality.__members__]
 
 
-def biomarkers_have_all_participants(p2i: pd.DataFrame, pids: np.ndarray) -> bool:
+def has_all_participants(p2i: pd.DataFrame, pids: np.ndarray) -> bool:
 
     return bool(np.isin(pids, p2i.index.astype(int).to_numpy()).all())
 
@@ -62,20 +59,17 @@ def real_time_where_data_exists(
     return (p2i.loc[p2i["seq_len"] > 0, "time"] >= 0).all()
 
 
-@pytest.mark.parametrize(
-    "biomarker_path",
-    [os.path.join(biomarker_path, biomarker) for biomarker in all_biomarkers],
-)
-def test_biomarkers(biomarker_path):
+@pytest.mark.parametrize("biomarker", all_biomarkers)
+def test_biomarkers(dataset_dir, all_participants, biomarker):
+    biomarker_path = os.path.join(dataset_dir, "biomarkers", biomarker)
 
     data = np.fromfile(os.path.join(biomarker_path, "data.bin"), dtype=np.float32)
     p2i = pd.read_csv(
         os.path.join(biomarker_path, "p2i.csv"),
         index_col="pid",
     )
-    pids = all_ukb_participants()
 
-    assert biomarkers_have_all_participants(p2i=p2i, pids=pids)
+    assert has_all_participants(p2i=p2i, pids=all_participants)
     assert data_is_1d(data=data)
     assert no_nan_data(data=data)
     assert total_dimensions_match(p2i=p2i, data=data)
