@@ -1,56 +1,64 @@
 # Data Preparation
 
-Multimodal Delphi handles data differently compared to the original version. The data directory should be structured as follows:
+Multimodal Delphi (Delphi-M4) handles data differently compared to the original version. The data directory should be structured as follows:
 
 ```bash
-# example file tree of multimodal Delphi data corpus
+# file tree of example data directory
 ukb_data/
 ├── data.bin
 ├── time.bin
 ├── p2i.csv
 ├── tokenizer.yaml
-├── expansion_packs/
-│   └── surgical_ops/
+├── participants/ # participant ID lists
+│   ├── train_fold.bin
+│   └── val_fold.bin
+├── expansion_packs/ # additional discrete modalities that expand upon the original vocab of disease events (e.g. surgical operations)
+│   └── ops/
 │       ├── data.bin
 │       ├── time.bin
 │       ├── p2i.csv
 │       └── tokenizer.yaml
-└── biomarkers/
-    └── polygenic_risk_scores/
-        ├── data.npy
+└── biomarkers/ # biomarker modalties (e.g. polygenic risk scores and blood panels)
+    ├── prs/
+    │   ├── data.bin
+    │   └── p2i.csv
+    └── blood/
+        ├── data.bin
         └── p2i.csv
 ```
 
 ## Event Records
 
-Event records represent disease occurrences with sex and lifestyle tokens that the original Delphi was trained on. These should be stored in two binary files:
+Event records represent disease occurrences with sex and lifestyle tokens that the original Delphi was trained on.
 
-### Required Files
+> **Tip💡:** In the first version of Delphi, data is stored on a binary file `data.bin` that consists of three columns: participant IDs, timesteps, and tokens. And a mapping from participant IDs to starting positions and sequence lengths is dynamically constructed. In Delphi-M4, we essentially decompose that binary file into two separate files: tokens (`data.bin`) and timesteps (`time.bin`). And the mapping (`p2i.csv`) is constructed beforehand.
 
-**`data.bin`**
-- Contains a contiguous sequence of all event tokens (`np.uint32`)
-- **Important:** Token indexing must start at 1
+- **`data.bin`**
+  - Contains a contiguous sequence of all event tokens (`np.uint32`)
+  - **Important❗:** Token indexing starts at 2. See below for a more detailed explanation.
+- **`time.bin`**
+  - Contains a contiguous sequence of timestamps measured in days (`np.uint32`)
+  - Timestamps correspond to when event tokens occurred
+  - Must map one-to-one with `data.bin` entries and be exactly the same length
+- **`p2i.csv`**
+  - Contains three columns: `pid`, `start_pos`, and `seq_len`
+  - Maps each participant ID (`pid`) to:
+    - `start_pos`: starting index in the data files
+    - `seq_len`: sequence length for that participant
+- **`tokenizer.yaml`**
+  - Dictionary mapping event names to token indices. Refer to `data/ukb_real_data/tokenizer.yaml` for an example.
+  - Must include these required mappings:
 
-**`time.bin`**
-- Contains a contiguous sequence of timestamps measured in days (`np.uint32`)
-- Timestamps correspond to when event tokens occurred
-- Must map one-to-one with `data.bin` entries and be exactly the same length
+    ```yaml
+    padding: 0
+    no_event: 1
+    ```
 
-**`p2i.csv`**
-- Maps each participant ID (`pid`) to:
-  - `start_pos`: starting index in the data files
-  - `seq_len`: sequence length for that participant
+> **Important❗:** `padding`(0) is a placeholder token and `no_event` (1) is only introduced into the trajectories during training as data augmentation. Neither `padding` nor `no_event` are present in the data itself. Hence, the smallest token in `data.bin` should be 2, which corresponds to `female`.
 
-**`tokenizer.yaml`**
-- Dictionary mapping event names to token indices
-- Must include these required mappings:
-  ```yaml
-  padding: 0
-  no_event: 1
-  female: 2
-  male: 3
-  ```
-- Token indexing must be consistent with `data.bin` and start at 1
+## Data Split
+
+To split your data into training and validation folds, create two lists of participant IDs (`np.uint32`) (one for training and one for validation), and save them to `./participants/train_fold.bin` and `./participants/val_fold.bin`. The naming here is flexible as long as they are consistent with how they are referenced in the training config. You can create as many participant lists as your analysis requires.
 
 ## Multimodal Extensions
 
@@ -60,17 +68,15 @@ Multimodal data can be incorporated in two ways: as biomarkers or expansion pack
 
 A biomarker represents a measurement taken at a specific time point in an individual's health trajectory. Examples include HbA1c levels, polygenic risk scores, and diet quality indices.
 
-#### Required Files
-
-**`data.npy`**
-- One-dimensional, contiguous array containing biomarker measurements
-- Data type varies depending on the specific biomarker
-
-**`p2i.csv`**
-- Maps each participant ID (`pid`) to:
-  - `start_pos`: starting index in `data.npy`
-  - `seq_len`: number of measurements (e.g., 36 for polygenic risk scores covering 36 diseases)
-  - `time`: timestamp in days when the biomarker was measured
+- **`data.bin`**
+  - One-dimensional, contiguous array containing biomarker measurements (`np.float32`)
+- **`p2i.csv`**
+  - Contains four columns: `pid`, `visit`, `start_pos`, and `seq_len`
+  - Maps each participant ID (`pid`) to:
+    - `visit`: An integer index representing the chronological order of a biomarker measurement within a participant's timeline. For a given individual (pid), the first recorded measurement is assigned visit = 0, the second visit = 1, and so on. This index captures the relative sequence of measurements within subjects, independent of absolute time.
+    - `start_pos`: The starting index in data.bin where the biomarker sequence for a given participant and visit begins. This index allows you to locate the first value of the participant's biomarker data in the one-dimensional array. Combined with seq_len, it defines the contiguous slice of data corresponding to that specific measurement.
+    - `seq_len`: Number of measurements (e.g., 36 for polygenic risk scores covering 36 diseases)
+    - `time`: Timestamp in days when the biomarker was measured
 
 #### Registering a New Biomarker
 
@@ -122,21 +128,40 @@ If adding a sleep quality biomarker, add `SLEEP_SCORE = 25` to the enum and crea
 
 An expansion pack contains additional timestamped events that enrich an individual's health trajectory. Examples include surgical operations and medical prescriptions that extend beyond Delphi's original disease occurrence vocabulary.
 
-#### Required Files
+- **`data.npy`**
+  - One-dimensional, contiguous array of all tokens (`np.uint32`)
+  - **Important❗:** Token indexing starts at 1
+- **`time.npy`**
+  - One-dimensional, contiguous array of timestamps in days (`np.uint32`)
+  - Corresponds to when event tokens occurred
+- **`p2i.csv`**
+  - Maps each participant ID (`pid`) to:
+    - `start_pos`: starting index in both `data.npy` and `time.npy`
+    - `seq_len`: sequence length for that participant
+- **`tokenizer.yaml`**
+  - Dictionary mapping event names (surgical operations, medications, etc.) to token indices. For example,
 
-**`data.npy`**
-- One-dimensional, contiguous array of all tokens (`np.uint32`)
-- **Important:** Token indexing must start at 1
+    ```yaml
+    heart_surgery: 1
+    coronary_angioplasty_(ptca)_+/-_stent: 2
+    other_arterial_surgery/revascularisation_procedures: 3
+    coronary_artery_bypass_grafts_(cabg): 4
+    pacemaker/defibrillator_insertion: 5
+    ```
 
-**`time.npy`**
-- One-dimensional, contiguous array of timestamps in days (`np.uint32`)
-- Corresponds to when event tokens occurred
+  - Token indexing must be consistent with `data.npy` and starts at 1
 
-**`p2i.csv`**
-- Maps each participant ID (`pid`) to:
-  - `start_pos`: starting index in both `data.npy` and `time.npy`
-  - `seq_len`: sequence length for that participant
+### Tests 💯
 
-**`tokenizer.yaml`**
-- Dictionary mapping event names (surgical operations, medications, etc.) to token indices
-- Token indexing must be consistent with `data.npy` and start at 1
+Once you have processed the data, check that it is done correctly by running the following tests:
+
+```bash
+# event records
+pytest delphi/test/test_data.py --dataset $NAME_OF_YOUR_DATASET
+# biomarkers
+pytest delphi/test/test_biomarkers.py --dataset $NAME_OF_YOUR_DATASET
+# expansion packs
+pytest delphi/test/test_expansion_packs.py --dataset $NAME_OF_YOUR_DATASET
+```
+
+Ensure that all tests are passed before moving on training your model.
