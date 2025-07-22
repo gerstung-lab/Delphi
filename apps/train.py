@@ -26,7 +26,7 @@ class TrainConfig:
     eval_interval: int = 2000
     eval_iters: int = 200
     eval_only: bool = False  # if True, script exits right after the first eval
-    init_from: str = "scratch"  # 'scratch' or 'resume' or 'gpt2*'
+    init_from: str = "scratch"  # 'scratch' or 'resume'
     seed: int = 42
     gradient_accumulation_steps: int = 1  # used to simulate larger batch sizes
     batch_size: int = 128
@@ -132,7 +132,6 @@ def train(cfg: TrainConfig):
     if cfg.init_from == "scratch":
         # init a new model from scratch
         print("Initializing a new model from scratch")
-        # determine the vocab size we'll use for from-scratch training
         model = Delphi(cfg.model)
     elif cfg.init_from == "resume":
         print(f"Resuming training from {run_dir}")
@@ -145,7 +144,6 @@ def train(cfg: TrainConfig):
         model_args = asdict(cfg.model)
         for k in ["n_layer", "n_head", "n_embd", "block_size", "bias", "vocab_size"]:
             model_args[k] = checkpoint_model_args[k]
-        # create the model
         cfg.model = DelphiConfig(**model_args)
         model = Delphi(cfg.model)
         state_dict = checkpoint["model"]
@@ -157,7 +155,6 @@ def train(cfg: TrainConfig):
                 state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
         model.load_state_dict(state_dict)
         iter_num = checkpoint["iter_num"]
-        # best_val_loss = checkpoint["best_val_loss"]
 
     model.to(cfg.device)
 
