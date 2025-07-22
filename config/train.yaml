@@ -42,7 +42,6 @@ val_data:
         mode: random
 ignore_expansion_tokens: true
 model:
-  block_size: 48
   # delphi-2m vocab_size: 1270
   # fsf vocab size: 9
   # summary_ops vocab size: 1565

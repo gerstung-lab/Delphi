@@ -26,7 +26,7 @@ class TrainConfig:
     eval_interval: int = 2000
     eval_iters: int = 200
     eval_only: bool = False  # if True, script exits right after the first eval
-    init_from: str = "scratch"  # 'scratch' or 'resume'
+    init_from: str = "scratch"  # 'scratch' or 'finetune'
     seed: int = 42
     gradient_accumulation_steps: int = 1  # used to simulate larger batch sizes
     batch_size: int = 128
@@ -133,16 +133,15 @@ def train(cfg: TrainConfig):
         # init a new model from scratch
         print("Initializing a new model from scratch")
         model = Delphi(cfg.model)
-    elif cfg.init_from == "resume":
-        print(f"Resuming training from {run_dir}")
-        # resume training from a checkpoint.
+    elif cfg.init_from == "finetune":
+        print(f"finetune model from {run_dir}")
         ckpt_path = os.path.join(run_dir, "ckpt.pt")
         checkpoint = torch.load(ckpt_path, map_location=cfg.device)
         checkpoint_model_args = checkpoint["model_args"]
         # force these config attributes to be equal otherwise we can't even resume training
         # the rest of the attributes (e.g. dropout) can stay as desired from command line
         model_args = asdict(cfg.model)
-        for k in ["n_layer", "n_head", "n_embd", "block_size", "bias", "vocab_size"]:
+        for k in ["n_layer", "n_head", "n_embd", "bias", "vocab_size"]:
             model_args[k] = checkpoint_model_args[k]
         cfg.model = DelphiConfig(**model_args)
         model = Delphi(cfg.model)
@@ -164,8 +163,8 @@ def train(cfg: TrainConfig):
     optimizer, scheduler = configure_optimizers(
         model=model, cfg=cfg.optim, device_type=device_type
     )
-    if cfg.init_from == "resume":
-        optimizer.load_state_dict(checkpoint["optimizer"])
+    # if cfg.init_from == "resume":
+    #     optimizer.load_state_dict(checkpoint["optimizer"])
 
     # compile the model
     if cfg.compile:

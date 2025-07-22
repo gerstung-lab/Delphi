@@ -46,15 +46,6 @@ class CausalSelfAttention(nn.Module):
         self.dropout = config.dropout
         # flash attention make GPU go brrrrr but support is only in PyTorch nightly and still a bit scary
         self.flash = False  # hasattr(torch.nn.functional, 'scaled_dot_product_attention') and self.dropout == 0.0
-        if not self.flash:
-            # print("WARNING: using slow attention. Flash Attention atm needs PyTorch nightly and dropout=0.0")
-            # causal mask to ensure that attention is only applied to the left in the input sequence
-            self.register_buffer(
-                "bias",
-                torch.tril(torch.ones(config.block_size, config.block_size)).view(
-                    1, 1, config.block_size, config.block_size
-                ),
-            )
 
     def forward(self, x, attn_mask):
         B, T, C = x.size()
@@ -133,7 +124,6 @@ class Delphi(nn.Module):
     def __init__(self, config: DelphiConfig):
         super().__init__()
         assert config.vocab_size is not None
-        assert config.block_size is not None
         self.config = config
 
         self.transformer = nn.ModuleDict(

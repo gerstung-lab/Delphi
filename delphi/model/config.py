@@ -22,7 +22,6 @@ class LossConfig:
 
 @dataclass
 class DelphiConfig:
-    block_size: int = 1024
     vocab_size: Optional[int] = None
     n_layer: int = 12
     n_head: int = 12

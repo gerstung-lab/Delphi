@@ -32,7 +32,6 @@ val_data:
         interval_in_years: 5
         mode: random
 model:
-  block_size: 48
   n_layer: 12
   n_head: 12
   n_embd: 120

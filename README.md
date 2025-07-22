@@ -111,7 +111,6 @@ ignore_expansion_tokens: true
 
 # Model architecture
 model:
-  block_size: 48
   n_layer: 12
   n_head: 12
   n_embd: 120

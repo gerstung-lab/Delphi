@@ -26,7 +26,6 @@ val_data:
         interval_in_years: 5
         mode: random
 model:
-  block_size: 48
   vocab_size: 1271
   n_layer: 12
   n_head: 12
