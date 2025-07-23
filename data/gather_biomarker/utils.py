@@ -35,6 +35,15 @@ def load_fid(fid: str) -> pd.DataFrame:
     return pd.read_csv(ukb_tab[str(fid)], delimiter="\t", index_col="f.eid")
 
 
+def load_coding(scheme: int) -> pd.DataFrame:
+
+    coding_path = multimodal_dir / "coding" / f"{str(scheme)}.txt"
+    if not coding_path.exists():
+        raise FileNotFoundError(f"Coding file {coding_path} does not exist.")
+
+    return pd.read_csv(coding_path, sep="\t")
+
+
 def convert_to_longitudinal(df) -> pd.DataFrame:
 
     n = df.shape[0]
@@ -218,12 +227,19 @@ def build_biomarker(
     p2i.to_csv(odir / "p2i.csv")
 
 
-def assessment_age(visits: list) -> pd.DataFrame:
+def month_of_birth() -> pd.DataFrame:
 
     mob = pd.read_csv(
         multimodal_dir / "year_and_month_of_birth.txt", sep="\t", index_col="eid"
     )
     mob["year_month"] = pd.to_datetime(mob["year_month"], format="%Y%m")
+
+    return mob
+
+
+def assessment_age(visits: list) -> pd.DataFrame:
+
+    mob = month_of_birth()
 
     assess_date = load_fid(fid="53")
     assess_date = assess_date.rename(

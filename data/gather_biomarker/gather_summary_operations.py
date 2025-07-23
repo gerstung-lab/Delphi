@@ -1,21 +1,14 @@
-import os
-from pathlib import Path
-
 import numpy as np
-import pandas as pd
 import polars as pl
 from utils import (
     all_ukb_participants,
     build_expansion_pack,
-    multimodal_dir,
+    load_coding,
+    load_fid,
+    month_of_birth,
 )
 
-idir = Path("data/multimodal/summary_operations")
-
-vocab = pd.read_csv(
-    idir / "coding.txt",
-    sep="\t",
-)
+vocab = load_coding(240)
 vocab = vocab.loc[~vocab["coding"].str.contains("Chapter")]
 is_parent = vocab["selectable"] == "N"
 is_child = vocab["selectable"] == "Y"
@@ -41,31 +34,19 @@ tokenizer_keys = (
 tokenizer_values = vocab.loc[vocab["parent"].unique(), "parent_id"].astype(int).tolist()
 tokenizer = dict(zip(tokenizer_keys, tokenizer_values))
 
-token_df = pl.read_csv(
-    idir / "main_opcs4_41200.txt",
-    separator="\t",
-)
+token_df = pl.from_pandas(load_fid("41200").reset_index())
 summary_ops_participants = token_df["f.eid"].to_numpy().astype(int)
 token_df = token_df.drop("f.eid")
 token_df = token_df.select(pl.all().replace_strict(mapping, default=0))
 token_np = token_df.to_numpy().astype(int)
 
-time_df = pl.read_csv(
-    idir / "date_of_first_operative_procedure_main_opcs4_41260.txt",
-    separator="\t",
-)
+time_df = pl.from_pandas(load_fid("41260").reset_index())
 time_df = time_df.drop("f.eid")
 time_df = time_df.with_columns(
     pl.all().str.strptime(pl.Datetime, strict=False, format="%Y-%m-%d")
 )
 
-mob_txt = os.path.join(
-    multimodal_dir,
-    "year_and_month_of_birth.txt",
-)
-mob_df = pd.read_csv(mob_txt, sep="\t", index_col="eid")
-mob_df["year_month"] = pd.to_datetime(mob_df["year_month"], format="%Y%m")
-mob_df = pl.from_pandas(mob_df)
+mob_df = pl.from_pandas(month_of_birth())
 
 time_df = time_df.select(
     (pl.all() - mob_df["year_month"]).cast(pl.Duration).dt.total_days()

@@ -1,27 +1,18 @@
-from pathlib import Path
-
 import numpy as np
-import pandas as pd
 import polars as pl
 from utils import (
     all_ukb_participants,
     assessment_age,
     build_expansion_pack,
+    load_coding,
+    load_fid,
 )
 
-idir = Path("data/multimodal/medications")
-
-vocab = pd.read_csv(
-    idir / "coding.txt",
-    sep="\t",
-)
+vocab = load_coding(4)
 vocab["id"] = np.arange(1, len(vocab) + 1)
 token_map = vocab.set_index("coding")
 
-orig_token_df = pl.read_csv(
-    idir / "medication_code_20003.txt",
-    separator="\t",
-)
+orig_token_df = pl.from_pandas(load_fid("20003").reset_index())
 medication_participants = orig_token_df["f.eid"].to_numpy().astype(int)
 orig_token_df = orig_token_df.drop("f.eid")
 token_df = orig_token_df.select(
@@ -37,7 +28,6 @@ token_counts = token_counts[accept_mask]
 vocab.loc[unique_tokens, "counts"] = token_counts.astype(int)
 vocab = vocab.reset_index()
 vocab = vocab.sort_values(by="counts", ascending=False)
-vocab.to_csv(idir / "vocab.csv", index=False)
 
 vocab = vocab[vocab["counts"] > 100]
 vocab = vocab[vocab["coding"] != 99999]

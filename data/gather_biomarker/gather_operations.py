@@ -1,17 +1,9 @@
-from pathlib import Path
-
 import numpy as np
-import pandas as pd
-from utils import all_ukb_participants, build_expansion_pack
+from utils import all_ukb_participants, build_expansion_pack, load_coding, load_fid
 
 from delphi import DAYS_PER_YEAR
 
-idir = Path("data/multimodal/operations")
-
-vocab = pd.read_csv(
-    idir / "coding.txt",
-    sep="\t",
-)
+vocab = load_coding(5)
 reject_vals = [-1, 99999]
 vocab = vocab.loc[~vocab["coding"].isin(reject_vals)]
 code_vals = vocab["coding"].unique()
@@ -28,16 +20,8 @@ lookup = np.zeros((max_key + 1,), dtype=int)
 for k, v in code_map.items():
     lookup[k] = v
 
-token_df = pd.read_csv(
-    idir / "operation_code_20004.txt",
-    sep="\t",
-    index_col="f.eid",
-)
-time_df = pd.read_csv(
-    idir / "age_when_operation_20011.txt",
-    sep="\t",
-    index_col="f.eid",
-)
+token_df = load_fid("20004")
+time_df = load_fid("20011")
 ops_participants = time_df.index.to_numpy().astype(int)
 ukb_participants = all_ukb_participants()
 is_valid = np.isin(ops_participants, ukb_participants)
