@@ -86,6 +86,7 @@ def get_batch(ix, data, p2i, select='center', index='patient', padding='regular'
     if lifestyle_augmentations:
         lifestyle_idx = (tokens >= 3) * (tokens <= 11)
         if lifestyle_idx.sum():
+            #TODO maybe use the same shift for all lifestyle tokens in the trajectory?
             ages[lifestyle_idx] += torch.randint(-20*365, 365*40, (lifestyle_idx.sum(),), generator=gen).float()
 
     tokens = tokens.masked_fill(~mask, -1)
@@ -129,6 +130,7 @@ def get_batch(ix, data, p2i, select='center', index='patient', padding='regular'
         ages = ages[:, cut_margin:]
 
     # cut to maintain the block size
+    #TODO it would be better to use the strategy defined by the "select" parameter
     if tokens.shape[1] > block_size + 1:
         cut_margin = tokens.shape[1] - block_size - 1
         tokens = tokens[:, cut_margin:]
