@@ -15,7 +15,12 @@ from delphi.data.dataset import (
 )
 from delphi.env import DELPHI_CKPT_DIR
 from delphi.log import TrainLogConfig, TrainLogger
-from delphi.model.config import DelphiConfig, parse_ignore_tokens, validate_model_config
+from delphi.model.config import (
+    DelphiConfig,
+    parse_ignore_tokens,
+    validate_model_config,
+    validate_model_config_for_finetuning,
+)
 from delphi.model.transformer import Delphi
 from delphi.optim import OptimConfig, configure_optimizers
 
@@ -130,20 +135,16 @@ def train(cfg: TrainConfig):
     iter_num = 0
 
     if cfg.init_from == "scratch":
-        # init a new model from scratch
         print("Initializing a new model from scratch")
         model = Delphi(cfg.model)
     elif cfg.init_from == "finetune":
         print(f"finetune model from {run_dir}")
         ckpt_path = os.path.join(run_dir, "ckpt.pt")
         checkpoint = torch.load(ckpt_path, map_location=cfg.device)
-        checkpoint_model_args = checkpoint["model_args"]
-        # force these config attributes to be equal otherwise we can't even resume training
-        # the rest of the attributes (e.g. dropout) can stay as desired from command line
-        model_args = asdict(cfg.model)
-        for k in ["n_layer", "n_head", "n_embd", "bias", "vocab_size"]:
-            model_args[k] = checkpoint_model_args[k]
-        cfg.model = DelphiConfig(**model_args)
+        validate_model_config_for_finetuning(
+            finetune_config=cfg.model,
+            pretrain_config=DelphiConfig(**checkpoint["model_args"]),
+        )
         model = Delphi(cfg.model)
         state_dict = checkpoint["model"]
         # fix the keys of the state dictionary :(
@@ -152,8 +153,7 @@ def train(cfg: TrainConfig):
         for k, v in list(state_dict.items()):
             if k.startswith(unwanted_prefix):
                 state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
-        model.load_state_dict(state_dict)
-        iter_num = checkpoint["iter_num"]
+        model.load_state_dict(state_dict, strict=False)
 
     model.to(cfg.device)
 

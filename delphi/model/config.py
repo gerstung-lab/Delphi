@@ -44,6 +44,37 @@ def validate_model_config(config: DelphiConfig):
     ), "mask_ties and zero_inflate cannot be both True or both False"
 
 
+def validate_model_config_for_finetuning(
+    finetune_config: DelphiConfig, pretrain_config: DelphiConfig
+) -> None:
+
+    assert (
+        finetune_config.vocab_size == pretrain_config.vocab_size
+        and finetune_config.n_layer == pretrain_config.n_layer
+        and finetune_config.n_head == pretrain_config.n_head
+        and finetune_config.n_embd == pretrain_config.n_embd
+        and finetune_config.bias == pretrain_config.bias
+    ), "model dimensions must match between finetune and pretrain configs"
+
+    finetune_biomarkers = set(finetune_config.biomarkers.keys())
+    pretrain_biomarkers = set(pretrain_config.biomarkers.keys())
+    assert pretrain_biomarkers.issubset(
+        finetune_biomarkers
+    ), "finetune config must have all biomarkers from pretrain config"
+
+    intersect_biomarkers = finetune_biomarkers.intersection(pretrain_biomarkers)
+    for biomarker in intersect_biomarkers:
+        finetune_bm = finetune_config.biomarkers[biomarker]
+        pretrain_bm = pretrain_config.biomarkers[biomarker]
+
+        assert (
+            finetune_bm.projector == pretrain_bm.projector
+            and finetune_bm.n_layers == pretrain_bm.n_layers
+            and finetune_bm.n_hidden == pretrain_bm.n_hidden
+            and finetune_bm.input_size == pretrain_bm.input_size
+        ), f"biomarker {biomarker} embed configs must match between finetune and pretrain configs"
+
+
 def parse_ignore_tokens(ignore_tokens: list[str]) -> list:
     if not ignore_tokens:
         return []
