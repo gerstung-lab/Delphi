@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from delphi.multimodal import Modality
+from delphi.test.config import DATASET_DIR, PARTICIPANTS
 
 all_biomarkers = [modality.lower() for modality in Modality.__members__]
 
@@ -60,8 +61,8 @@ def real_time_where_data_exists(
 
 
 @pytest.mark.parametrize("biomarker", all_biomarkers)
-def test_biomarkers(dataset_dir, all_participants, biomarker):
-    biomarker_path = os.path.join(dataset_dir, "biomarkers", biomarker)
+def test_biomarkers(biomarker):
+    biomarker_path = os.path.join(DATASET_DIR, "biomarkers", biomarker)
 
     data = np.fromfile(os.path.join(biomarker_path, "data.bin"), dtype=np.float32)
     p2i = pd.read_csv(
@@ -69,7 +70,7 @@ def test_biomarkers(dataset_dir, all_participants, biomarker):
         index_col="pid",
     )
 
-    assert has_all_participants(p2i=p2i, pids=all_participants)
+    assert has_all_participants(p2i=p2i, pids=PARTICIPANTS)
     assert data_is_1d(data=data)
     assert no_nan_data(data=data)
     assert total_dimensions_match(p2i=p2i, data=data)

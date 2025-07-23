@@ -3,6 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 
+from delphi.test.config import DATASET_DIR, PARTICIPANTS
 from delphi.test.test_biomarkers import has_all_participants
 from delphi.test.test_expansion_packs import (
     all_start_pos_within_range,
@@ -50,25 +51,25 @@ def tokens_within_range(tokens: np.ndarray, tokenizer: dict) -> bool:
     )
 
 
-def test_data(dataset_dir, all_participants):
+def test_data():
 
-    assert required_files_exist(dataset_dir)
+    assert required_files_exist(DATASET_DIR)
 
-    tokenizer_path = os.path.join(dataset_dir, "tokenizer.yaml")
+    tokenizer_path = os.path.join(DATASET_DIR, "tokenizer.yaml")
     with open(tokenizer_path, "r") as f:
         import yaml
 
         tokenizer = yaml.safe_load(f)
-    lookup_path = os.path.join(dataset_dir, "p2i.csv")
+    lookup_path = os.path.join(DATASET_DIR, "p2i.csv")
     p2i = pd.read_csv(lookup_path, index_col="pid")
-    data_path = os.path.join(dataset_dir, "data.bin")
+    data_path = os.path.join(DATASET_DIR, "data.bin")
     tokens = np.fromfile(data_path, dtype=np.uint32)
-    time_path = os.path.join(dataset_dir, "time.bin")
+    time_path = os.path.join(DATASET_DIR, "time.bin")
     time_steps = np.fromfile(time_path, dtype=np.uint32)
 
     assert data_and_time_size_match(tokens=tokens, time_steps=time_steps)
     assert tokens_within_range(tokens=tokens, tokenizer=tokenizer)
-    assert has_all_participants(p2i=p2i, pids=all_participants)
+    assert has_all_participants(p2i=p2i, pids=PARTICIPANTS)
     assert all_start_pos_within_range(p2i=p2i, tokens=tokens)
     assert no_duplicate_start_pos(p2i=p2i)
     assert total_seq_len_add_up(p2i=p2i, tokens=tokens)

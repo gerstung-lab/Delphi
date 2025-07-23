@@ -2,7 +2,9 @@ import os
 
 import numpy as np
 import pandas as pd
+import pytest
 
+from delphi.test.config import EXPANSION_PACK_PATHS, PARTICIPANTS
 from delphi.test.test_biomarkers import has_all_participants
 
 
@@ -84,7 +86,8 @@ def tokenizer_contiguous(tokenizer: dict):
     )
 
 
-def test_expansion_pack(expansion_pack_path, all_participants):
+@pytest.mark.parametrize("expansion_pack_path", EXPANSION_PACK_PATHS)
+def test_expansion_pack(expansion_pack_path):
 
     assert required_files_exist(expansion_pack_path)
 
@@ -102,7 +105,7 @@ def test_expansion_pack(expansion_pack_path, all_participants):
 
     assert data_and_time_size_match(tokens=tokens, time_steps=time_steps)
     assert tokens_within_range(tokens=tokens, tokenizer=tokenizer)
-    assert has_all_participants(p2i=p2i, pids=all_participants)
+    assert has_all_participants(p2i=p2i, pids=PARTICIPANTS)
     assert all_start_pos_within_range(p2i=p2i, tokens=tokens)
     assert no_duplicate_start_pos(p2i=p2i)
     assert total_seq_len_add_up(p2i=p2i, tokens=tokens)
