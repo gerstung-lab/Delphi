@@ -58,15 +58,6 @@ def tricolumnar_to_2d(data):
     return X, T
 
 
-def sort_by_time(X: np.ndarray, T: np.ndarray):
-
-    s = np.argsort(T, axis=1)
-    X = np.take_along_axis(X, s, axis=1)
-    T = np.take_along_axis(T, s, axis=1)
-
-    return X, T
-
-
 def biomarker_to_tensor(
     biomarker_data: dict[Modality, np.ndarray],
 ):
