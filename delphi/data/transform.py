@@ -40,12 +40,10 @@ class AddNoEvent:
 
     def __call__(
         self,
-        P: np.ndarray,
         X: np.ndarray,
         T: np.ndarray,
+        M: np.ndarray,
         biomarker_X: dict[str, np.ndarray],
-        biomarker_T: dict[str, np.ndarray],
-        biomarker_C: dict[str, np.ndarray],
     ):
 
         n_participants = X.shape[0]
@@ -78,8 +76,9 @@ class AddNoEvent:
 
         X = np.hstack((X, no_event_tokens))
         T = np.hstack((T, no_event_timesteps))
+        M = np.hstack((M, (no_event_tokens != 0).astype(np.int8)))
 
-        return P, X, T, biomarker_X, biomarker_T, biomarker_C
+        return X, T, M, biomarker_X
 
 
 class AugmentLifestyle:
@@ -100,12 +99,10 @@ class AugmentLifestyle:
 
     def __call__(
         self,
-        P: np.ndarray,
         X: np.ndarray,
         T: np.ndarray,
+        M: np.ndarray,
         biomarker_X: dict[str, np.ndarray],
-        biomarker_T: dict[str, np.ndarray],
-        biomarker_C: dict[str, np.ndarray],
     ):
 
         is_lifestyle = np.isin(X, self.lifestyle_tokens)
@@ -115,7 +112,7 @@ class AugmentLifestyle:
             )
             T[is_lifestyle] += augment
 
-        return P, X, T, biomarker_X, biomarker_T, biomarker_C
+        return X, T, M, biomarker_X
 
 
 transform_registry = {

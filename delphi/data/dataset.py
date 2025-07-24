@@ -350,46 +350,33 @@ class Dataset:
         X = collate_batch_data(X)
         T = collate_batch_time(T)
 
-        biomarker_X = {}
-        biomarker_T = {}
-        biomarker_C = {}
-        for modality, dataset in self.mod_ds.items():
-            m_X, m_T, m_C = dataset.get_raw_batch(P)
-            biomarker_X[modality] = m_X
-            biomarker_T[modality] = m_T
-            biomarker_C[modality] = m_C
-
-        return P, X, T, biomarker_X, biomarker_T, biomarker_C
-
-    def get_batch(self, batch_idx):
-
-        P, X, T, biomarker_X, biomarker_T, biomarker_C = self.get_raw_batch(batch_idx)
-
-        for transform in self.transforms:
-            P, X, T, biomarker_X, biomarker_T, biomarker_C = transform(
-                P=P,
-                X=X,
-                T=T,
-                biomarker_X=biomarker_X,
-                biomarker_T=biomarker_T,
-                biomarker_C=biomarker_C,
-            )
-
         M = np.zeros_like(X, dtype=np.int8)
         M[X > 0] = 1
-
-        for modality in biomarker_T.keys():
-
-            m_T = biomarker_T[modality]
+        biomarker_X = {}
+        for modality, dataset in self.mod_ds.items():
+            m_X, m_T, _ = dataset.get_raw_batch(P)
+            biomarker_X[modality] = m_X
 
             m_M = np.zeros_like(m_T, dtype=np.int8)
             m_M[m_T != -1e4] = modality.value
 
-            m_X = np.zeros_like(m_T, dtype=np.int8)
-
             T = np.concatenate((T, m_T), axis=1)
             M = np.concatenate((M, m_M), axis=1)
-            X = np.concatenate((X, m_X), axis=1)
+            X = np.concatenate((X, np.zeros_like(m_T, dtype=np.int8)), axis=1)
+
+        return P, X, T, M, biomarker_X
+
+    def get_batch(self, batch_idx):
+
+        P, X, T, M, biomarker_X = self.get_raw_batch(batch_idx)
+
+        for transform in self.transforms:
+            X, T, M, biomarker_X = transform(
+                X=X,
+                T=T,
+                M=M,
+                biomarker_X=biomarker_X,
+            )
 
         # sort by time
         s = np.argsort(T, axis=1)
@@ -427,9 +414,7 @@ class PromptDataset(Dataset):
 
     def get_batch(self, batch_idx):
 
-        P, X, T, biomarker_X, biomarker_T, biomarker_C = super().get_raw_batch(
-            batch_idx
-        )
+        P, X, T, M, biomarker_X = super().get_raw_batch(batch_idx)
 
         X[T > self.start_age] = 0
         T[T > self.start_age] = -1e4
@@ -443,4 +428,4 @@ class PromptDataset(Dataset):
         T = np.pad(T, ((0, 0), (0, 1)), mode="constant", constant_values=self.start_age)
 
         # TODO: remove biomarkers after prompt_age
-        return P, X, T, biomarker_X, biomarker_T, biomarker_C
+        return P, X, T, M, biomarker_X
