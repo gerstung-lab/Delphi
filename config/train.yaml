@@ -29,17 +29,13 @@ train_data:
         mode: random
 infer_val_biomarkers: true
 infer_val_expansion_packs: true
+infer_val_transforms: true
 val_data:
   data_dir: ukb_real_data
   subject_list: ukb_real_data/participants/val_fold.bin
   seed: 42
   biomarker_dir: ukb_real_data/biomarkers
   expansion_pack_dir: ukb_real_data/expansion_packs
-  transforms:
-    - name: no-event
-      args:
-        interval_in_years: 5
-        mode: random
 ignore_expansion_tokens: true
 model:
   # delphi-2m vocab_size: 1270
@@ -64,9 +60,6 @@ model:
     prs:
       projector: linear
       input_size: 36
-    # blood_all:
-    #   projector: linear
-    #   input_size: 57
     wbc:
       projector: linear
       input_size: 31
@@ -137,10 +130,10 @@ log:
   always_ckpt_after_eval: true
   ckpt_interval: null
 optim:
-  learning_rate: 6e-4 # with baby networks can afford to go a bit higher
+  learning_rate: 6e-4
   max_iters: 100000
   weight_decay: 2e-1
-  lr_decay_iters: 100000 # make equal to max_iters usually
-  min_lr: 6e-5 # learning_rate / 10 usually
-  beta2: 0.99 # make a bit bigger because number of tokens per iter is small
-  warmup_iters: 1000 # not super necessary potentially
+  lr_decay_iters: 100000
+  min_lr: 6e-5
+  beta2: 0.99
+  warmup_iters: 1000

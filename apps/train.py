@@ -52,6 +52,7 @@ class TrainConfig:
     val_data: UKBDataConfig = field(default_factory=UKBDataConfig)
     infer_val_biomarkers: bool = True
     infer_val_expansion_packs: bool = True
+    infer_val_transforms: bool = True
 
     model: DelphiConfig = field(default_factory=DelphiConfig)
     ignore_expansion_tokens: bool = True
@@ -109,6 +110,8 @@ def train(cfg: TrainConfig):
     assert set(cfg.val_data.expansion_packs).issubset(
         set(cfg.train_data.expansion_packs)
     )
+    if cfg.infer_val_transforms:
+        cfg.val_data.transforms = cfg.train_data.transforms
     print("validation dataset")
     val_ds = Dataset(cfg=cfg.val_data, memmap=cfg.memmap)
 
