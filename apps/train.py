@@ -188,7 +188,7 @@ def train(cfg: TrainConfig):
             eval_loss[split] = {"loss_ce": 0, "loss_dt": 0}
             for _ in range(cfg.eval_iters):
 
-                _, X, T, M, biomarker_X, _, _ = next(loader)
+                _, X, T, M, biomarker_X = next(loader)
                 X, T, M = pad_trailing_biomarkers(X, T, M)
                 X, T, M = X.to(cfg.device), T.to(cfg.device), M.to(cfg.device)
                 biomarker_X = {k: v.to(cfg.device) for k, v in biomarker_X.items()}
@@ -242,7 +242,7 @@ def train(cfg: TrainConfig):
         # and using the GradScaler if data type is float16``
         for _ in range(cfg.gradient_accumulation_steps):
 
-            _, X, T, M, biomarker_X, _, _ = next(train_loader)
+            _, X, T, M, biomarker_X = next(train_loader)
             X, T, M = pad_trailing_biomarkers(X, T, M)
             X, T, M = X.to(cfg.device), T.to(cfg.device), M.to(cfg.device)
             biomarker_X = {k: v.to(cfg.device) for k, v in biomarker_X.items()}

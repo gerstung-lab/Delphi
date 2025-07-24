@@ -68,19 +68,14 @@ def sort_by_time(X: np.ndarray, T: np.ndarray):
 
 
 def biomarker_to_tensor(
-    biomarker_X: dict[Modality, np.ndarray],
-    biomarker_T: dict[Modality, np.ndarray],
-    biomarker_C: dict[Modality, np.ndarray],
+    biomarker_data: dict[Modality, np.ndarray],
 ):
 
-    for modality in biomarker_X.keys():
-        m_X = biomarker_X[modality]
-        m_T = biomarker_T[modality]
-        biomarker_X[modality] = torch.from_numpy(m_X)  # type: ignore
-        biomarker_T[modality] = torch.tensor(m_T)  # type: ignore
-        biomarker_C[modality] = torch.from_numpy(biomarker_C[modality])  # type: ignore
+    for modality in biomarker_data.keys():
+        m_X = biomarker_data[modality]
+        biomarker_data[modality] = torch.from_numpy(m_X)  # type: ignore
 
-    return biomarker_X, biomarker_T, biomarker_C
+    return biomarker_data
 
 
 def pad_trailing_biomarkers(
@@ -123,19 +118,15 @@ def load_sequences(
 
     for idx in it:
 
-        P, X, T, M, biomarker_X, biomarker_T, biomarker_C = dataset.get_batch(idx)
+        P, X, T, M, biomarker_data = dataset.get_batch(idx)
 
         P = torch.tensor(P, dtype=torch.long)
         X = torch.tensor(X, dtype=torch.long)
         T = torch.tensor(T)
         M = torch.tensor(M, dtype=torch.long)
-        biomarker_X, biomarker_T, biomarker_C = biomarker_to_tensor(
-            biomarker_X=biomarker_X,
-            biomarker_T=biomarker_T,
-            biomarker_C=biomarker_C,
-        )
+        biomarker_data = biomarker_to_tensor(biomarker_data=biomarker_data)
 
-        yield P, X, T, M, biomarker_X, biomarker_T, biomarker_C
+        yield P, X, T, M, biomarker_data
 
 
 def collate_batch_data(batch_data: list[np.ndarray]) -> np.ndarray:
@@ -412,7 +403,7 @@ class Dataset:
         X = X[:, squeeze_margin:]
         T = T[:, squeeze_margin:]
 
-        return P, X, T, M, biomarker_X, biomarker_T, biomarker_C
+        return P, X, T, M, biomarker_X
 
 
 class PromptDataset(Dataset):
