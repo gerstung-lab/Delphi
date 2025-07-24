@@ -98,31 +98,6 @@ def pad_trailing_biomarkers(
     return X, T, M
 
 
-def multimodal_T_and_X(
-    X: np.ndarray,
-    T: np.ndarray,
-    biomarker_T: dict[Modality, np.ndarray] = {},
-):
-
-    M = np.zeros_like(X, dtype=np.int8)
-    M[X > 0] = 1
-
-    for modality in biomarker_T.keys():
-
-        m_T = biomarker_T[modality]
-
-        m_M = np.zeros_like(m_T, dtype=np.int8)
-        m_M[m_T != -1e4] = modality.value
-
-        m_X = np.zeros_like(m_T, dtype=np.int8)
-
-        T = np.concatenate((T, m_T), axis=1)
-        M = np.concatenate((M, m_M), axis=1)
-        X = np.concatenate((X, m_X), axis=1)
-
-    return M, T, X
-
-
 def eval_iter(total_size: int, batch_size: int) -> Iterator[np.ndarray]:
 
     batch_start_pos = np.arange(0, total_size, batch_size)
@@ -148,23 +123,11 @@ def load_sequences(
 
     for idx in it:
 
-        P, X, T, biomarker_X, biomarker_T, biomarker_C = dataset.get_batch(idx)
-
-        M, multi_T, multi_X = multimodal_T_and_X(X=X, T=T, biomarker_T=biomarker_T)
-
-        s = np.argsort(multi_T, axis=1)
-        M = np.take_along_axis(M, s, axis=1)
-        multi_T = np.take_along_axis(multi_T, s, axis=1)
-        multi_X = np.take_along_axis(multi_X, s, axis=1)
-
-        squeeze_margin = np.min(np.sum(M == 0, axis=1))
-        M = M[:, squeeze_margin:]
-        multi_X = multi_X[:, squeeze_margin:]
-        multi_T = multi_T[:, squeeze_margin:]
+        P, X, T, M, biomarker_X, biomarker_T, biomarker_C = dataset.get_batch(idx)
 
         P = torch.tensor(P, dtype=torch.long)
-        multi_X = torch.tensor(multi_X, dtype=torch.long)
-        multi_T = torch.tensor(multi_T)
+        X = torch.tensor(X, dtype=torch.long)
+        T = torch.tensor(T)
         M = torch.tensor(M, dtype=torch.long)
         biomarker_X, biomarker_T, biomarker_C = biomarker_to_tensor(
             biomarker_X=biomarker_X,
@@ -172,7 +135,7 @@ def load_sequences(
             biomarker_C=biomarker_C,
         )
 
-        yield P, multi_X, multi_T, M, biomarker_X, biomarker_T, biomarker_C
+        yield P, X, T, M, biomarker_X, biomarker_T, biomarker_C
 
 
 def collate_batch_data(batch_data: list[np.ndarray]) -> np.ndarray:
@@ -421,7 +384,35 @@ class Dataset:
                 biomarker_C=biomarker_C,
             )
 
-        return P, X, T, biomarker_X, biomarker_T, biomarker_C
+        M = np.zeros_like(X, dtype=np.int8)
+        M[X > 0] = 1
+
+        for modality in biomarker_T.keys():
+
+            m_T = biomarker_T[modality]
+
+            m_M = np.zeros_like(m_T, dtype=np.int8)
+            m_M[m_T != -1e4] = modality.value
+
+            m_X = np.zeros_like(m_T, dtype=np.int8)
+
+            T = np.concatenate((T, m_T), axis=1)
+            M = np.concatenate((M, m_M), axis=1)
+            X = np.concatenate((X, m_X), axis=1)
+
+        # sort by time
+        s = np.argsort(T, axis=1)
+        M = np.take_along_axis(M, s, axis=1)
+        T = np.take_along_axis(T, s, axis=1)
+        X = np.take_along_axis(X, s, axis=1)
+
+        # trim
+        squeeze_margin = np.min(np.sum(M == 0, axis=1))
+        M = M[:, squeeze_margin:]
+        X = X[:, squeeze_margin:]
+        T = T[:, squeeze_margin:]
+
+        return P, X, T, M, biomarker_X, biomarker_T, biomarker_C
 
 
 class PromptDataset(Dataset):
