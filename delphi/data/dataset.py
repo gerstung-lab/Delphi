@@ -412,7 +412,14 @@ class Dataset:
         P, X, T, biomarker_X, biomarker_T, biomarker_C = self.get_raw_batch(batch_idx)
 
         for transform in self.transforms:
-            X, T = transform(X, T)
+            P, X, T, biomarker_X, biomarker_T, biomarker_C = transform(
+                P=P,
+                X=X,
+                T=T,
+                biomarker_X=biomarker_X,
+                biomarker_T=biomarker_T,
+                biomarker_C=biomarker_C,
+            )
 
         return P, X, T, biomarker_X, biomarker_T, biomarker_C
 
