@@ -187,20 +187,21 @@ class Biomarker:
 
         for pid in pids:
             pid_grp = self.p2i.get_group(pid)
-            pid_time = []
-            for i, l, t in zip(
-                pid_grp["start_pos"], pid_grp["seq_len"], pid_grp["time"]
-            ):
+            pid_time = pid_grp["time"].to_numpy()
+            s = np.argsort(pid_time)
+            pid_time = pid_time[s]
+            pid_seq_len = pid_grp["seq_len"].to_numpy()[s]
+            pid_start_pos = pid_grp["start_pos"].to_numpy()[s]
+            for i, l in zip(pid_start_pos, pid_seq_len):
                 if l > 0:
                     x = self.data[i : i + l]
                     batch_data.append(x)
                     batch_count.append(1)
                 else:
                     batch_count.append(0)
-                pid_time.append(t)
                 if self.first_time_only:
                     continue
-            batch_time.append(np.array(pid_time))
+            batch_time.append(pid_time)
 
         batch_data = collate_batch_data(batch_data)
         batch_time = collate_batch_time(batch_time)
