@@ -1,0 +1,168 @@
+blood:
+  apo:
+    - 30630 # apolipoprotein A
+    - 30640 # apolipoprotein B
+  crp:
+    - 30710 # CRP
+  cysc:
+    - 30720 # cystatin-c
+  dht:
+    - 30850 # testosterone
+  hba1c:
+    - 30750 # hba1c
+  igf1:
+    - 30770 # igf-1
+  lft:
+    - 30840 # total_bilirubin
+    - 30620 # alanine_aminotransferase
+    - 30650 # aspartate_aminotransferase
+    - 30610 # alkaline_phosphatase
+    - 30730 # gamma_glutamyltransferase
+    - 30600 # albumin
+    - 30860 # total_protein
+  lipid:
+    - 30690 # cholesterol
+    - 30760 # hdl_cholesterol
+    - 30780 # ldl_direct
+    - 30870 # triglycerides
+  renal:
+    - 30680 # calcium
+    - 30700 # creatinine
+    - 30810 # phosphate
+    - 30740 # glucose
+    - 30670 # urea
+    - 30880 # urate
+  shbg:
+    - 30830 # shbg
+  urate:
+    - 30880 # urate
+  vitd:
+    - 30890 # vitamin D
+  wbc:
+  - 30160 # basophill_count
+  - 30220 # basophill_percentage
+  - 30150 # eosinophill_count
+  - 30210 # eosinophill_percentage
+  - 30030 # haematocrit_percentage
+  - 30020 # haemoglobin_concentration
+  - 30300 # high_light_scatter_reticulocyte_count
+  - 30290 # high_light_scatter_reticulocyte_percentage
+  - 30280 # immature_reticulocyte_fraction
+  - 30120 # lymphocyte_count
+  - 30180 # lymphocyte_percentage
+  - 30050 # mean_corpuscular_haemoglobin
+  - 30060 # mean_corpuscular_haemoglobin_concentration
+  - 30040 # mean_corpuscular_volume
+  - 30100 # mean_platelet_thrombocyte_volume
+  - 30260 # mean_reticulocyte_volume
+  - 30270 # mean_sphered_cell_volume
+  - 30130 # monocyte_count
+  - 30190 # monocyte_percentage
+  - 30140 # neutrophill_count
+  - 30200 # neutrophill_percentage
+  - 30170 # nucleated_red_blood_cell_count
+  - 30230 # nucleated_red_blood_cell_percentage
+  - 30080 # platelet_count
+  - 30090 # platelet_crit
+  - 30110 # platelet_distribution_width
+  - 30010 # red_blood_cell_erythrocyte_count
+  - 30070 # red_blood_cell_erythrocyte_distribution_width
+  - 30250 # reticulocyte_count
+  - 30240 # reticulocyte_percentage
+  - 30000 # white_blood_cell_leukocyte_count
+urine:
+  nak:
+    - 30530 # sodium
+    - 30520 # potassium
+  creat:
+    - 30510 # creatinine
+  albu:
+    - 30500 # albumin
+telomere:
+  - 22191
+diet:
+  - 1369  # beef
+  - 1438  # bread
+  - 1458  # cereal
+  - 1498  # coffee
+  - 1289  # cooked_vegetable
+  - 1319  # dried_fruit
+  - 1309  # fresh_fruit
+  - 1379  # lamb
+  - 1339  # non_oily_fish
+  - 1329  # oily_fish
+  - 1389  # pork
+  - 1359  # poultry
+  - 1349  # processed_meat
+  - 1299  # salad
+  - 1488  # tea
+  - 1528  # water
+prs:
+  - 26206  # alzheimer
+  - 26204  # AMD
+  - 26210  # asthma
+  - 26212  # atrial_fibrillation
+  - 26214  # bipolar_disorder
+  - 26216  # body_mass_index
+  - 26234  # bone_mineral_density
+  - 26218  # bowel_cancer
+  - 26220  # breast_cancer
+  - 26227  # cad
+  - 26223  # cardiovascular_disease
+  - 26225  # coeliac_disease
+  - 26229  # crohns
+  - 26232  # epithelial_ovarian_cancer
+  - 26265  # glaucoma
+  - 26238  # glycated_haemoglobin
+  - 26242  # HDL
+  - 26240  # height
+  - 26244  # hypertension
+  - 26246  # intraocular_pressure
+  - 26248  # ischaemic_stroke
+  - 26250  # LDL
+  - 26278  # lupus
+  - 26252  # melanoma
+  - 26202  # menopause
+  - 26254  # multiple_sclerosis
+  - 26258  # osteoporosis
+  - 26260  # parkinsons
+  - 26267  # prostate_cancer
+  - 26269  # psoriasis
+  - 26273  # rheumatoid_arthritis
+  - 26275  # schizophrenia
+  - 26283  # T1D
+  - 26285  # T2D
+  - 26287  # ulcerative_colitis
+  - 26289  # venous_thromboembolic_disease
+met:
+  - 22037  # walking
+  - 22038  # moderate
+  - 22039  # vigorous
+abdo_fat_cross:
+  - 22434
+  - 22435
+  - 22409
+  - 22410
+  - 22432
+  - 22433
+abdo_fat_long:
+  # - 22436
+  # - 23363
+  # - 23358
+  # - 23359
+  # - 23361
+  - 24353
+  - 24354
+  - 24352
+  # - 23364
+  # - 23360
+  # - 23362
+  - 23355
+  - 23356
+  # - 23357
+  - 22408
+  - 22407
+  - 22405
+  - 22403
+  - 22406
+  - 22404

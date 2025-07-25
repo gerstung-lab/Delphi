@@ -21,6 +21,9 @@ expansion_pack_dir = ukb_dir / "expansion_packs"
 biomarker_dir = ukb_dir / "biomarkers"
 token_list_dir = Path("config/disease_list")
 
+with open("data/gather_biomarker/panel.yaml", "r") as f:
+    biomarkers = yaml.safe_load(f)
+
 
 def all_ukb_participants():
 
@@ -44,35 +47,33 @@ def load_coding(scheme: int) -> pd.DataFrame:
     return pd.read_csv(coding_path, sep="\t")
 
 
-def convert_to_longitudinal(df) -> pd.DataFrame:
+def index_by_visit(df: pd.DataFrame, visits: list[str]) -> pd.Series:
 
     n = df.shape[0]
     l = df.shape[1]
+    assert l == len(
+        visits
+    ), "Number of visits does not match number of columns in DataFrame"
     vals = np.concatenate([df[col].to_numpy() for col in df.columns], axis=0)
-    visits = np.repeat(np.arange(l), n)
+    visit_types = np.repeat(np.array(visits), n)
     subjects = np.tile(df.index.to_numpy(), l)
 
-    long_df = pd.DataFrame(
-        columns=["placeholder", "pid", "visit"],
-        data=np.stack([vals, subjects, visits], axis=-1),
+    return pd.Series(
+        data=vals,
+        index=pd.MultiIndex.from_arrays(
+            [subjects, visit_types], names=["pid", "visit"]
+        ),
     )
-    long_df = long_df.set_index(["pid", "visit"])
-
-    return long_df
 
 
-def load_longitudinal_fid(fid: str) -> pd.Series:
+def load_biomarker_df(fids: list, visits: list[str]) -> pd.DataFrame:
 
-    df = load_fid(fid=fid)
-    long_df = convert_to_longitudinal(df=df)
-    long_df = long_df.rename(columns={"placeholder": fid})
-
-    return long_df[fid]
-
-
-def build_longitudinal_df(fids: list):
-
-    long_df = pd.concat([load_longitudinal_fid(fid=str(fid)) for fid in fids], axis=1)
+    markers = []
+    for fid in fids:
+        marker = load_fid(str(fid))
+        marker = index_by_visit(df=marker, visits=visits)
+        markers.append(marker)
+    long_df = pd.concat(markers, axis=1)
 
     return long_df
 
@@ -162,7 +163,7 @@ def build_biomarker(
 
     print(biomarker)
     subjects = biomarker_df.reset_index()["pid"].to_numpy().astype(np.int32)
-    visits = biomarker_df.reset_index()["visit"].to_numpy().astype(np.int32)
+    visits = biomarker_df.reset_index()["visit"].to_numpy().astype(str)
 
     ukb_subjects = all_ukb_participants()
     not_in_ukb_subjects = ~np.isin(subjects, ukb_subjects)
@@ -211,7 +212,7 @@ def build_biomarker(
     miss_p2i = pd.DataFrame.from_dict(
         data={
             "pid": miss_subjects,
-            "visit": 0,
+            "visit": "none",
             "start_pos": 0,
             "seq_len": 0,
             "time": -1e4,
@@ -219,12 +220,11 @@ def build_biomarker(
     )
 
     p2i = pd.concat([p2i, miss_p2i], axis=0)
-    p2i = p2i.set_index("pid")
 
     odir = biomarker_dir / biomarker
     os.makedirs(odir, exist_ok=True)
     data_np.ravel().astype(np.float32).tofile(odir / "data.bin")
-    p2i.to_csv(odir / "p2i.csv")
+    p2i.to_csv(odir / "p2i.csv", index=False)
 
 
 def month_of_birth() -> pd.DataFrame:
@@ -237,7 +237,7 @@ def month_of_birth() -> pd.DataFrame:
     return mob
 
 
-def assessment_age(visits: list) -> pd.DataFrame:
+def assessment_age(visits: list):
 
     mob = month_of_birth()
 
@@ -251,18 +251,10 @@ def assessment_age(visits: list) -> pd.DataFrame:
         }
     )
 
-    assess_age = pd.DataFrame(columns=assess_date.columns, index=assess_date.index)
+    assert set(visits).issubset(set(assess_date.columns))
+    assess_age = pd.DataFrame(columns=visits, index=assess_date.index)
     for col in visits:
         assess_date[col] = pd.to_datetime(assess_date[col], format="%Y-%m-%d")
         assess_age[col] = (assess_date[col] - mob["year_month"]).dt.days.astype(float)
 
     return assess_age
-
-
-def longitudinal_assessment_age(visits: list) -> pd.Series:
-
-    assess_age = assessment_age(visits=visits)
-    assess_age = convert_to_longitudinal(assess_age)
-    assess_age = assess_age.rename(columns={"placeholder": "age"})
-
-    return assess_age["age"]
