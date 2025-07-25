@@ -27,6 +27,11 @@ train_data:
       args:
         interval_in_years: 5
         mode: random
+    - name: crop-block-size
+      args:
+        block_size: 64
+        priority_tokens: [male, female]
+        priority_modality: [prs]
 infer_val_biomarkers: true
 infer_val_expansion_packs: true
 infer_val_transforms: true

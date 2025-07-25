@@ -4,6 +4,7 @@ from typing import Any, Dict, Literal, Optional
 import numpy as np
 
 from delphi import DAYS_PER_YEAR
+from delphi.multimodal import Modality
 from delphi.tokenizer import Tokenizer
 
 
@@ -115,9 +116,67 @@ class AugmentLifestyle:
         return X, T, M, biomarker_X
 
 
+class CropBlockSize:
+
+    def __init__(
+        self,
+        tokenizer: Tokenizer,
+        seed: int,
+        block_size: int,
+        priority_tokens: Optional[list[str]] = None,
+        priority_modality: Optional[list[str]] = None,
+        **kwargs,
+    ):
+
+        self.rng = np.random.default_rng(seed)
+        self.block_size = block_size
+        if priority_tokens:
+            self.priority_tokens = np.array(tokenizer.encode(priority_tokens))
+        if priority_modality:
+            self.priority_modality = np.array(
+                [Modality[modality.upper()].value for modality in priority_modality]
+            )
+
+    def __call__(
+        self,
+        X: np.ndarray,
+        T: np.ndarray,
+        M: np.ndarray,
+        biomarker_X: dict[Modality, np.ndarray],
+    ):
+        """
+        crop the input data to a fixed block size, prioritizing certain tokens and modalities and preferentially crop out padding tokens
+        """
+
+        priority_np = np.zeros(M.shape, dtype=np.uint8)
+        priority_np[M > 0] = 1
+        if hasattr(self, "priority_tokens"):
+            priority_np[np.isin(X, self.priority_tokens)] = 2
+        if hasattr(self, "priority_modality"):
+            priority_np[np.isin(M, self.priority_modality)] = 2
+
+        tiebreaker = self.rng.integers(0, M.shape[1], size=M.shape, dtype=np.uint8)
+        s = np.lexsort((tiebreaker, priority_np), axis=1)
+        s_inv = np.argsort(s, axis=1)
+        to_keep = np.zeros_like(M, dtype=bool)
+        to_keep[:, -self.block_size :] = True
+        to_keep = np.take_along_axis(to_keep, s_inv, axis=1)
+
+        for modality, m_X in biomarker_X.items():
+            sub_idx, pos_idx = np.where(M == modality.value)
+            biomarker_X[modality] = m_X[to_keep[sub_idx, pos_idx], :]
+
+        M = M[to_keep].reshape(M.shape[0], -1)
+        X = X[to_keep].reshape(X.shape[0], -1)
+        T = T[to_keep].reshape(T.shape[0], -1)
+
+        return X, T, M, biomarker_X
+
+
 transform_registry = {
     "no-event": AddNoEvent,
     "augment-lifestyle": AugmentLifestyle,
+    "crop-block-size": CropBlockSize,
     # Add other transforms here
 }
 
