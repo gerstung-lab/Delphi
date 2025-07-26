@@ -5,7 +5,7 @@ eval_only: false
 init_from: scratch
 seed: 42
 gradient_accumulation_steps: 1
-batch_size: 512
+batch_size: 128
 device: cuda
 
 infer_train_biomarkers: true
@@ -14,6 +14,14 @@ train_data:
   subject_list: ukb_real_data/participants/train_fold.bin
   seed: 42
   biomarker_dir: ukb_real_data/biomarkers
+  expansion_pack_dir: ukb_real_data/expansion_packs
+  expansion_packs:
+    - family_hx
+    - fsf
+    - meds
+    - ops
+    - prescriptions
+    - summary_ops
   transforms:
     - name: no-event
       args:
@@ -26,6 +34,7 @@ val_data:
   subject_list: ukb_real_data/participants/val_fold.bin
   seed: 42
   biomarker_dir: ukb_real_data/biomarkers
+  expansion_pack_dir: ukb_real_data/expansion_packs
   transforms:
     - name: no-event
       args:
@@ -46,6 +55,9 @@ model:
     - female
     - config/disease_list/lifestyle.yaml
   biomarkers:
+    prs:
+      projector: linear
+      input_size: 36
     wbc:
       projector: linear
       input_size: 31
@@ -94,6 +106,12 @@ model:
     albu:
       projector: linear
       input_size: 1
+    diet:
+      projector: linear
+      input_size: 16
+    met:
+      projector: linear
+      input_size: 3
     telomere:
       projector: linear
       input_size: 1
@@ -105,7 +123,7 @@ model:
 log:
   wandb_log: true
   wandb_project: ${ckpt_dir}
-  run_name: blood+urine+telomere
+  run_name: delphi-m4
   log_interval: 25
   always_ckpt_after_eval: true
   ckpt_interval: null

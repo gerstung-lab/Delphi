@@ -5,7 +5,7 @@ eval_only: false
 init_from: scratch
 seed: 42
 gradient_accumulation_steps: 1
-batch_size: 128
+batch_size: 512
 device: cuda
 
 infer_train_biomarkers: true
