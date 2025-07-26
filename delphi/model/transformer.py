@@ -11,10 +11,11 @@ from delphi.config import dataclass_from_dict
 from delphi.model.components import (
     DelphiEmbedding,
     attention_mask,
-    build_zero_inflate_projector,
     target_mask,
+    ties_adjusted_delta_t,
 )
 from delphi.model.config import DelphiConfig
+from delphi.model.loss import CompetingExpHead, CrosseEntropyHead
 
 
 class LayerNorm(nn.Module):
@@ -137,9 +138,8 @@ class Delphi(nn.Module):
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.transformer.embed.token_embedding.weight = self.lm_head.weight
 
-        # zero time inflation
-        if config.loss.zero_inflate:
-            self.pi_head = build_zero_inflate_projector(config)
+        self.ce_head = CrosseEntropyHead(config)
+        self.dt_head = CompetingExpHead(config)
 
         # init all weights
         self.apply(self._init_weights)
@@ -191,7 +191,7 @@ class Delphi(nn.Module):
         x = self.transformer.ln_f(x)
         att = torch.stack(att)
 
-        if targets is not None:
+        if (targets is not None) and (targets_age is not None):
             logits = self.lm_head(x)
 
             logits_cp = logits.clone()
@@ -199,14 +199,17 @@ class Delphi(nn.Module):
             if validation_loss_mode:
                 ignored_tokens += [1]
                 logits_cp[..., ignored_tokens] = -torch.inf
-            loss_ce = self.ce_loss(logits=logits_cp, targets=targets)
 
-            dt = self.transformer.embed.ties_adjusted_delta_t(
-                age, targets_age, attn_mask
+            dt = ties_adjusted_delta_t(
+                t0=age,
+                t1=targets_age,
+                attn_mask=attn_mask,
+                mask_ties=self.config.mask_ties,
+                eps=0.0 if self.config.loss.zero_inflate else 1.0,
             )
-            loss_dt = self.dt_loss(
-                logits, dt, zero_inflate=self.config.loss.zero_inflate
-            )
+
+            loss_ce = self.ce_head(logits=logits_cp, targets=targets)
+            loss_dt = self.dt_head(logits=logits, delta_t=dt)
 
             is_valid_target = target_mask(targets, ignore_tokens=ignored_tokens)
             loss_ce = torch.mean(loss_ce[is_valid_target])
@@ -224,37 +227,6 @@ class Delphi(nn.Module):
             loss = None
 
         return logits, loss, att
-
-    def ce_loss(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-
-        logits = logits.permute(0, 2, 1)  # (b, l, n_vocab) -> (b, n_vocab, l)
-        loss_ce = F.cross_entropy(logits, targets, ignore_index=-1, reduction="none")
-
-        return loss_ce
-
-    def dt_loss(
-        self,
-        logits: torch.Tensor,
-        delta_t: torch.Tensor,
-        zero_inflate: bool = False,
-    ) -> torch.Tensor:
-
-        # time to next event loss, padding masked
-        lse = torch.logsumexp(logits, -1)
-        # More forgiving than using torch.max() for the most likely next event
-        lse = -torch.log(torch.exp(-lse) + self.config.t_min)
-        ldt = -torch.log(delta_t + torch.tensor(self.config.t_min))
-        exp_log_likelihood = lse - torch.exp(lse - ldt)
-
-        if zero_inflate:
-            pi = self.pi_head(logits).squeeze()
-            zero_case = -(F.softplus(-pi + lse) - F.softplus(-pi))
-            nonzero_case = -(exp_log_likelihood - pi - F.softplus(-pi))
-            loss_dt = zero_case * (delta_t == 0) + nonzero_case * (delta_t > 0)
-        else:
-            loss_dt = -exp_log_likelihood
-
-        return loss_dt
 
 
 def load_model(
