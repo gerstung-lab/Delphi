@@ -1,4 +1,4 @@
-ckpt_dir: multimodal
+ckpt_dir: finetune
 eval_interval: 25
 eval_iters: 25
 eval_only: false
