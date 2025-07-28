@@ -1,33 +1,9 @@
 import torch
 
-from delphi import DAYS_PER_YEAR
 from delphi.model.loss import broadcast_delta_t, time_to_event
 
-seed = 42
-batch_size = 2
-seq_len = 11
-vocab_size = 5
-max_age = int(100 * DAYS_PER_YEAR)
-max_delta = int(5 * DAYS_PER_YEAR)
-max_pad = 5
 
-torch.manual_seed(seed)
-test_shape = (batch_size, seq_len)
-timesteps = torch.randint(0, max_age, test_shape)
-timesteps, s = torch.sort(timesteps, dim=1)
-tokens = torch.randint(1, vocab_size, test_shape)
-
-pad_idx = torch.randint(0, max_pad, (batch_size,))
-pad_mask = torch.arange(seq_len).reshape(1, -1) <= pad_idx.reshape(-1, 1)
-
-tokens[pad_mask] = 0
-timesteps[pad_mask] = -1e4
-
-age, targets_age = timesteps[:, :-1], timesteps[:, 1:]
-_, targets = tokens[:, :-1], tokens[:, 1:]
-
-
-def test_broadcast_delta_t() -> None:
+def test_broadcast_delta_t(age: torch.Tensor, targets_age: torch.Tensor):
 
     B = age.shape[0]
     L = age.shape[1]
@@ -45,7 +21,9 @@ def no_out_of_range_idx(token_index: torch.Tensor, seq_len: int):
     return token_index.max() <= seq_len
 
 
-def test_time_to_event() -> None:
+def test_time_to_event(
+    age: torch.Tensor, targets_age: torch.Tensor, targets: torch.Tensor, vocab_size: int
+):
 
     tte, no_event, token_index = time_to_event(
         age=age, targets_age=targets_age, targets=targets, vocab_size=vocab_size
