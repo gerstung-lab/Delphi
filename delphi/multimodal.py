@@ -23,6 +23,8 @@ class Modality(Enum):
     DIET = 19
     MET = 20
     TELOMERE = 21
+    ABDO_FAT_CROSS = 22
+    ABDO_FAT_LONG = 23
 
 
 def module_name(modality: Modality) -> str:
