@@ -59,7 +59,7 @@ Set the following environment variables:
 
 > **Tip:** We recommend using a `.env` file with [direnv](https://direnv.net) for environment management.
 
-### Training Configuration
+### Training
 
 Delphi uses OmegaConf for experiment configuration management. Here's an example configuration:
 
@@ -156,13 +156,73 @@ optim:
   warmup_iters: 1000
 ```
 
-### Training
-
 Execute the following command to start training:
 
 ```bash
 python train.py config=example.yaml
 # Override specific parameters: python train.py config=example.yaml device=cuda
+```
+
+### Evaluation
+
+The currently supported evaluation tasks are:
+
+- AUC per disease stratified by age and sex
+
+#### Stratified AUC
+
+First, do a forward pass to get the logits from the model:
+
+```bash
+python apps/forward.py config=config/forward.yaml ckpt=$MODEL_CHECKPOINT
+```
+
+The configuration file for the forward pass is structured like this:
+
+```yaml
+# forward.yaml
+name: forward # name of directory where outputs will be written to
+device: cuda
+batch_size: 128
+subsample: null
+use_val_data: true # True if you want to use the same data configuration as the validation fold during model training
+data: # data configuration; ignored if use_val_data is set to True
+  data_dir: ukb_real_data
+  subject_list: ukb_real_data/participants/val_fold.bin
+  seed: 42
+  transforms:
+    - name: no-event
+      args:
+        interval_in_years: 5
+        mode: random
+log:
+  save_tokens: true
+  save_logits: true
+  flush_interval: 10 # higher interval -> faster but more RAM usage
+  wandb_log: false
+```
+
+Next, run the following command to launch the eval task:
+
+```bash
+python apps/eval.py config=config/eval/auc.yaml ckpt=$MODEL_CHECKPOINT
+```
+
+The configuration file for this eval task is structured like this:
+
+```yaml
+# auc.yaml
+task_name: auc_eval_task
+task_type: auc
+task_input: forward
+task_args:
+  disease_lst: config/disease_list/doi.yaml # path to a list of diseases to evaluate on; some lists are provided at config/disease_list
+  min_time_gap: 0.1
+  age_groups:
+    bin_start: 40
+    bin_end: 80
+    bin_width: 5
+  event_input_only: false
 ```
 
 ## Development
