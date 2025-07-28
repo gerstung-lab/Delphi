@@ -122,7 +122,10 @@ def load_sequences(
 
 def collate_batch_data(batch_data: list[np.ndarray]) -> np.ndarray:
 
-    max_len = max([bd.size for bd in batch_data])
+    if len(batch_data) > 0:
+        max_len = max([bd.size for bd in batch_data])
+    else:
+        max_len = 0
     collated_batch = np.full(
         shape=(len(batch_data), max_len),
         fill_value=0,
