@@ -43,7 +43,7 @@ def get_cosine_lr(it: int, cfg: OptimConfig) -> float:
 
 
 def get_constant_lr(it: int, cfg: OptimConfig) -> float:
-    return float(cfg.learning_rate)
+    return 1.0
 
 
 def configure_optimizers(
