@@ -5,7 +5,7 @@ from functools import partial
 
 import torch
 
-from delphi.model.transformer import LayerNorm
+from delphi.model.transformer import Delphi, LayerNorm
 
 
 @dataclass
@@ -19,6 +19,7 @@ class OptimConfig:
     grad_clip: float = 1.0  # clip gradients at this value, or disable if == 0.0
 
     # learning rate decay settings
+    schedule: str = "consine"  # consine, constant
     warmup_iters: int = 2000  # how many steps to warm up for
     lr_decay_iters: int = 10000  # should be ~= max_iters per Chinchilla
     min_lr: float = (
@@ -27,7 +28,7 @@ class OptimConfig:
 
 
 # learning rate decay scheduler (cosine with warmup)
-def get_lr(it: int, cfg: OptimConfig) -> float:
+def get_cosine_lr(it: int, cfg: OptimConfig) -> float:
     # 1) linear warmup for warmup_iters steps
     if it < cfg.warmup_iters:
         return it / cfg.warmup_iters
@@ -41,8 +42,12 @@ def get_lr(it: int, cfg: OptimConfig) -> float:
     return (cfg.min_lr + coeff * (cfg.learning_rate - cfg.min_lr)) / cfg.learning_rate
 
 
+def get_constant_lr(it: int, cfg: OptimConfig) -> float:
+    return float(cfg.learning_rate)
+
+
 def configure_optimizers(
-    model, cfg: OptimConfig, device_type
+    model: Delphi, cfg: OptimConfig, device_type: str
 ) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR]:
     """
     This long function is unfortunately doing something very simple and is being very defensive:
@@ -114,10 +119,17 @@ def configure_optimizers(
         optim_groups, lr=cfg.learning_rate, betas=(cfg.beta1, cfg.beta2), **extra_args
     )
 
-    lr_schedule_fn = partial(
-        get_lr,
-        cfg=cfg,
-    )
+    print(f"lr schedule: {cfg.schedule}")
+    if cfg.schedule == "cosine":
+        lr_schedule_fn = partial(
+            get_cosine_lr,
+            cfg=cfg,
+        )
+    elif cfg.schedule == "constant":
+        lr_schedule_fn = partial(get_constant_lr, cfg=cfg)
+    else:
+        raise ValueError(f"unknown lr schedule: {cfg.schedule}")
+
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer,
         lr_lambda=lr_schedule_fn,
