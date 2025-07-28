@@ -22,10 +22,13 @@ train_data:
 infer_val_biomarkers: true
 infer_val_expansion_packs: true
 infer_val_transforms: true
+infer_val_subject_filters: false
 val_data:
   data_dir: ukb_real_data
-  subject_list: ukb_real_data/participants/val_abdo_fat_cross.bin
+  subject_list: ukb_real_data/participants/val_fold.bin
   biomarker_dir: ukb_real_data/biomarkers
+  must_have_biomarkers:
+    - abdo_fat_cross
   seed: 42
 model:
   n_layer: 12

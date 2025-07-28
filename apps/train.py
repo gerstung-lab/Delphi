@@ -55,6 +55,7 @@ class TrainConfig:
     infer_val_biomarkers: bool = True
     infer_val_expansion_packs: bool = True
     infer_val_transforms: bool = True
+    infer_val_subject_filters: bool = True
 
     model: DelphiConfig = field(default_factory=DelphiConfig)
     ignore_expansion_tokens: bool = True
@@ -112,6 +113,8 @@ def train(cfg: TrainConfig):
     assert set(cfg.val_data.expansion_packs).issubset(
         set(cfg.train_data.expansion_packs)
     )
+    if cfg.infer_val_subject_filters:
+        cfg.val_data.must_have_biomarkers = cfg.train_data.must_have_biomarkers
     if cfg.infer_val_transforms:
         cfg.val_data.transforms = cfg.train_data.transforms
     print("validation dataset")

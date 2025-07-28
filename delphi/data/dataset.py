@@ -157,6 +157,7 @@ class UKBDataConfig:
     expansion_packs: list[str] = field(default_factory=list)
     biomarker_dir: str = "ukb_real_data/biomarkers"
     biomarkers: list[str] = field(default_factory=list)
+    must_have_biomarkers: list[str] = field(default_factory=list)
     first_time_only: bool = True
     seed: int = 42
     transforms: Optional[List[TransformArgs]] = None
@@ -179,6 +180,14 @@ class Biomarker:
 
     def __repr__(self):
         return f"Biomarker(path={self.path})"
+
+    @property
+    def data_participants(self):
+
+        have_data = self.p2i.obj["seq_len"] > 0
+        participants_with_data = self.p2i.obj.loc[have_data, "pid"].unique()
+
+        return participants_with_data
 
     def get_raw_batch(
         self, pids: np.ndarray
@@ -299,6 +308,16 @@ class Dataset:
             )
             self.mod_ds[modality] = dataset
         print(f"only using first occurrence of biomarkers: {cfg.first_time_only}")
+
+        print(f"keeping participants with biomarkers: {cfg.must_have_biomarkers}")
+        old_n = self.participants.size
+        for modality in cfg.must_have_biomarkers:
+            modality = Modality[modality.upper()]
+            data_participants = self.mod_ds[modality].data_participants
+            self.participants = self.participants[
+                np.isin(self.participants, data_participants)
+            ]
+        print(f"{self.participants.size}/{old_n} remaining")
 
         self.transforms = []
         if cfg.transforms is not None:
