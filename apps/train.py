@@ -1,6 +1,7 @@
 import os
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
+from typing import Optional
 
 import numpy as np
 import torch
@@ -32,6 +33,7 @@ class TrainConfig:
     eval_iters: int = 200
     eval_only: bool = False  # if True, script exits right after the first eval
     init_from: str = "scratch"  # 'scratch' or 'finetune'
+    resume_from: Optional[str] = None
     seed: int = 42
     gradient_accumulation_steps: int = 1  # used to simulate larger batch sizes
     batch_size: int = 128
@@ -141,9 +143,12 @@ def train(cfg: TrainConfig):
         print("Initializing a new model from scratch")
         model = Delphi(cfg.model)
     elif cfg.init_from == "finetune":
-        print(f"finetune model from {run_dir}")
-        ckpt_path = os.path.join(run_dir, "ckpt.pt")
-        checkpoint = torch.load(ckpt_path, map_location=cfg.device)
+        assert cfg.resume_from is not None
+        print(f"Finetuning pretrained model at {cfg.resume_from}")
+        checkpoint = torch.load(
+            os.path.join(DELPHI_CKPT_DIR, cfg.resume_from, "ckpt.pt"),
+            map_location=cfg.device,
+        )
         validate_model_config_for_finetuning(
             finetune_config=cfg.model,
             pretrain_config=DelphiConfig(**checkpoint["model_args"]),
@@ -156,7 +161,19 @@ def train(cfg: TrainConfig):
         for k, v in list(state_dict.items()):
             if k.startswith(unwanted_prefix):
                 state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
+        existing_keys = set(state_dict.keys())
+        model_keys = set(model.state_dict().keys())
+        new_keys = model_keys - existing_keys
+        print(f"new layers: {new_keys}")
         model.load_state_dict(state_dict, strict=False)
+        trainable_layers = []
+        for name, param in model.named_parameters():
+            if name in existing_keys:
+                param.requires_grad = False
+            else:
+                trainable_layers.append(name)
+                param.requires_grad = True
+        print(f"trainable layers: {trainable_layers}")
 
     model.to(cfg.device)
 
