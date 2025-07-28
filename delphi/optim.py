@@ -98,6 +98,13 @@ def configure_optimizers(
         str(param_dict.keys() - union_params),
     )
 
+    trainable = set()
+    for pn, p in model.named_parameters():
+        if p.requires_grad:
+            trainable.add(pn)
+    decay = decay.intersection(trainable)
+    no_decay = no_decay.intersection(trainable)
+
     # create the pytorch optimizer object
     optim_groups = [
         {
