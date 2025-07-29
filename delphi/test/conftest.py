@@ -45,45 +45,76 @@ def all_participants(dataset_dir):
     return np.array(list(participants))
 
 
-def generate_samples():
+@pytest.fixture(scope="class", params=[1, 10, 50])
+def batch_size(request: FixtureRequest):
+    return request.param
 
-    torch.manual_seed(42)
 
-    batch_size = np.arange(1, 11)
-    vocab_size = np.arange(5, 110, step=10)
-    seq_len = np.arange(11, 21)
-    max_age = int(100 * DAYS_PER_YEAR)
+@pytest.fixture(scope="class", params=[5, 100])
+def vocab_size(request: FixtureRequest):
+    return request.param
 
-    time_horizon = np.arange(300, 3300, step=10)
-    time_bins = [
-        torch.arange(0, horizon, step=horizon / 10) for horizon in time_horizon
-    ]
 
-    age_list = []
-    targets_age_list = []
-    targets_list = []
-    for b, l, v in zip(batch_size, seq_len, vocab_size):
-        sample_shape = (b, l)
-        timesteps = torch.randint(0, max_age, sample_shape)
-        timesteps, _ = torch.sort(timesteps, dim=1)
-        tokens = torch.randint(1, v, sample_shape)
+@pytest.fixture(scope="class", params=[10, 100])
+def seq_len(request: FixtureRequest):
+    return request.param
 
-        max_pad = int(l / 2)
 
-        pad_idx = torch.randint(0, max_pad, (b,))
-        pad_mask = torch.arange(l).reshape(1, -1) <= pad_idx.reshape(-1, 1)
+@pytest.fixture(scope="class", params=[(1, 500), (5, 200), (8, 300)])
+def time_bins(request: FixtureRequest):
+    n_bins, bin_width = request.param
+    return torch.Tensor(np.array([i * bin_width for i in np.arange(n_bins + 1)]))
 
-        tokens[pad_mask] = 0
-        timesteps[pad_mask] = -1e4
 
-        age, targets_age = timesteps[:, :-1], timesteps[:, 1:]
-        _, targets = tokens[:, :-1], tokens[:, 1:]
+class CaseGenerator:
 
-        age_list.append(age)
-        targets_age_list.append(targets_age)
-        targets_list.append(targets)
+    def __init__(self, batch_size: int, seq_len: int, vocab_size: int):
 
-    return age_list, targets_age_list, targets_list, vocab_size.tolist(), time_bins
+        max_age = 100 * DAYS_PER_YEAR
+
+        sample_shape = (batch_size, seq_len)
+        timesteps = torch.randint(0, int(max_age), sample_shape)
+        self.timesteps, _ = torch.sort(timesteps, dim=1)
+        self.tokens = torch.randint(1, vocab_size, sample_shape)
+
+        max_pad = int(seq_len / 2)
+        pad_idx = torch.randint(0, max_pad, (batch_size,))
+        pad_mask = torch.arange(seq_len).reshape(1, -1) <= pad_idx.reshape(-1, 1)
+
+        self.tokens[pad_mask] = 0
+        self.timesteps[pad_mask] = -1e4
+
+    @property
+    def targets(self):
+        return self.tokens[:, 1:]
+
+    @property
+    def age(self):
+        return self.timesteps[:, :-1]
+
+    @property
+    def targets_age(self):
+        return self.timesteps[:, 1:]
+
+
+@pytest.fixture(scope="class")
+def case_generator(batch_size: int, seq_len: int, vocab_size: int):
+    return CaseGenerator(batch_size=batch_size, seq_len=seq_len, vocab_size=vocab_size)
+
+
+@pytest.fixture(scope="class")
+def targets(case_generator: CaseGenerator):
+    return case_generator.targets
+
+
+@pytest.fixture(scope="class")
+def targets_age(case_generator: CaseGenerator):
+    return case_generator.targets_age
+
+
+@pytest.fixture(scope="class")
+def age(case_generator: CaseGenerator):
+    return case_generator.age
 
 
 def pytest_generate_tests(metafunc: Metafunc):
@@ -100,32 +131,4 @@ def pytest_generate_tests(metafunc: Metafunc):
                 os.path.join(pack_dir, expansion_pack)
                 for expansion_pack in expansion_packs
             ],
-        )
-
-    if set(metafunc.fixturenames) == set(["age", "targets_age"]):
-
-        age_list, targets_age_list, _, _, _ = generate_samples()
-        test_params = list(zip(age_list, targets_age_list))
-        metafunc.parametrize("age,targets_age", test_params)
-
-    if set(metafunc.fixturenames) == set(
-        ["age", "targets_age", "targets", "vocab_size"]
-    ):
-
-        age_list, targets_age_list, targets_list, vocab_size, _ = generate_samples()
-        test_params = list(zip(age_list, targets_age_list, targets_list, vocab_size))
-        metafunc.parametrize("age,targets_age,targets,vocab_size", test_params)
-
-    if set(metafunc.fixturenames) == set(
-        ["age", "targets_age", "targets", "vocab_size", "time_bins"]
-    ):
-
-        age_list, targets_age_list, targets_list, vocab_size, time_bins = (
-            generate_samples()
-        )
-        test_params = list(
-            zip(age_list, targets_age_list, targets_list, vocab_size, time_bins)
-        )
-        metafunc.parametrize(
-            "age,targets_age,targets,vocab_size,time_bins", test_params
         )
