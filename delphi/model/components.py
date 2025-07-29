@@ -139,6 +139,8 @@ class DelphiEmbedding(nn.Module):
 
         for modality in biomarker_x.keys():
             m_pos = torch.nonzero(M == modality.value)  # N * 2
+            if m_pos.size == 0:
+                continue
             m_emb = self.biomarker_embed[module_name(modality)](
                 biomarker_x[modality]
             )  # N * H
