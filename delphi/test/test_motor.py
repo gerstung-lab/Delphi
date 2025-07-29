@@ -1,6 +1,6 @@
 import torch
 
-from delphi.model.loss import broadcast_delta_t, time_to_event
+from delphi.model.loss import broadcast_delta_t, piecewise_time, time_to_event
 
 
 def test_broadcast_delta_t(age: torch.Tensor, targets_age: torch.Tensor):
@@ -19,6 +19,20 @@ def test_broadcast_delta_t(age: torch.Tensor, targets_age: torch.Tensor):
 
 def no_out_of_range_idx(token_index: torch.Tensor, seq_len: int):
     return token_index.max() <= seq_len
+
+
+def event_time_within_piece(
+    surv_or_event_time: torch.Tensor,
+    occur_in_piece: torch.Tensor,
+    time_bins: torch.Tensor,
+):
+
+    event_time = surv_or_event_time[occur_in_piece]
+    piece_idx = torch.argwhere(occur_in_piece)[:, -2]
+    piece_start, piece_end = time_bins[piece_idx], time_bins[piece_idx + 1]
+    within_piece = torch.logical_and(event_time >= piece_start, event_time <= piece_end)
+
+    return within_piece.all()
 
 
 def test_time_to_event(
@@ -46,3 +60,31 @@ def test_time_to_event(
                     assert tte[i, j, k] == dt
                 else:
                     assert no_event[i, j, k] == 1
+
+
+def test_piecewise_event_time(
+    age: torch.Tensor,
+    targets_age: torch.Tensor,
+    targets: torch.Tensor,
+    vocab_size: int,
+    time_bins: torch.Tensor,
+):
+
+    tte, no_event, _ = time_to_event(
+        age=age, targets_age=targets_age, targets=targets, vocab_size=vocab_size
+    )
+
+    time_to_last_token = targets_age[:, -1].view(-1, 1) - age
+
+    surv_or_to_event_time, occur_mask = piecewise_time(
+        tte=tte,
+        no_future_event=no_event,
+        last_censor=time_to_last_token,
+        time_bins=time_bins,
+    )
+
+    assert event_time_within_piece(
+        surv_or_event_time=surv_or_to_event_time,
+        occur_in_piece=occur_mask,
+        time_bins=time_bins,
+    )

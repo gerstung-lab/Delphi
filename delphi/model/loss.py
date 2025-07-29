@@ -84,31 +84,68 @@ class MotorHead(nn.Module):
         h: torch.Tensor,
         age: torch.Tensor,
         targets_age: torch.Tensor,
-        delta_t: torch.Tensor,
         targets: torch.Tensor,
     ) -> torch.Tensor:
 
+        # h: [B, L, H]
         h = self.head[0](h)
+        # h: [B, L, P, M]
         h = torch.reshape(
             h, (-1, -1, self.config.loss.motor_n_bin, self.config.loss.motor_n_hidden)
         )
-        h = self.head[1](h)
+        # h: [B, L, P, V]
+        log_lambda = self.head[1](h)
 
-        tte, no_event, _ = time_to_event(
+        # tte: [B, L, V]
+        tte, no_future_event, _ = time_to_event(
             age=age, targets_age=targets_age, targets=targets, vocab_size=self.V
         )
 
-        censor_masks = []
-        for i in range(self.n_bins):
-            is_censored = (tte >= self.time_bins[i]) * (tte < self.time_bins[i + 1])
-            is_censored = torch.logical_or(is_censored, no_event)
-            censor_masks.append(is_censored)
-        censor_mask = torch.stack(censor_masks, dim=-2)  # [B, L, K, V]
+        # last_censor: [B, L]
+        last_censor = targets_age[:, -1].view(-1, 1) - age
 
-        # compute loss
-        # loss = loss_fn(censor_mask, h, tte)
+        surv_or_event_time, occur_in_piece = piecewise_time(
+            tte=tte,
+            no_future_event=no_future_event,
+            last_censor=last_censor,
+            time_bins=self.time_bins,
+        )
 
-        return h
+        ll_survival = (-torch.exp(log_lambda) * surv_or_event_time).mean()
+        ll_to_event = (log_lambda * occur_in_piece.float()).mean()
+        nll_loss = -(ll_survival + ll_to_event)
+
+        return nll_loss
+
+
+def piecewise_time(
+    tte: torch.Tensor,
+    no_future_event: torch.Tensor,
+    last_censor: torch.Tensor,
+    time_bins: torch.Tensor,
+):
+
+    occur_mask_per_bin = []
+    surv_or_to_event_time_per_bin = []
+    for i in range(len(time_bins) - 1):
+        start, end = time_bins[i], time_bins[i + 1]
+        # occur_in_bin: [B, L, V]
+        occur_in_bin = (
+            (tte > start).bool() & (tte <= end).bool() & ~no_future_event.bool()
+        )
+        # surv_or_event_time_in_bin: [B, L, V]
+        surv_or_event_time_in_bin = torch.where(
+            occur_in_bin.bool(),
+            input=tte,
+            other=torch.clamp(last_censor.unsqueeze(-1), min=0, max=float(end - start)),
+        )
+        occur_mask_per_bin.append(occur_in_bin.bool())
+        surv_or_to_event_time_per_bin.append(surv_or_event_time_in_bin)
+    # occur_in_piece: [B, L, P, V]
+    occur_in_piece = torch.stack(occur_mask_per_bin, dim=-2)
+    surv_or_event_time = torch.stack(surv_or_to_event_time_per_bin, dim=-2)
+
+    return surv_or_event_time, occur_in_piece
 
 
 def time_to_event(

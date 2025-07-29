@@ -54,6 +54,11 @@ def generate_samples():
     seq_len = np.arange(11, 21)
     max_age = int(100 * DAYS_PER_YEAR)
 
+    time_horizon = np.arange(300, 3300, step=10)
+    time_bins = [
+        torch.arange(0, horizon, step=horizon / 10) for horizon in time_horizon
+    ]
+
     age_list = []
     targets_age_list = []
     targets_list = []
@@ -78,7 +83,7 @@ def generate_samples():
         targets_age_list.append(targets_age)
         targets_list.append(targets)
 
-    return age_list, targets_age_list, targets_list, vocab_size.tolist()
+    return age_list, targets_age_list, targets_list, vocab_size.tolist(), time_bins
 
 
 def pytest_generate_tests(metafunc: Metafunc):
@@ -99,7 +104,7 @@ def pytest_generate_tests(metafunc: Metafunc):
 
     if set(metafunc.fixturenames) == set(["age", "targets_age"]):
 
-        age_list, targets_age_list, _, _ = generate_samples()
+        age_list, targets_age_list, _, _, _ = generate_samples()
         test_params = list(zip(age_list, targets_age_list))
         metafunc.parametrize("age,targets_age", test_params)
 
@@ -107,6 +112,20 @@ def pytest_generate_tests(metafunc: Metafunc):
         ["age", "targets_age", "targets", "vocab_size"]
     ):
 
-        age_list, targets_age_list, targets_list, vocab_size = generate_samples()
+        age_list, targets_age_list, targets_list, vocab_size, _ = generate_samples()
         test_params = list(zip(age_list, targets_age_list, targets_list, vocab_size))
         metafunc.parametrize("age,targets_age,targets,vocab_size", test_params)
+
+    if set(metafunc.fixturenames) == set(
+        ["age", "targets_age", "targets", "vocab_size", "time_bins"]
+    ):
+
+        age_list, targets_age_list, targets_list, vocab_size, time_bins = (
+            generate_samples()
+        )
+        test_params = list(
+            zip(age_list, targets_age_list, targets_list, vocab_size, time_bins)
+        )
+        metafunc.parametrize(
+            "age,targets_age,targets,vocab_size,time_bins", test_params
+        )
