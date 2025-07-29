@@ -34,13 +34,18 @@ def get_p2i(data):
     return np.array(p2i)
 
 
-def tricolumnar_to_2d(data):
+def tricolumnar_to_2d(data, subsample: Optional[int] = None):
     """
     Convert a tricolumnar array to a 2D array.
     The first column is the participant index, the second column is the time step,
     and the third column is the token.
     """
     p2i = get_p2i(data)
+    N = p2i.shape[0]
+    if subsample is not None and subsample <= N:
+        n_tokens_to_remove = p2i[subsample:, 1].sum()
+        data = data[:-n_tokens_to_remove]
+        p2i = p2i[:subsample, :]
     sub_idx = np.repeat(np.arange(p2i.shape[0]), p2i[:, 1])
     pos_idx = np.concatenate([np.arange(p2i[i, 1]) for i in range(p2i.shape[0])])
 

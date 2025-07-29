@@ -28,6 +28,7 @@ class CalibrateAUCArgs:
     age_groups: TimeBins = field(default_factory=TimeBins)
     min_time_gap: float = 0.1
     event_input_only: bool = True
+    subsample: Optional[int] = None
 
 
 def parse_time_bins(time_bins: TimeBins) -> list[tuple[int, int]]:
@@ -147,7 +148,7 @@ def calibrate_auc(
     )
     XT = np.fromfile(xt_path, dtype=np.uint32).reshape(-1, 3)
 
-    X, T = tricolumnar_to_2d(XT)
+    X, T = tricolumnar_to_2d(XT, subsample=task_args.subsample)
     sub_idx, pos_idx = np.nonzero(T != -1e4)
 
     max_len = T.shape[1] - 1
