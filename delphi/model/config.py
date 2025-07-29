@@ -18,6 +18,10 @@ class LossConfig:
     dt_beta: float = 1.0
     zero_inflate: bool = False
     zero_inflate_projector: str = "linear"
+    motor: bool = False
+    motor_n_bin: int = 4
+    motor_time_horizon: int = 600
+    motor_n_hidden: int = 32
 
 
 @dataclass

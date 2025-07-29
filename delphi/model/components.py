@@ -1,5 +1,4 @@
 import math
-from ast import Not
 from typing import Optional
 
 import torch
@@ -100,30 +99,6 @@ class DelphiEmbedding(nn.Module):
                 max_modality_idx + 1, config.n_embd, padding_idx=0
             )
 
-    def ties_adjusted_delta_t(
-        self, t0: torch.Tensor, t1: torch.Tensor, attn_mask: torch.Tensor
-    ) -> torch.Tensor:
-
-        delta_t = t1 - t0
-        if not self.config.loss.zero_inflate:
-            delta_t = torch.clamp(delta_t, min=1.0)
-
-        if self.config.mask_ties:
-            delta_t = torch.gather(
-                delta_t,
-                -1,
-                (
-                    attn_mask
-                    * torch.arange(
-                        0, t0.size(1), device=t0.device, dtype=torch.float32
-                    ).view(1, 1, 1, -1)
-                )
-                .max(-1)
-                .indices.squeeze((1, 2)),
-            )
-
-        return delta_t
-
     def forward(
         self,
         x0: torch.Tensor,
@@ -177,17 +152,6 @@ class ZeroInflateProjector(nn.Module):
         return x
 
 
-def build_zero_inflate_projector(config: DelphiConfig):
-
-    assert config.vocab_size is not None
-    if config.loss.zero_inflate_projector == "linear":
-        return nn.Linear(config.vocab_size, 1, bias=False)
-    elif config.loss.zero_inflate_projector == "mlp":
-        return ZeroInflateProjector(config)
-    else:
-        raise ValueError(f"Unknown pi_projector: {config.loss.zero_inflate_projector}")
-
-
 def attention_mask(
     t0: torch.Tensor,
     m0: torch.Tensor,
@@ -224,3 +188,31 @@ def target_mask(
         is_valid_target *= x1 != k
 
     return is_valid_target
+
+
+def ties_adjusted_delta_t(
+    t0: torch.Tensor,
+    t1: torch.Tensor,
+    attn_mask: torch.Tensor,
+    mask_ties: bool,
+    eps: float = 1.0,
+) -> torch.Tensor:
+
+    delta_t = t1 - t0
+    delta_t = torch.clamp(delta_t, min=eps)
+
+    if mask_ties:
+        delta_t = torch.gather(
+            delta_t,
+            -1,
+            (
+                attn_mask
+                * torch.arange(
+                    0, t0.size(1), device=t0.device, dtype=torch.float32
+                ).view(1, 1, 1, -1)
+            )
+            .max(-1)
+            .indices.squeeze((1, 2)),
+        )
+
+    return delta_t
