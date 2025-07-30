@@ -5,10 +5,11 @@ from typing import Optional
 
 import numpy as np
 import yaml
+from torch import logit
 from tqdm import tqdm
 
 from delphi import DAYS_PER_YEAR
-from delphi.data.dataset import tricolumnar_to_2d
+from delphi.data.dataset import subsample_tricolumnar, tricolumnar_to_2d
 from delphi.eval import eval_task
 from delphi.tokenizer import Gender, Tokenizer
 
@@ -148,7 +149,10 @@ def calibrate_auc(
     )
     XT = np.fromfile(xt_path, dtype=np.uint32).reshape(-1, 3)
 
-    X, T = tricolumnar_to_2d(XT, subsample=task_args.subsample)
+    XT, logits = subsample_tricolumnar(
+        XT=XT, logits=logits, subsample=task_args.subsample
+    )
+    X, T = tricolumnar_to_2d(XT)
     sub_idx, pos_idx = np.nonzero(T != -1e4)
 
     max_len = T.shape[1] - 1
