@@ -186,15 +186,11 @@ def train(cfg: TrainConfig):
     optimizer, scheduler = configure_optimizers(
         model=model, cfg=cfg.optim, device_type=device_type
     )
-    # if cfg.init_from == "resume":
-    #     optimizer.load_state_dict(checkpoint["optimizer"])
 
-    # compile the model
     if cfg.compile:
         print("compiling the model... (takes a ~minute)")
         model = torch.compile(model)  # requires PyTorch 2.0
 
-    # helps estimate an arbitrarily accurate loss over either split using many batches
     @torch.no_grad()
     def estimate_loss():
         model.eval()
