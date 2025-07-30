@@ -25,15 +25,19 @@ class LossConfig:
 
 
 @dataclass
-class DelphiConfig:
+class GPT2Config:
     vocab_size: Optional[int] = None
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
     dropout: float = 0.0
     token_dropout: float = 0.0
-    t_min: float = 1.0
     bias: bool = True
+
+
+@dataclass
+class DelphiConfig(GPT2Config):
+    t_min: float = 1.0
     # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     mask_ties: bool = False
     ignore_tokens: list = field(default_factory=lambda: [0])

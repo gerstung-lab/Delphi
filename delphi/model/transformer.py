@@ -1,4 +1,5 @@
 import math
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
 
@@ -120,12 +121,49 @@ class Block(nn.Module):
         return x, att
 
 
-class Delphi(nn.Module):
+class GPT2Base(nn.Module, ABC):
 
-    def __init__(self, config: DelphiConfig):
+    def __init__(self, config):
         super().__init__()
-        assert config.vocab_size is not None
         self.config = config
+
+        self.build_model(config)
+
+        self.apply(self._init_weights)
+        # apply special scaled init to the residual projections, per GPT-2 paper
+        for pn, p in self.named_parameters():
+            if pn.endswith("c_proj.weight"):
+                torch.nn.init.normal_(
+                    p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer)
+                )
+
+        print("number of parameters: %.2fM" % (self.num_params / 1e6,))
+
+    @property
+    def num_params(self):
+        n_params = sum(p.numel() for p in self.parameters())
+        return n_params
+
+    def _init_weights(self, module: torch.nn.Module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    @abstractmethod
+    def build_model(self, config):
+        pass
+
+    @abstractmethod
+    def forward(self, *args, **kwargs):
+        pass
+
+
+class Delphi(GPT2Base):
+
+    def build_model(self, config: DelphiConfig):
 
         self.transformer = nn.ModuleDict(
             dict(
@@ -135,6 +173,7 @@ class Delphi(nn.Module):
                 ln_f=LayerNorm(config.n_embd, bias=config.bias),
             )
         )
+        assert config.vocab_size is not None
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.transformer.embed.token_embedding.weight = self.lm_head.weight
 
@@ -143,31 +182,6 @@ class Delphi(nn.Module):
             self.dt_head = MotorHead(config)
         else:
             self.dt_head = CompetingExpHead(config)
-
-        # init all weights
-        self.apply(self._init_weights)
-        # apply special scaled init to the residual projections, per GPT-2 paper
-        for pn, p in self.named_parameters():
-            if pn.endswith("c_proj.weight"):
-                torch.nn.init.normal_(
-                    p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer)
-                )
-
-        # report number of parameters
-        print("number of parameters: %.2fM" % (self.num_params / 1e6,))
-
-    @property
-    def num_params(self):
-        n_params = sum(p.numel() for p in self.parameters())
-        return n_params
-
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     def forward(
         self,
