@@ -41,25 +41,32 @@ class TestMotor:
         age: torch.Tensor,
         targets_age: torch.Tensor,
         targets: torch.Tensor,
+        task_tokens: torch.Tensor,
         vocab_size: int,
     ):
 
         tte, no_event, token_index = time_to_event(
-            age=age, targets_age=targets_age, targets=targets, vocab_size=vocab_size
+            age=age,
+            targets_age=targets_age,
+            targets=targets,
+            task_tokens=task_tokens,
+            vocab_size=vocab_size,
         )
         assert no_out_of_range_idx(token_index=token_index, seq_len=targets.shape[1])
         B = age.shape[0]
         L = age.shape[1]
-        V = vocab_size
+        V = task_tokens.numel()
         assert tte.shape == no_event.shape == token_index.shape == (B, L, V)
 
+        sorted_task_tokens, _ = torch.sort(task_tokens)
         for i in range(B):
             for j in range(L):
                 future_tokens = targets[i, :].clone()
                 future_tokens[:j] = 0
-                for k in range(1, V):
-                    if k in future_tokens:
-                        pos = torch.argwhere(future_tokens == k).min()
+                for k in range(0, V):
+                    task = sorted_task_tokens[k]
+                    if task in future_tokens:
+                        pos = torch.argwhere(future_tokens == task).min()
                         assert token_index[i, j, k] == pos
                         dt = targets_age[i, pos] - age[i, j]
                         assert tte[i, j, k] == dt
@@ -71,12 +78,17 @@ class TestMotor:
         age: torch.Tensor,
         targets_age: torch.Tensor,
         targets: torch.Tensor,
-        vocab_size: int,
+        task_tokens: torch.Tensor,
         time_bins: torch.Tensor,
+        vocab_size: int,
     ):
 
         tte, no_event, _ = time_to_event(
-            age=age, targets_age=targets_age, targets=targets, vocab_size=vocab_size
+            age=age,
+            targets_age=targets_age,
+            targets=targets,
+            task_tokens=task_tokens,
+            vocab_size=vocab_size,
         )
 
         time_to_last_token = targets_age[:, -1].view(-1, 1) - age

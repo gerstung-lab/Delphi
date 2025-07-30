@@ -6,7 +6,7 @@ from delphi.model.components import ZeroInflateProjector
 from delphi.model.config import DelphiConfig
 
 
-class CrosseEntropyHead(nn.Module):
+class CrossEntropyHead(nn.Module):
     def __init__(self, config: DelphiConfig):
         super().__init__()
         self.config = config
@@ -62,20 +62,20 @@ class MotorHead(nn.Module):
     def __init__(self, config: DelphiConfig):
         super().__init__()
         self.config = config
-        self.n_bins = config.loss.motor_n_bin
-        self.time_horizon = config.loss.motor_time_horizon
-        self.time_bins = torch.linspace(0, self.time_horizon, self.n_bins + 1)[:-1]
+        self.time_bins = torch.Tensor(self.config.loss.motor_time_bins)
+        self.task_tokens = torch.Tensor(self.config.loss.motor_task_tokens)
+        self.n_bins = len(self.time_bins) - 1
 
         assert config.vocab_size is not None
-        self.V = config.vocab_size
+        self.V = self.task_tokens.shape[0]
         self.head = nn.ModuleList(
             [
                 nn.Linear(
                     config.n_embd,
-                    config.loss.motor_n_bin * config.loss.motor_n_hidden,
+                    self.n_bins * config.loss.motor_n_hidden,
                     bias=False,
                 ),
-                nn.Linear(config.loss.motor_n_hidden, config.vocab_size, bias=False),
+                nn.Linear(config.loss.motor_n_hidden, self.V, bias=False),
             ]
         )
 
@@ -87,18 +87,23 @@ class MotorHead(nn.Module):
         targets: torch.Tensor,
     ) -> torch.Tensor:
 
+        batch_size, seq_len = h.shape[0], h.shape[1]
         # h: [B, L, H]
         h = self.head[0](h)
         # h: [B, L, P, M]
         h = torch.reshape(
-            h, (-1, -1, self.config.loss.motor_n_bin, self.config.loss.motor_n_hidden)
+            h, (batch_size, seq_len, self.n_bins, self.config.loss.motor_n_hidden)
         )
         # h: [B, L, P, V]
         log_lambda = self.head[1](h)
 
         # tte: [B, L, V]
         tte, no_future_event, _ = time_to_event(
-            age=age, targets_age=targets_age, targets=targets, vocab_size=self.V
+            age=age,
+            targets_age=targets_age,
+            targets=targets,
+            task_tokens=self.task_tokens,
+            vocab_size=self.config.vocab_size,
         )
 
         # last_censor: [B, L]
@@ -152,45 +157,57 @@ def time_to_event(
     age: torch.Tensor,
     targets_age: torch.Tensor,
     targets: torch.Tensor,
+    task_tokens: torch.Tensor,
     vocab_size: int,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     notation:
         - i: participant index
-        - j: position index (i.e. the j th event in trajectory)
-        - k: event index
+        - j: the j th event in trajectory
+        - k: the k th task token in the sorted order
     returns:
         for any participant i,
         - tte:
-            (i, j, k) -> time from the j th event to the next event k
+            (i, j, k) -> time from j to the next k
         - no_event:
-            (i, j, k) -> 1 if event k does not appear after (not including) the j th event else 0
+            (i, j, k) -> 1 if k does not appear after (not including) j else 0
         - token_index
-            (i, j, k) -> n if the n th event is the next event k after (not including) the j th event
+            (i, j, k) -> n if [the n th event] == k after (not including) j
     """
 
     assert age.shape == targets_age.shape == targets.shape
     B = age.shape[0]
     L = age.shape[1]
-    V = vocab_size
+    V = task_tokens.shape[0]
+    device = targets.device
 
     # time_to_next_token: [B, L, L]
     time_to_next_token = broadcast_delta_t(age, targets_age)
 
-    # token_index: [B, L, V]; targets: [B, L]
-    # token_index: (i, j, k) -> y where y = argmin(targets[i][y] == k) s.t. (j < y) or -1
-    targets_exp = targets.clone().view(-1, 1, L).expand(B, L, L)
+    targets_clone = targets.clone()
+    targets_exp = targets_clone.view(-1, 1, L).expand(B, L, L)
     targets_exp = torch.triu(
         targets_exp, diagonal=0
     )  # invalidate retrospective targets
-    L_idx = torch.arange(L, device=targets.device).view(1, L).expand(L, L)
+
+    token_map = torch.arange(vocab_size, device=device)
+    token_map[~torch.isin(token_map, task_tokens)] = 0  # invalidate non-task targets
+    token_map[token_map > 0] = torch.arange(1, V + 1, device=device)
+    targets_exp = token_map[targets_exp]
+
+    L_idx = torch.arange(L, device=device).view(1, L).expand(L, L)
     L_idx_exp = L_idx.unsqueeze(0).expand(B, L, L)
+
+    # token_index: [B, L, V+1]
+    # token_index: (i, j, k) -> y where y = argmin(targets[i][y] == the k-1 th task token) s.t. (j < y) or -1
+    token_index = torch.full((B, L, V + 1), -1, device=device)
     # token_index[i][j1][targets[i][j1][j2]] = L_idx_exp[i][j1][j2]
     # -> token_index[i][j1][targets[i][j1][j2]] = j2
-    token_index = torch.full((B, L, V), -1, device=targets.device)
     token_index = token_index.scatter_reduce(
         dim=-1, index=targets_exp, src=L_idx_exp, reduce="amin", include_self=False
     )
+    # remove the 0th position in the V dimension
+    token_index = token_index[:, :, 1:]
     no_event = token_index == -1
 
     # tte: [B, L, V]

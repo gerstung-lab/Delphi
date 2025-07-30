@@ -66,11 +66,17 @@ def time_bins(request: FixtureRequest):
     return torch.Tensor(np.array([i * bin_width for i in np.arange(n_bins + 1)]))
 
 
+@pytest.fixture(scope="class", params=[1, 20])
+def n_tasks(request: FixtureRequest):
+    return request.param
+
+
 class CaseGenerator:
 
-    def __init__(self, batch_size: int, seq_len: int, vocab_size: int):
+    def __init__(self, batch_size: int, seq_len: int, vocab_size: int, n_tasks: int):
 
         max_age = 100 * DAYS_PER_YEAR
+        torch.manual_seed(42)
 
         sample_shape = (batch_size, seq_len)
         timesteps = torch.randint(0, int(max_age), sample_shape)
@@ -84,6 +90,9 @@ class CaseGenerator:
         self.tokens[pad_mask] = 0
         self.timesteps[pad_mask] = -1e4
 
+        self.vocab_size = vocab_size
+        self.n_tasks = min(n_tasks, vocab_size - 1)
+
     @property
     def targets(self):
         return self.tokens[:, 1:]
@@ -96,10 +105,19 @@ class CaseGenerator:
     def targets_age(self):
         return self.timesteps[:, 1:]
 
+    @property
+    def task_tokens(self):
+        pdf = torch.ones((self.vocab_size))
+        pdf[0] = 0
+        tokens = torch.multinomial(pdf, num_samples=self.n_tasks, replacement=False)
+        return tokens
+
 
 @pytest.fixture(scope="class")
-def case_generator(batch_size: int, seq_len: int, vocab_size: int):
-    return CaseGenerator(batch_size=batch_size, seq_len=seq_len, vocab_size=vocab_size)
+def case_generator(batch_size: int, seq_len: int, vocab_size: int, n_tasks: int):
+    return CaseGenerator(
+        batch_size=batch_size, seq_len=seq_len, vocab_size=vocab_size, n_tasks=n_tasks
+    )
 
 
 @pytest.fixture(scope="class")
@@ -115,6 +133,11 @@ def targets_age(case_generator: CaseGenerator):
 @pytest.fixture(scope="class")
 def age(case_generator: CaseGenerator):
     return case_generator.age
+
+
+@pytest.fixture(scope="class")
+def task_tokens(case_generator: CaseGenerator):
+    return case_generator.task_tokens
 
 
 def pytest_generate_tests(metafunc: Metafunc):
