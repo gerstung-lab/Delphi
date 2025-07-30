@@ -8,7 +8,7 @@ from omegaconf import OmegaConf
 from tqdm import tqdm
 
 from delphi.data.dataset import (
-    Dataset,
+    M4Dataset,
     UKBDataConfig,
     eval_iter,
     load_sequences,
@@ -60,7 +60,7 @@ def forward(
         data_cfg = train_cfg.val_data
     else:
         data_cfg = cfg.data
-    ds = Dataset(data_cfg)
+    ds = M4Dataset(data_cfg)
 
     n_participants = len(ds) if cfg.subsample is None else cfg.subsample
 

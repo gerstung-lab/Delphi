@@ -8,7 +8,7 @@ import torch
 from omegaconf import OmegaConf
 
 from delphi.data.dataset import (
-    Dataset,
+    M4Dataset,
     UKBDataConfig,
     load_sequences,
     pad_trailing_biomarkers,
@@ -101,7 +101,7 @@ def train(cfg: TrainConfig):
     assert set(cfg.train_data.biomarkers).issubset(set(cfg.model.biomarkers.keys()))
     print(f"using memmap mode: {cfg.memmap}")
     print("training dataset")
-    train_ds = Dataset(cfg=cfg.train_data, memmap=cfg.memmap)
+    train_ds = M4Dataset(cfg=cfg.train_data, memmap=cfg.memmap)
     train_it = train_iter(rng=rng, total_size=len(train_ds), batch_size=cfg.batch_size)
     train_loader = load_sequences(it=train_it, dataset=train_ds)
 
@@ -118,7 +118,7 @@ def train(cfg: TrainConfig):
     if cfg.infer_val_transforms:
         cfg.val_data.transforms = cfg.train_data.transforms
     print("validation dataset")
-    val_ds = Dataset(cfg=cfg.val_data, memmap=cfg.memmap)
+    val_ds = M4Dataset(cfg=cfg.val_data, memmap=cfg.memmap)
 
     if cfg.model.vocab_size is None:
         cfg.model.vocab_size = train_ds.vocab_size

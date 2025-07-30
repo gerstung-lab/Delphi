@@ -1,5 +1,8 @@
 import os
+from abc import ABC, abstractmethod
+from copy import copy
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Iterator, List, Optional
 
 import numpy as np
@@ -123,7 +126,7 @@ def train_iter(
 
 def load_sequences(
     it: Iterator,
-    dataset: "Dataset",
+    dataset: "M4Dataset",
 ) -> Iterator:
 
     for idx in it:
@@ -169,17 +172,21 @@ def collate_batch_time(batch_time: list[np.ndarray]) -> np.ndarray:
 
 
 @dataclass
-class UKBDataConfig:
+class BaseDataConfig:
     data_dir: str = "ukb_real_data"
     subject_list: str = "participants.bin"
+    seed: int = 42
+    transforms: Optional[List[TransformArgs]] = None
+
+
+@dataclass
+class UKBDataConfig(BaseDataConfig):
     expansion_pack_dir: str = "ukb_real_data/expansion_packs"
     expansion_packs: list[str] = field(default_factory=list)
     biomarker_dir: str = "ukb_real_data/biomarkers"
     biomarkers: list[str] = field(default_factory=list)
     must_have_biomarkers: list[str] = field(default_factory=list)
     first_time_only: bool = True
-    seed: int = 42
-    transforms: Optional[List[TransformArgs]] = None
 
 
 class Biomarker:
@@ -268,23 +275,30 @@ class ExpansionPack:
         return x_pid, t_pid
 
 
-class Dataset:
+def load_transforms(cfg: UKBDataConfig, tokenizer: Tokenizer):
+    transforms = []
+    if cfg.transforms is not None:
+        for transform in cfg.transforms:
+            transform = parse_transform(transform, tokenizer=tokenizer, seed=cfg.seed)
+            transforms.append(transform)
+    return transforms
+
+
+class BaseDataset(ABC):
 
     def __init__(self, cfg: UKBDataConfig, memmap: bool = False):
-        self.data_dir = os.path.join(DELPHI_DATA_DIR, cfg.data_dir)
-        print(f"building dataset at {self.data_dir}")
-        tokenizer_path = os.path.join(self.data_dir, "tokenizer.yaml")
+
+        dataset_dir = Path(DELPHI_DATA_DIR) / cfg.data_dir
+        print(f"building dataset at {dataset_dir}")
+        tokenizer_path = dataset_dir / "tokenizer.yaml"
         print(f"\t– loading tokenizer from {tokenizer_path}")
         with open(tokenizer_path, "r") as f:
-            base_tokenizer = yaml.safe_load(f)
+            self.tokenizer = yaml.safe_load(f)
 
-        p2i_path = os.path.join(self.data_dir, "p2i.csv")
-        self.p2i = pd.read_csv(p2i_path, index_col="pid")
-        self.start_pos = self.p2i["start_pos"].to_dict()
-        self.seq_len = self.p2i["seq_len"].to_dict()
-        participants_path = os.path.join(DELPHI_DATA_DIR, cfg.subject_list)
-        tokens_path = os.path.join(self.data_dir, "data.bin")
-        time_steps_path = os.path.join(self.data_dir, "time.bin")
+        self.p2i = pd.read_csv(dataset_dir / "p2i.csv", index_col="pid")
+        participants_path = Path(DELPHI_DATA_DIR) / cfg.subject_list
+        tokens_path = dataset_dir / "data.bin"
+        time_steps_path = dataset_dir / "time.bin"
         if memmap:
             self.participants = np.memmap(participants_path, dtype=np.uint32, mode="r")
             self.tokens = np.memmap(tokens_path, dtype=np.uint32, mode="r")
@@ -293,6 +307,31 @@ class Dataset:
             self.participants = np.fromfile(participants_path, dtype=np.uint32)
             self.tokens = np.fromfile(tokens_path, dtype=np.uint32)
             self.time_steps = np.fromfile(time_steps_path, dtype=np.uint32)
+        self.start_pos = self.p2i["start_pos"].to_dict()
+        self.seq_len = self.p2i["seq_len"].to_dict()
+
+    def __len__(self):
+        return self.participants.size
+
+    @property
+    def vocab_size(self):
+        return self.tokenizer.vocab_size
+
+    @abstractmethod
+    def get_raw_batch(self, batch_idx: np.ndarray):
+        pass
+
+    @abstractmethod
+    def get_batch(self, batch_idx: np.ndarray):
+        pass
+
+
+class M4Dataset(BaseDataset):
+
+    def __init__(self, cfg: UKBDataConfig, memmap: bool = False):
+
+        super().__init__(cfg=cfg, memmap=memmap)
+        base_tokenizer = copy(self.tokenizer)
 
         cfg.expansion_packs.sort()
         self.expansion_packs = []
@@ -308,13 +347,13 @@ class Dataset:
                 add_tokenizer = yaml.safe_load(f)
 
             base_tokenizer, offset = update_tokenizer(
-                base_tokenizer=base_tokenizer, add_tokenizer=add_tokenizer
+                base_tokenizer=base_tokenizer, add_tokenizer=add_tokenizer  # type: ignore
             )
             self.expansion_pack_tokenizers.append(add_tokenizer)
             self.expansion_packs.append(
                 ExpansionPack(path=pack_path, offset=offset, memmap=memmap)
             )
-        self.tokenizer = Tokenizer(base_tokenizer)
+        self.tokenizer = Tokenizer(base_tokenizer)  # type: ignore
 
         self.biomarker_dir = os.path.join(DELPHI_DATA_DIR, cfg.biomarker_dir)
         self.mod_ds = {}
@@ -338,23 +377,9 @@ class Dataset:
             ]
         print(f"{self.participants.size}/{old_n} remaining")
 
-        self.transforms = []
-        if cfg.transforms is not None:
-            for transform in cfg.transforms:
-                transform = parse_transform(
-                    transform, tokenizer=self.tokenizer, seed=cfg.seed
-                )
-                self.transforms.append(transform)
+        self.transforms = load_transforms(cfg=cfg, tokenizer=self.tokenizer)
 
         print(f"built dataset!")
-
-    def __len__(self):
-
-        return self.participants.size
-
-    @property
-    def vocab_size(self):
-        return self.tokenizer.vocab_size
 
     @property
     def expansion_tokens(self):
@@ -426,7 +451,7 @@ class Dataset:
         return P, X, T, M, biomarker_X
 
 
-class PromptDataset(Dataset):
+class PromptDataset(M4Dataset):
 
     def __init__(
         self,
