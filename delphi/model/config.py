@@ -19,9 +19,9 @@ class LossConfig:
     zero_inflate: bool = False
     zero_inflate_projector: str = "linear"
     motor: bool = False
-    motor_n_bin: int = 4
-    motor_time_horizon: int = 600
     motor_n_hidden: int = 32
+    motor_time_bins: list = field(default_factory=list)
+    motor_task_tokens: list = field(default_factory=list)
 
 
 @dataclass
@@ -79,19 +79,19 @@ def validate_model_config_for_finetuning(
         ), f"biomarker {biomarker} embed configs must match between finetune and pretrain configs"
 
 
-def parse_ignore_tokens(ignore_tokens: list[str]) -> list:
-    if not ignore_tokens:
+def parse_token_list(token_list: list[str]) -> list:
+    if not token_list:
         return []
 
     parsed = []
-    for ignore_token in ignore_tokens:
-        if ignore_token.endswith(".yaml") or ignore_token.endswith(".yml"):
-            with open(ignore_token, "r") as f:
+    for token in token_list:
+        if token.endswith(".yaml") or token.endswith(".yml"):
+            with open(token, "r") as f:
                 tokens = yaml.safe_load(f)
             if not isinstance(tokens, list):
-                raise ValueError(f"Expected a list of tokens in {ignore_token}")
+                raise ValueError(f"Expected a list of tokens in {token}")
             parsed.extend(tokens)
         else:
-            parsed.append(ignore_token)
+            parsed.append(token)
 
     return parsed

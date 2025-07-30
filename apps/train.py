@@ -18,7 +18,7 @@ from delphi.env import DELPHI_CKPT_DIR
 from delphi.log import TrainLogConfig, TrainLogger
 from delphi.model.config import (
     DelphiConfig,
-    parse_ignore_tokens,
+    parse_token_list,
     validate_model_config,
     validate_model_config_for_finetuning,
 )
@@ -133,12 +133,16 @@ def train(cfg: TrainConfig):
 
     print(f"ignored tokens:")
     print(f"\t- {cfg.model.ignore_tokens}")
-    ignore_tokens = parse_ignore_tokens(cfg.model.ignore_tokens)
+    ignore_tokens = parse_token_list(cfg.model.ignore_tokens)
     if cfg.ignore_expansion_tokens:
         print(f"\t- all expansion pack tokens")
         ignore_tokens = set(ignore_tokens).union(set(train_ds.expansion_tokens))
         ignore_tokens = list(ignore_tokens)
     cfg.model.ignore_tokens = train_ds.tokenizer.encode(ignore_tokens)  # type: ignore
+
+    if cfg.model.loss.motor:
+        motor_task_tokens = parse_token_list(cfg.model.loss.motor_task_tokens)
+        cfg.model.loss.motor_task_tokens = train_ds.tokenizer.encode(motor_task_tokens)  # type: ignore
 
     iter_num = 0
 

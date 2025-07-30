@@ -103,7 +103,7 @@ class MotorHead(nn.Module):
             targets_age=targets_age,
             targets=targets,
             task_tokens=self.task_tokens,
-            vocab_size=self.config.vocab_size,
+            vocab_size=self.config.vocab_size,  # type: ignore
         )
 
         # last_censor: [B, L]

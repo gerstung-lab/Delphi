@@ -15,7 +15,7 @@ from delphi.model.components import (
     ties_adjusted_delta_t,
 )
 from delphi.model.config import DelphiConfig
-from delphi.model.loss import CompetingExpHead, CrosseEntropyHead
+from delphi.model.loss import CompetingExpHead, CrossEntropyHead, MotorHead
 
 
 class LayerNorm(nn.Module):
@@ -138,8 +138,11 @@ class Delphi(nn.Module):
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.transformer.embed.token_embedding.weight = self.lm_head.weight
 
-        self.ce_head = CrosseEntropyHead(config)
-        self.dt_head = CompetingExpHead(config)
+        self.ce_head = CrossEntropyHead(config)
+        if config.loss.motor:
+            self.dt_head = MotorHead(config)
+        else:
+            self.dt_head = CompetingExpHead(config)
 
         # init all weights
         self.apply(self._init_weights)
@@ -208,12 +211,16 @@ class Delphi(nn.Module):
                 eps=0.0 if self.config.loss.zero_inflate else 1.0,
             )
 
-            loss_ce = self.ce_head(logits=logits_cp, targets=targets)
-            loss_dt = self.dt_head(logits=logits, delta_t=dt)
-
             is_valid_target = target_mask(targets, ignore_tokens=ignored_tokens)
+            loss_ce = self.ce_head(logits=logits_cp, targets=targets)
             loss_ce = torch.mean(loss_ce[is_valid_target])
-            loss_dt = torch.mean(loss_dt[is_valid_target])
+            if self.config.loss.motor:
+                loss_dt = self.dt_head(
+                    h=x, age=age, targets_age=targets_age, targets=targets
+                )
+            else:
+                loss_dt = self.dt_head(logits=logits, delta_t=dt)
+                loss_dt = torch.mean(loss_dt[is_valid_target])
 
             loss = {
                 "loss_ce": loss_ce * self.config.loss.ce_beta,
