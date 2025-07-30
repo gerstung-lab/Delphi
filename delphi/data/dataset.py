@@ -34,6 +34,25 @@ def get_p2i(data):
     return np.array(p2i)
 
 
+def subsample_tricolumnar(
+    XT: np.ndarray,
+    logits: np.ndarray,
+    subsample: Optional[int] = None,
+):
+    """
+    subsample the number of trajectories to avoid excessive RAM usage during subsequent tricolumnar_to_2d conversion
+    """
+
+    p2i = get_p2i(XT)
+    N = p2i.shape[0]
+    if subsample is not None and subsample <= N:
+        n_to_keep = p2i[:subsample, 1].sum()
+        XT = XT[:n_to_keep]
+        logits = logits[:n_to_keep]
+
+    return XT, logits
+
+
 def tricolumnar_to_2d(data):
     """
     Convert a tricolumnar array to a 2D array.

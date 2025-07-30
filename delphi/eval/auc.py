@@ -5,10 +5,11 @@ from typing import Optional
 
 import numpy as np
 import yaml
+from torch import logit
 from tqdm import tqdm
 
 from delphi import DAYS_PER_YEAR
-from delphi.data.dataset import tricolumnar_to_2d
+from delphi.data.dataset import subsample_tricolumnar, tricolumnar_to_2d
 from delphi.eval import eval_task
 from delphi.tokenizer import Gender, Tokenizer
 
@@ -28,6 +29,7 @@ class CalibrateAUCArgs:
     age_groups: TimeBins = field(default_factory=TimeBins)
     min_time_gap: float = 0.1
     event_input_only: bool = True
+    subsample: Optional[int] = None
 
 
 def parse_time_bins(time_bins: TimeBins) -> list[tuple[int, int]]:
@@ -147,6 +149,9 @@ def calibrate_auc(
     )
     XT = np.fromfile(xt_path, dtype=np.uint32).reshape(-1, 3)
 
+    XT, logits = subsample_tricolumnar(
+        XT=XT, logits=logits, subsample=task_args.subsample
+    )
     X, T = tricolumnar_to_2d(XT)
     sub_idx, pos_idx = np.nonzero(T != -1e4)
 
