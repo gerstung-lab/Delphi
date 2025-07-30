@@ -5,13 +5,12 @@ from typing import Optional
 
 import numpy as np
 import yaml
-from torch import logit
 from tqdm import tqdm
 
 from delphi import DAYS_PER_YEAR
 from delphi.data.dataset import subsample_tricolumnar, tricolumnar_to_2d
 from delphi.eval import eval_task
-from delphi.tokenizer import Gender, Tokenizer
+from delphi.tokenizer import Gender, load_tokenizer_from_yaml
 
 
 @dataclass
@@ -129,7 +128,6 @@ def calibrate_auc(
     task_name: str,
     task_input: str,
     ckpt: str,
-    tokenizer: Tokenizer,
     **kwargs,
 ) -> None:
 
@@ -140,6 +138,8 @@ def calibrate_auc(
 
     logbook_path = os.path.join(ckpt, task_input, f"{task_name}.json")
     logbook = {}
+
+    tokenizer = load_tokenizer_from_yaml(os.path.join(ckpt, "tokenizer.yaml"))
 
     input_dir = os.path.join(ckpt, task_input)
     logits_path = os.path.join(input_dir, "logits.bin")

@@ -5,10 +5,9 @@ from typing import Any
 
 from omegaconf import OmegaConf
 
+from delphi.env import DELPHI_CKPT_DIR
 from delphi.eval import clock, eval_task
 from delphi.eval.auc import CalibrateAUCArgs
-from delphi.model.transformer import load_model
-from delphi.tokenizer import load_tokenizer_from_ckpt
 
 
 class TaskType(Enum):
@@ -37,10 +36,8 @@ class TaskConfig:
 @clock
 def eval(cfg: TaskConfig, ckpt: str):
 
-    ckpt = os.path.join(os.environ["DELPHI_CKPT_DIR"], ckpt)
+    ckpt = os.path.join(DELPHI_CKPT_DIR, ckpt)
     assert os.path.exists(ckpt), f"checkpoint {ckpt} does not exist."
-    model, _ = load_model(ckpt)
-    tokenizer = load_tokenizer_from_ckpt(ckpt)
 
     task_type = TaskType(cfg.task_type)
     args_type = task_type_to_args_type[task_type]
@@ -53,8 +50,6 @@ def eval(cfg: TaskConfig, ckpt: str):
         task_name=cfg.task_name,
         task_input=cfg.task_input,
         ckpt=ckpt,
-        model=model,
-        tokenizer=tokenizer,
     )
 
 
