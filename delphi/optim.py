@@ -19,7 +19,7 @@ class OptimConfig:
     grad_clip: float = 1.0  # clip gradients at this value, or disable if == 0.0
 
     # learning rate decay settings
-    schedule: str = "consine"  # consine, constant
+    schedule: str = "cosine"  # consine, constant
     warmup_iters: int = 2000  # how many steps to warm up for
     lr_decay_iters: int = 10000  # should be ~= max_iters per Chinchilla
     min_lr: float = (
