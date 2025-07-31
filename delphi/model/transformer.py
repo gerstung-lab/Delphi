@@ -11,7 +11,7 @@ from torch.nn import functional as F
 from delphi.config import dataclass_from_dict
 from delphi.model.components import (
     DelphiEmbedding,
-    attention_mask,
+    causal_attention_mask,
     target_mask,
     ties_adjusted_delta_t,
 )
@@ -197,8 +197,8 @@ class Delphi(GPT2Base):
         x = self.transformer.embed(x0=idx, t0=age, M=modality, biomarker_x=biomarker)
         x = self.transformer.drop(x)
 
-        attn_mask = attention_mask(
-            t0=age, m0=modality, t1=targets_age, mask_ties=self.config.mask_ties
+        attn_mask = causal_attention_mask(
+            pad=(modality > 0), t1=targets_age, t0=age, mask_ties=self.config.mask_ties
         )
 
         att = []

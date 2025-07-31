@@ -152,27 +152,28 @@ class ZeroInflateProjector(nn.Module):
         return x
 
 
-def attention_mask(
-    t0: torch.Tensor,
-    m0: torch.Tensor,
-    mask_ties: bool,
+def causal_attention_mask(
+    pad: torch.Tensor,
+    mask_ties: bool = False,
+    t0: Optional[torch.Tensor] = None,
     t1: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
 
-    b, l = m0.shape[0], m0.shape[1]
+    b, l = pad.shape
 
-    lower_tri_mask = torch.tril(torch.ones((l, l), device=m0.device))
+    lower_tri_mask = torch.tril(torch.ones((l, l), device=t0.device))
     lower_tri_mask = lower_tri_mask.view(1, l, l)
-    pad_mask = (m0 > 0).view(b, 1, l).to(torch.int)
+    pad_mask = pad.view(b, 1, l).to(torch.int)
     attn_mask = pad_mask * lower_tri_mask
 
     if mask_ties:
+        assert t0 is not None
         if t1 is not None:
             ties_mask = (t1.view(b, l, 1) != t0.view(b, 1, l)).to(torch.int)
             attn_mask *= ties_mask
 
     attn_mask += (attn_mask.sum(-1, keepdim=True) == 0) * torch.diag(
-        torch.ones(m0.size(1), device=m0.device)
+        torch.ones(l, device=t0.device)
     ) > 0
 
     return attn_mask.unsqueeze(1)
