@@ -1,7 +1,7 @@
 import os
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
-from typing import Optional
+from typing import Iterator, Optional
 
 import numpy as np
 import torch
@@ -206,6 +206,40 @@ def train(cfg: TrainConfig):
         print("compiling the model... (takes a ~minute)")
         model = torch.compile(model)  # requires PyTorch 2.0
 
+    logger = TrainLogger(
+        cfg=cfg.log,
+        exp_cfg=asdict(cfg),
+        dump_dir=run_dir,
+        model=model,  # type: ignore
+        tokenizer=train_ds.tokenizer,
+        optimizer=optimizer,
+        scheduler=scheduler,
+    )
+
+    def mini_step(loader: Iterator, validation_loss_mode: bool = False):
+
+        _, X, T, M, biomarker_X = next(loader)
+        X, T, M = pad_trailing_biomarkers(X, T, M)
+        X, T, M = X.to(cfg.device), T.to(cfg.device), M.to(cfg.device)
+        biomarker_X = {k: v.to(cfg.device) for k, v in biomarker_X.items()}
+
+        X_t0, X_t1 = X[:, :-1], X[:, 1:]
+        T_t0, T_t1 = T[:, :-1], T[:, 1:]
+        M_t0, _ = M[:, :-1], M[:, 1:]
+
+        with ctx:
+            _, loss, _ = model(
+                idx=X_t0,
+                targets=X_t1,
+                modality=M_t0,
+                age=T_t0,
+                targets_age=T_t1,
+                biomarker=biomarker_X,
+                validation_loss_mode=validation_loss_mode,
+            )
+
+        return loss
+
     @torch.no_grad()
     def estimate_loss():
         model.eval()
@@ -222,25 +256,7 @@ def train(cfg: TrainConfig):
             eval_loss[split] = {"loss_ce": 0, "loss_dt": 0}
             for _ in range(cfg.eval_iters):
 
-                _, X, T, M, biomarker_X = next(loader)
-                X, T, M = pad_trailing_biomarkers(X, T, M)
-                X, T, M = X.to(cfg.device), T.to(cfg.device), M.to(cfg.device)
-                biomarker_X = {k: v.to(cfg.device) for k, v in biomarker_X.items()}
-
-                X_t0, X_t1 = X[:, :-1], X[:, 1:]
-                T_t0, T_t1 = T[:, :-1], T[:, 1:]
-                M_t0, _ = M[:, :-1], M[:, 1:]
-
-                with ctx:
-                    _, loss, _ = model(
-                        idx=X_t0,
-                        age=T_t0,
-                        modality=M_t0,
-                        targets=X_t1,
-                        targets_age=T_t1,
-                        biomarker=biomarker_X,
-                        validation_loss_mode=True,
-                    )
+                loss = mini_step(loader=loader, validation_loss_mode=True)
 
                 eval_loss[split]["loss_ce"] += loss["loss_ce"].detach().cpu()
                 eval_loss[split]["loss_dt"] += loss["loss_dt"].detach().cpu()
@@ -251,16 +267,6 @@ def train(cfg: TrainConfig):
         model.train()
 
         return eval_loss["train"], eval_loss["val"]
-
-    logger = TrainLogger(
-        cfg=cfg.log,
-        exp_cfg=asdict(cfg),
-        dump_dir=run_dir,
-        model=model,  # type: ignore
-        tokenizer=train_ds.tokenizer,
-        optimizer=optimizer,
-        scheduler=scheduler,
-    )
 
     while True:
 
@@ -275,25 +281,7 @@ def train(cfg: TrainConfig):
         # forward backward update, with optional gradient accumulation to simulate larger batch size
         # and using the GradScaler if data type is float16``
         for _ in range(cfg.gradient_accumulation_steps):
-
-            _, X, T, M, biomarker_X = next(train_loader)
-            X, T, M = pad_trailing_biomarkers(X, T, M)
-            X, T, M = X.to(cfg.device), T.to(cfg.device), M.to(cfg.device)
-            biomarker_X = {k: v.to(cfg.device) for k, v in biomarker_X.items()}
-
-            X_t0, X_t1 = X[:, :-1], X[:, 1:]
-            T_t0, T_t1 = T[:, :-1], T[:, 1:]
-            M_t0, _ = M[:, :-1], M[:, 1:]
-
-            with ctx:
-                _, loss, _ = model(
-                    idx=X_t0,
-                    targets=X_t1,
-                    modality=M_t0,
-                    age=T_t0,
-                    targets_age=T_t1,
-                    biomarker=biomarker_X,
-                )
+            loss = mini_step(loader=train_loader)
 
             # backward pass, with gradient scaling if training in fp16
             loss_agg = loss["loss_ce"] + loss["loss_dt"]
