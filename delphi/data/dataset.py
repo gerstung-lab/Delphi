@@ -1,6 +1,4 @@
 import os
-from abc import ABC, abstractmethod
-from copy import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator, List, Optional
@@ -284,50 +282,40 @@ def load_transforms(cfg: BaseDataConfig, tokenizer: Tokenizer):
     return transforms
 
 
-class BaseDataset(ABC):
+def load_core_data_package(cfg: BaseDataConfig, memmap: bool = False):
 
-    def __init__(self, cfg: BaseDataConfig, memmap: bool = False):
+    dataset_dir = Path(DELPHI_DATA_DIR) / cfg.data_dir
+    print(f"building dataset at {dataset_dir}")
+    tokenizer_path = dataset_dir / "tokenizer.yaml"
+    print(f"\t– loading tokenizer from {tokenizer_path}")
+    with open(tokenizer_path, "r") as f:
+        tokenizer = yaml.safe_load(f)
 
-        dataset_dir = Path(DELPHI_DATA_DIR) / cfg.data_dir
-        print(f"building dataset at {dataset_dir}")
-        tokenizer_path = dataset_dir / "tokenizer.yaml"
-        print(f"\t– loading tokenizer from {tokenizer_path}")
-        with open(tokenizer_path, "r") as f:
-            self.tokenizer = yaml.safe_load(f)
+    p2i = pd.read_csv(dataset_dir / "p2i.csv", index_col="pid")
+    participants_path = Path(DELPHI_DATA_DIR) / cfg.subject_list
+    tokens_path = dataset_dir / "data.bin"
+    time_steps_path = dataset_dir / "time.bin"
+    if memmap:
+        participants = np.memmap(participants_path, dtype=np.uint32, mode="r")
+        tokens = np.memmap(tokens_path, dtype=np.uint32, mode="r")
+        timesteps = np.memmap(time_steps_path, dtype=np.uint32, mode="r")
+    else:
+        participants = np.fromfile(participants_path, dtype=np.uint32)
+        tokens = np.fromfile(tokens_path, dtype=np.uint32)
+        timesteps = np.fromfile(time_steps_path, dtype=np.uint32)
 
-        self.p2i = pd.read_csv(dataset_dir / "p2i.csv", index_col="pid")
-        participants_path = Path(DELPHI_DATA_DIR) / cfg.subject_list
-        tokens_path = dataset_dir / "data.bin"
-        time_steps_path = dataset_dir / "time.bin"
-        if memmap:
-            self.participants = np.memmap(participants_path, dtype=np.uint32, mode="r")
-            self.tokens = np.memmap(tokens_path, dtype=np.uint32, mode="r")
-            self.time_steps = np.memmap(time_steps_path, dtype=np.uint32, mode="r")
-        else:
-            self.participants = np.fromfile(participants_path, dtype=np.uint32)
-            self.tokens = np.fromfile(tokens_path, dtype=np.uint32)
-            self.time_steps = np.fromfile(time_steps_path, dtype=np.uint32)
-        self.start_pos = self.p2i["start_pos"].to_dict()
-        self.seq_len = self.p2i["seq_len"].to_dict()
-
-    def __len__(self):
-        return self.participants.size
-
-    @property
-    def vocab_size(self):
-        return self.tokenizer.vocab_size
-
-    @abstractmethod
-    def get_batch(self, batch_idx: np.ndarray):
-        pass
+    return tokenizer, p2i, participants, tokens, timesteps
 
 
-class M4Dataset(BaseDataset):
+class M4Dataset:
 
     def __init__(self, cfg: UKBDataConfig, memmap: bool = False):
 
-        super().__init__(cfg=cfg, memmap=memmap)
-        base_tokenizer = copy(self.tokenizer)
+        base_tokenizer, self.p2i, self.participants, self.tokens, self.time_steps = (
+            load_core_data_package(cfg=cfg, memmap=memmap)
+        )
+        self.start_pos = self.p2i["start_pos"].to_dict()
+        self.seq_len = self.p2i["seq_len"].to_dict()
 
         cfg.expansion_packs.sort()
         self.expansion_packs = []
@@ -376,6 +364,13 @@ class M4Dataset(BaseDataset):
         self.transforms = load_transforms(cfg=cfg, tokenizer=self.tokenizer)
 
         print(f"built dataset!")
+
+    def __len__(self):
+        return self.participants.size
+
+    @property
+    def vocab_size(self):
+        return self.tokenizer.vocab_size
 
     @property
     def expansion_tokens(self):
