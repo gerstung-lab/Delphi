@@ -187,12 +187,9 @@ class TrainLogger:
 
             wandb.define_metric("step")
             wandb.define_metric("lr", step_metric="step")
-            wandb.define_metric("val/loss_ce", step_metric="step")
-            wandb.define_metric("val/loss_dt", step_metric="step")
             wandb.define_metric("val/loss", step_metric="step")
-            wandb.define_metric("train/loss_ce", step_metric="step")
-            wandb.define_metric("train/loss_dt", step_metric="step")
             wandb.define_metric("train/loss", step_metric="step")
+            self.addon_metrics = set()
 
             wandb.summary["model_params"] = model.num_params
             for name, param in self.model.named_parameters():
@@ -228,20 +225,22 @@ class TrainLogger:
         torch.save(checkpoint, ckpt_path)
 
     def eval_step(self, step: int, loss: dict[str, torch.Tensor]):
-        loss_ce = loss["loss_ce"].item()
-        loss_dt = loss["loss_dt"].item()
-        lossf = loss_ce + loss_dt
+
+        lossf = 0.0
+        log_dict = {"step": step, "val/loss": lossf}
+        for loss_key, loss_pt in loss.items():
+            metric = f"val/{loss_key}"
+            log_dict[metric] = loss_pt.item()
+            if metric not in self.addon_metrics:
+                wandb.define_metric(metric, step_metric="step")
+                self.addon_metrics.add(metric)
+            lossf += loss_pt.item()
+
         print(f"iter {step}: val loss {lossf:.4f}")
         if self.cfg.always_ckpt_after_eval or lossf < self.best_val_loss:
             self.save_ckpt(step, ckpt_fname="ckpt.pt")
 
         if self.wandb:
-            log_dict = {
-                "step": step,
-                "val/loss": lossf,
-                "val/loss_ce": loss_ce,
-                "val/loss_dt": loss_dt,
-            }
             wandb.log(log_dict)
 
         self.best_val_loss = min(lossf, self.best_val_loss)
@@ -262,19 +261,23 @@ class TrainLogger:
         step: int,
         loss: dict[str, torch.Tensor],
     ):
+        lossf = 0.0
+        log_dict = {
+            "step": step,
+            "train/loss": lossf,
+            "lr": self.scheduler.get_last_lr()[0],
+        }
         if step % self.cfg.log_interval == 0:
-            loss_ce = loss["loss_ce"].item()
-            loss_dt = loss["loss_dt"].item()
-            lossf = loss_ce + loss_dt
+            for loss_key, loss_pt in loss.items():
+                metric = f"train/{loss_key}"
+                log_dict[metric] = loss_pt.item()
+                if metric not in self.addon_metrics:
+                    wandb.define_metric(metric, step_metric="step")
+                    self.addon_metrics.add(metric)
+                lossf += loss_pt.item()
+
             print(f"iter {step}: loss {lossf:.4f}")
             if self.wandb:
-                log_dict = {
-                    "step": step,
-                    "train/loss_ce": loss_ce,
-                    "train/loss_dt": loss_dt,
-                    "train/loss": lossf,
-                    "lr": self.scheduler.get_last_lr()[0],
-                }
                 wandb.log(log_dict)
                 self.log_grad()
 
