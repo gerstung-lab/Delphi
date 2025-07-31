@@ -5,7 +5,7 @@ from functools import partial
 
 import torch
 
-from delphi.model.transformer import GPT2Base, LayerNorm
+from delphi.model.transformer import LayerNorm
 
 
 @dataclass
@@ -47,7 +47,7 @@ def get_constant_lr(it: int, cfg: OptimConfig) -> float:
 
 
 def configure_optimizers(
-    model: GPT2Base, cfg: OptimConfig, device_type: str
+    model: torch.nn.Module, cfg: OptimConfig, device_type: str
 ) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR]:
     """
     This long function is unfortunately doing something very simple and is being very defensive:

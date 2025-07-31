@@ -1,5 +1,4 @@
 import math
-from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
 
@@ -15,7 +14,7 @@ from delphi.model.components import (
     target_mask,
     ties_adjusted_delta_t,
 )
-from delphi.model.config import DelphiConfig
+from delphi.model.config import DelphiConfig, GPT2Config
 from delphi.model.loss import CompetingExpHead, CrossEntropyHead, MotorHead
 
 
@@ -121,30 +120,14 @@ class Block(nn.Module):
         return x, att
 
 
-class GPT2Base(nn.Module, ABC):
+def count_params(model: torch.nn.Module):
+    n_params = sum(p.numel() for p in model.parameters())
+    return n_params
 
-    def __init__(self, config):
-        super().__init__()
-        self.config = config
 
-        self.build_model(config)
+def initialize_weights(model: torch.nn.Module, config: GPT2Config):
 
-        self.apply(self._init_weights)
-        # apply special scaled init to the residual projections, per GPT-2 paper
-        for pn, p in self.named_parameters():
-            if pn.endswith("c_proj.weight"):
-                torch.nn.init.normal_(
-                    p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer)
-                )
-
-        print("number of parameters: %.2fM" % (self.num_params / 1e6,))
-
-    @property
-    def num_params(self):
-        n_params = sum(p.numel() for p in self.parameters())
-        return n_params
-
-    def _init_weights(self, module: torch.nn.Module):
+    def _init_weights(module: torch.nn.Module):
         if isinstance(module, nn.Linear):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
             if module.bias is not None:
@@ -152,16 +135,26 @@ class GPT2Base(nn.Module, ABC):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    @abstractmethod
-    def build_model(self, config):
-        pass
-
-    @abstractmethod
-    def forward(self, *args, **kwargs):
-        pass
+    model.apply(_init_weights)
+    # apply special scaled init to the residual projections, per GPT-2 paper
+    for pn, p in model.named_parameters():
+        if pn.endswith("c_proj.weight"):
+            torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer))
 
 
-class Delphi(GPT2Base):
+class Delphi(torch.nn.Module):
+
+    def __init__(self, config: DelphiConfig):
+        super().__init__()
+        self.config = config
+        self.build_model(config)
+        initialize_weights(self, config=config)
+        n_params = count_params(self)
+        print("number of parameters: %.2fM" % (n_params / 1e6,))
+
+    @property
+    def num_params(self):
+        return count_params(self)
 
     def build_model(self, config: DelphiConfig):
 
