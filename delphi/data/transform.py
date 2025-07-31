@@ -155,7 +155,7 @@ class CropBlockSize:
         if hasattr(self, "priority_modality"):
             priority_np[np.isin(M, self.priority_modality)] = 2
 
-        tiebreaker = self.rng.integers(0, M.shape[1], size=M.shape, dtype=np.uint8)
+        tiebreaker = self.rng.integers(0, M.shape[1], size=M.shape, dtype=np.uint32)
         s = np.lexsort((tiebreaker, priority_np), axis=1)
         s_inv = np.argsort(s, axis=1)
         to_keep = np.zeros_like(M, dtype=bool)
