@@ -132,6 +132,25 @@ def train(cfg: TrainConfig):
     print("validation dataset")
     val_ds = M4Dataset(cfg=cfg.val_data, memmap=cfg.memmap)
 
+    loaders_for_loss_estimates = {
+        "train": load_sequences(
+            it=train_iter(
+                rng=np.random.default_rng(cfg.seed),
+                total_size=len(train_ds),
+                batch_size=cfg.batch_size,
+            ),
+            dataset=train_ds,
+        ),
+        "val": load_sequences(
+            it=train_iter(
+                rng=np.random.default_rng(cfg.seed),
+                total_size=len(val_ds),
+                batch_size=cfg.batch_size,
+            ),
+            dataset=val_ds,
+        ),
+    }
+
     if cfg.model.vocab_size is None:
         cfg.model.vocab_size = train_ds.vocab_size
         print(
@@ -242,21 +261,13 @@ def train(cfg: TrainConfig):
         return loss
 
     @torch.no_grad()
-    def estimate_loss():
+    def estimate_loss(loaders: dict[str, Iterator]):
         model.eval()
         eval_loss = {}
         for split in ["train", "val"]:
-            ds = train_ds if split == "train" else val_ds
-            it = train_iter(
-                rng=rng,
-                total_size=len(ds),
-                batch_size=cfg.batch_size,
-            )
-            loader = load_sequences(it=it, dataset=ds)
-
             split_loss = defaultdict(float)
             for _ in range(cfg.eval_iters):
-                loss = mini_step(loader=loader, validation_loss_mode=True)
+                loss = mini_step(loader=loaders[split], validation_loss_mode=True)
                 for key in loss.keys():
                     split_loss[key] += loss[key].detach().cpu()
             split_loss = dict(split_loss)
@@ -272,7 +283,7 @@ def train(cfg: TrainConfig):
 
         # evaluate the loss on train/val sets and write checkpoints
         if iter_num % cfg.eval_interval == 0 and iter_num > 0:
-            _, val_loss = estimate_loss()
+            _, val_loss = estimate_loss(loaders_for_loss_estimates)
             logger.eval_step(step=iter_num, loss=val_loss)
 
         if iter_num == 0 and cfg.eval_only:
