@@ -275,7 +275,7 @@ class ExpansionPack:
         return x_pid, t_pid
 
 
-def load_transforms(cfg: UKBDataConfig, tokenizer: Tokenizer):
+def load_transforms(cfg: BaseDataConfig, tokenizer: Tokenizer):
     transforms = []
     if cfg.transforms is not None:
         for transform in cfg.transforms:
@@ -286,7 +286,7 @@ def load_transforms(cfg: UKBDataConfig, tokenizer: Tokenizer):
 
 class BaseDataset(ABC):
 
-    def __init__(self, cfg: UKBDataConfig, memmap: bool = False):
+    def __init__(self, cfg: BaseDataConfig, memmap: bool = False):
 
         dataset_dir = Path(DELPHI_DATA_DIR) / cfg.data_dir
         print(f"building dataset at {dataset_dir}")
@@ -316,10 +316,6 @@ class BaseDataset(ABC):
     @property
     def vocab_size(self):
         return self.tokenizer.vocab_size
-
-    @abstractmethod
-    def get_raw_batch(self, batch_idx: np.ndarray):
-        pass
 
     @abstractmethod
     def get_batch(self, batch_idx: np.ndarray):
