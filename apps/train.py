@@ -1,4 +1,5 @@
 import os
+from collections import defaultdict
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 from typing import Iterator, Optional
@@ -253,16 +254,15 @@ def train(cfg: TrainConfig):
             )
             loader = load_sequences(it=it, dataset=ds)
 
-            eval_loss[split] = {"loss_ce": 0, "loss_dt": 0}
+            split_loss = defaultdict(float)
             for _ in range(cfg.eval_iters):
-
                 loss = mini_step(loader=loader, validation_loss_mode=True)
-
-                eval_loss[split]["loss_ce"] += loss["loss_ce"].detach().cpu()
-                eval_loss[split]["loss_dt"] += loss["loss_dt"].detach().cpu()
-
-            eval_loss[split]["loss_ce"] /= cfg.eval_iters
-            eval_loss[split]["loss_dt"] /= cfg.eval_iters
+                for key in loss.keys():
+                    split_loss[key] += loss[key].detach().cpu()
+            split_loss = dict(split_loss)
+            for key in split_loss.keys():
+                split_loss[key] /= cfg.eval_iters
+            eval_loss[split] = split_loss
 
         model.train()
 
@@ -284,8 +284,8 @@ def train(cfg: TrainConfig):
             loss = mini_step(loader=train_loader)
 
             # backward pass, with gradient scaling if training in fp16
-            loss_agg = loss["loss_ce"] + loss["loss_dt"]
-            scaler.scale(loss_agg).backward()
+            loss_agg = sum([loss[key] for key in loss.keys()])
+            scaler.scale(loss_agg).backward()  # type: ignore
 
         # clip the gradient
         if cfg.optim.grad_clip != 0.0:
