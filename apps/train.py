@@ -84,6 +84,7 @@ def train(cfg: TrainConfig):
     run_dir = os.path.normpath(
         os.path.join(DELPHI_CKPT_DIR, cfg.ckpt_dir, cfg.log.run_name)
     )
+    os.makedirs(run_dir, exist_ok=True)
 
     device_type = (
         "cuda" if "cuda" in cfg.device else "cpu"
@@ -114,6 +115,8 @@ def train(cfg: TrainConfig):
     print(f"using memmap mode: {cfg.memmap}")
     print("training dataset")
     train_ds = M4Dataset(cfg=cfg.train_data, memmap=cfg.memmap)
+    tokenizer = train_ds.tokenizer
+    tokenizer.save_to_yaml(os.path.join(run_dir, "tokenizer.yaml"))
     train_it = train_iter(rng=rng, total_size=len(train_ds), batch_size=cfg.batch_size)
     train_loader = load_sequences(it=train_it, dataset=train_ds)
 
@@ -231,7 +234,6 @@ def train(cfg: TrainConfig):
         exp_cfg=asdict(cfg),
         dump_dir=run_dir,
         model=model,  # type: ignore
-        tokenizer=train_ds.tokenizer,
         optimizer=optimizer,
         scheduler=scheduler,
     )

@@ -9,8 +9,6 @@ import torch
 import wandb
 from omegaconf import OmegaConf
 
-from delphi.tokenizer import Tokenizer
-
 
 @dataclass
 class GenLogConfig:
@@ -168,7 +166,6 @@ class TrainLogger:
         exp_cfg: dict,
         dump_dir: str,
         model: torch.nn.Module,
-        tokenizer: Tokenizer,
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler.LambdaLR,
     ):
@@ -202,7 +199,6 @@ class TrainLogger:
         os.makedirs(dump_dir, exist_ok=True)
         with open(os.path.join(dump_dir, "config.yaml"), "w") as f:
             OmegaConf.save(config=exp_cfg, f=f)
-        tokenizer.save_to_yaml(os.path.join(dump_dir, "tokenizer.yaml"))
 
         self.best_val_loss = float("inf")
 
