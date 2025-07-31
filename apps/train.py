@@ -46,6 +46,15 @@ class TrainBaseConfig:
     # 'bfloat16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
     compile: bool = False  # use PyTorch 2.0 to compile the model to be faster
 
+    train_data: dict = field(default_factory=dict)
+    val_data: dict = field(default_factory=dict)
+
+    model: dict = field(default_factory=dict)
+
+    optim: OptimConfig = field(default_factory=OptimConfig)
+
+    log: TrainLogConfig = field(default_factory=TrainLogConfig)
+
 
 @dataclass
 class TrainConfig(TrainBaseConfig):
@@ -65,10 +74,6 @@ class TrainConfig(TrainBaseConfig):
 
     model: DelphiConfig = field(default_factory=DelphiConfig)
     ignore_expansion_tokens: bool = True
-
-    optim: OptimConfig = field(default_factory=OptimConfig)
-
-    log: TrainLogConfig = field(default_factory=TrainLogConfig)
 
 
 def train(cfg: TrainConfig):
