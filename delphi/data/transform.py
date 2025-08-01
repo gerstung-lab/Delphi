@@ -63,6 +63,23 @@ def trim_margin(reference: np.ndarray, *args: np.ndarray, trim_val: Any):
     return reference[:, margin:], *[arr[:, margin:] for arr in args]
 
 
+def crop_contiguous(
+    X: np.ndarray, *args: np.ndarray, block_size: int, rng: np.random.Generator
+):
+
+    L = X.shape[1]
+
+    if L <= block_size:
+        return X, *args
+    else:
+        start = rng.integers(0, L - block_size + 1)
+        cut = slice(start, start + block_size)
+        if args:
+            return X[:, cut], *[arr[:, cut] for arr in args]
+        else:
+            return X[:, cut]
+
+
 @dataclass
 class TransformArgs:
     name: str
