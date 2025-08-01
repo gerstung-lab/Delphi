@@ -185,7 +185,7 @@ def target_mask(
     ignore_tokens: list[int],
 ) -> torch.Tensor:
 
-    is_valid_target = x1 != -1
+    is_valid_target = x1 != 0
     for k in ignore_tokens:
         is_valid_target *= x1 != k
 
