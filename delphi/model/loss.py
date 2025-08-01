@@ -7,7 +7,7 @@ from delphi.model.config import DelphiConfig
 
 
 class CrossEntropyHead(nn.Module):
-    def __init__(self, config: DelphiConfig):
+    def __init__(self, config):
         super().__init__()
         self.config = config
 

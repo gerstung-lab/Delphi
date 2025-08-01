@@ -72,7 +72,7 @@ class Tokenizer:
 
     def save_to_yaml(
         self,
-        filepath: str,
+        filepath: str | os.PathLike,
     ) -> None:
 
         with open(filepath, "w") as f:
