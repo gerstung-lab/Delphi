@@ -160,8 +160,9 @@ def causal_attention_mask(
 ) -> torch.Tensor:
 
     b, l = pad.shape
+    device = pad.device
 
-    lower_tri_mask = torch.tril(torch.ones((l, l), device=t0.device))
+    lower_tri_mask = torch.tril(torch.ones((l, l), device=device))
     lower_tri_mask = lower_tri_mask.view(1, l, l)
     pad_mask = pad.view(b, 1, l).to(torch.int)
     attn_mask = pad_mask * lower_tri_mask
@@ -173,7 +174,7 @@ def causal_attention_mask(
             attn_mask *= ties_mask
 
     attn_mask += (attn_mask.sum(-1, keepdim=True) == 0) * torch.diag(
-        torch.ones(l, device=t0.device)
+        torch.ones(l, device=device)
     ) > 0
 
     return attn_mask.unsqueeze(1)
