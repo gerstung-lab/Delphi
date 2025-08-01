@@ -152,10 +152,6 @@ class Delphi(torch.nn.Module):
         n_params = count_params(self)
         print("number of parameters: %.2fM" % (n_params / 1e6,))
 
-    @property
-    def num_params(self):
-        return count_params(self)
-
     def build_model(self, config: DelphiConfig):
 
         self.transformer = nn.ModuleDict(

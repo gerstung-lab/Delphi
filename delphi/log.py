@@ -188,7 +188,7 @@ class TrainLogger:
             wandb.define_metric("train/loss", step_metric="step")
             self.addon_metrics = set()
 
-            wandb.summary["model_params"] = model.num_params
+            wandb.summary["model_params"] = sum(p.numel() for p in model.parameters())
             for name, param in self.model.named_parameters():
                 if param.requires_grad:
                     wandb.define_metric(f"grad_norm/{name}", step_metric="step")
