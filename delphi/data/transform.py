@@ -8,6 +8,24 @@ from delphi.multimodal import Modality
 from delphi.tokenizer import Tokenizer
 
 
+def sort_by_time(T: np.ndarray, *args):
+
+    s = np.argsort(T, axis=1)
+    T = np.take_along_axis(T, s, axis=1)
+
+    if args and any(arr.shape != T.shape for arr in args):
+        raise ValueError("all arrays must have the same shape as T")
+
+    return T, *[np.take_along_axis(arr, s, axis=1) for arr in args]
+
+
+def trim_margin(reference: np.ndarray, *args, trim_val: Any):
+
+    margin = np.min(np.sum(reference == trim_val, axis=1))
+
+    return reference[:, margin:], *[arr[:, margin:] for arr in args]
+
+
 @dataclass
 class TransformArgs:
     name: str

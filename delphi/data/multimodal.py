@@ -14,6 +14,7 @@ from delphi.data.core import (
     load_core_data_package,
     load_transforms,
 )
+from delphi.data.transform import sort_by_time, trim_margin
 from delphi.env import DELPHI_DATA_DIR
 from delphi.multimodal import Modality
 from delphi.tokenizer import Tokenizer, update_tokenizer
@@ -235,17 +236,8 @@ class M4Dataset:
                 biomarker_X=biomarker_X,
             )
 
-        # sort by time
-        s = np.argsort(T, axis=1)
-        M = np.take_along_axis(M, s, axis=1)
-        T = np.take_along_axis(T, s, axis=1)
-        X = np.take_along_axis(X, s, axis=1)
-
-        # trim
-        squeeze_margin = np.min(np.sum(M == 0, axis=1))
-        M = M[:, squeeze_margin:]
-        X = X[:, squeeze_margin:]
-        T = T[:, squeeze_margin:]
+        T, M, X = sort_by_time(T, M, X)
+        M, T, X = trim_margin(M, T, X, trim_val=0)
 
         return P, X, T, M, biomarker_X
 
