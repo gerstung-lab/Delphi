@@ -1,0 +1,164 @@
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterator, List, Optional
+
+import numpy as np
+import pandas as pd
+import yaml
+from scipy.sparse import coo_array
+
+from delphi.data.transform import TransformArgs, parse_transform
+from delphi.env import DELPHI_DATA_DIR
+from delphi.tokenizer import Tokenizer
+
+
+def get_p2i(data):
+    """
+    Get the patient to index mapping. (patient index in data -> length of sequence)
+    """
+
+    px = data[:, 0].astype("int")
+    p2i = []
+    j = 0
+    q = px[0]
+    for i, p in enumerate(px):
+        if p != q:
+            p2i.append([j, i - j])
+            q = p
+            j = i
+        if i == len(px) - 1:
+            # add last participant
+            p2i.append([j, i - j + 1])
+    return np.array(p2i)
+
+
+def subsample_tricolumnar(
+    XT: np.ndarray,
+    logits: np.ndarray,
+    subsample: Optional[int] = None,
+):
+    """
+    subsample the number of trajectories to avoid excessive RAM usage during subsequent tricolumnar_to_2d conversion
+    """
+
+    p2i = get_p2i(XT)
+    N = p2i.shape[0]
+    if subsample is not None and subsample <= N:
+        n_to_keep = p2i[:subsample, 1].sum()
+        XT = XT[:n_to_keep]
+        logits = logits[:n_to_keep]
+
+    return XT, logits
+
+
+def tricolumnar_to_2d(data):
+    """
+    Convert a tricolumnar array to a 2D array.
+    The first column is the participant index, the second column is the time step,
+    and the third column is the token.
+    """
+    p2i = get_p2i(data)
+    sub_idx = np.repeat(np.arange(p2i.shape[0]), p2i[:, 1])
+    pos_idx = np.concatenate([np.arange(p2i[i, 1]) for i in range(p2i.shape[0])])
+
+    X = coo_array(
+        (data[:, 2], (sub_idx, pos_idx)), shape=(p2i.shape[0], p2i[:, 1].max())
+    ).toarray()
+
+    T = np.full(X.shape, -10000, dtype=np.float32)
+    T[sub_idx, pos_idx] = data[:, 1]
+
+    sort_by_time = np.argsort(T, axis=1)
+    X = np.take_along_axis(X, sort_by_time, axis=1)
+    T = np.take_along_axis(T, sort_by_time, axis=1)
+
+    return X, T
+
+
+def eval_iter(total_size: int, batch_size: int) -> Iterator[np.ndarray]:
+
+    batch_start_pos = np.arange(0, total_size, batch_size)
+    batch_end_pos = batch_start_pos + batch_size
+    batch_end_pos[-1] = total_size
+
+    for start, end in zip(batch_start_pos, batch_end_pos):
+        yield np.arange(start, end)
+
+
+def train_iter(
+    rng: np.random.Generator, total_size: int, batch_size: int
+) -> Iterator[np.ndarray]:
+
+    while True:
+        yield rng.integers(total_size, size=(batch_size,))
+
+
+def collate_batch_data(batch_data: list[np.ndarray]) -> np.ndarray:
+
+    if len(batch_data) > 0:
+        max_len = max([bd.size for bd in batch_data])
+        collated_batch = np.full(
+            shape=(len(batch_data), max_len),
+            fill_value=0,
+            dtype=batch_data[0].dtype,
+        )
+        for i, bd in enumerate(batch_data):
+            collated_batch[i, : bd.size] = bd
+    else:
+        return np.empty(shape=(0, 0), dtype=np.float64)
+
+    return collated_batch
+
+
+def collate_batch_time(batch_time: list[np.ndarray]) -> np.ndarray:
+
+    max_len = max([bt.size for bt in batch_time])
+    collated_batch = np.full(
+        shape=(len(batch_time), max_len), fill_value=-1e4, dtype=np.float32
+    )
+    for i, bt in enumerate(batch_time):
+        collated_batch[i, : bt.size] = bt
+
+    return collated_batch
+
+
+@dataclass
+class BaseDataConfig:
+    data_dir: str = "ukb_real_data"
+    subject_list: str = "participants.bin"
+    seed: int = 42
+    transforms: Optional[List[TransformArgs]] = None
+
+
+def load_transforms(cfg: BaseDataConfig, tokenizer: Tokenizer):
+    transforms = []
+    if cfg.transforms is not None:
+        for transform in cfg.transforms:
+            transform = parse_transform(transform, tokenizer=tokenizer, seed=cfg.seed)
+            transforms.append(transform)
+    return transforms
+
+
+def load_core_data_package(cfg: BaseDataConfig, memmap: bool = False):
+
+    dataset_dir = Path(DELPHI_DATA_DIR) / cfg.data_dir
+    print(f"building dataset at {dataset_dir}")
+    tokenizer_path = dataset_dir / "tokenizer.yaml"
+    print(f"\t– loading tokenizer from {tokenizer_path}")
+    with open(tokenizer_path, "r") as f:
+        tokenizer = yaml.safe_load(f)
+
+    p2i = pd.read_csv(dataset_dir / "p2i.csv", index_col="pid")
+    participants_path = Path(DELPHI_DATA_DIR) / cfg.subject_list
+    tokens_path = dataset_dir / "data.bin"
+    time_steps_path = dataset_dir / "time.bin"
+    if memmap:
+        participants = np.memmap(participants_path, dtype=np.uint32, mode="r")
+        tokens = np.memmap(tokens_path, dtype=np.uint32, mode="r")
+        timesteps = np.memmap(time_steps_path, dtype=np.uint32, mode="r")
+    else:
+        participants = np.fromfile(participants_path, dtype=np.uint32)
+        tokens = np.fromfile(tokens_path, dtype=np.uint32)
+        timesteps = np.fromfile(time_steps_path, dtype=np.uint32)
+
+    return tokenizer, p2i, participants, tokens, timesteps

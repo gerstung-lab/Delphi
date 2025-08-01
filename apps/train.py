@@ -8,12 +8,12 @@ import numpy as np
 import torch
 from omegaconf import OmegaConf
 
-from delphi.data.dataset import (
+from delphi.data.core import train_iter
+from delphi.data.multimodal import (
     M4Dataset,
     UKBDataConfig,
     load_sequences,
     pad_trailing_biomarkers,
-    train_iter,
 )
 from delphi.env import DELPHI_CKPT_DIR
 from delphi.log import TrainLogConfig, TrainLogger

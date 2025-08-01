@@ -7,10 +7,10 @@ import torch
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
-from delphi.data.dataset import (
+from delphi.data.core import eval_iter
+from delphi.data.multimodal import (
     M4Dataset,
     UKBDataConfig,
-    eval_iter,
     load_sequences,
 )
 from delphi.log import GenLogConfig, GenLogger

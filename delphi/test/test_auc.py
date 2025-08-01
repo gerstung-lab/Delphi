@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from archive.evaluate_auc import get_calibration_auc
-from delphi.data.dataset import tricolumnar_to_2d
+from delphi.data.core import tricolumnar_to_2d
 from delphi.env import DELPHI_CKPT_DIR
 from delphi.eval.auc import corrective_indices, rates_by_age_bin
 from delphi.tokenizer import load_tokenizer_from_ckpt

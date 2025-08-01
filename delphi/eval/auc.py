@@ -8,7 +8,7 @@ import yaml
 from tqdm import tqdm
 
 from delphi import DAYS_PER_YEAR
-from delphi.data.dataset import subsample_tricolumnar, tricolumnar_to_2d
+from delphi.data.core import subsample_tricolumnar, tricolumnar_to_2d
 from delphi.eval import eval_task
 from delphi.tokenizer import Gender, load_tokenizer_from_yaml
 

@@ -6,12 +6,8 @@ from typing import Optional
 import numpy as np
 from omegaconf import OmegaConf
 
-from delphi.data.dataset import (
-    PromptDataset,
-    UKBDataConfig,
-    eval_iter,
-    load_sequences,
-)
+from delphi.data.core import eval_iter
+from delphi.data.multimodal import PromptDataset, UKBDataConfig, load_sequences
 from delphi.log import GenLogConfig, GenLogger
 from delphi.model.transformer import Delphi, load_model
 from delphi.sampler import (
