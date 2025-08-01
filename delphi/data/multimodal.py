@@ -16,7 +16,7 @@ from delphi.data.core import (
 )
 from delphi.env import DELPHI_DATA_DIR
 from delphi.multimodal import Modality
-from delphi.tokenizer import update_tokenizer
+from delphi.tokenizer import Tokenizer, update_tokenizer
 
 
 @dataclass
