@@ -220,17 +220,17 @@ class TrainLogger:
         print(f"saving checkpoint to {ckpt_path}")
         torch.save(checkpoint, ckpt_path)
 
-    def eval_step(self, step: int, loss: dict[str, torch.Tensor]):
+    def eval_step(self, step: int, loss: dict[str, float]):
 
         lossf = 0.0
         log_dict = {"step": step, "val/loss": lossf}
         for loss_key, loss_pt in loss.items():
             metric = f"val/{loss_key}"
-            log_dict[metric] = loss_pt.item()
+            log_dict[metric] = loss_pt
             if metric not in self.addon_metrics:
                 wandb.define_metric(metric, step_metric="step")
                 self.addon_metrics.add(metric)
-            lossf += loss_pt.item()
+            lossf += loss_pt
 
         print(f"iter {step}: val loss {lossf:.4f}")
         if self.cfg.always_ckpt_after_eval or lossf < self.best_val_loss:

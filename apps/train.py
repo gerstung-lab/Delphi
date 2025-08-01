@@ -238,7 +238,9 @@ def train(cfg: TrainConfig):
         scheduler=scheduler,
     )
 
-    def mini_step(loader: Iterator, validation_loss_mode: bool = False):
+    def mini_step(
+        loader: Iterator, validation_loss_mode: bool = False
+    ) -> dict[str, torch.Tensor]:
 
         _, X, T, M, biomarker_X = next(loader)
         X, T, M = pad_trailing_biomarkers(X, T, M)
@@ -271,7 +273,7 @@ def train(cfg: TrainConfig):
             for _ in range(cfg.eval_iters):
                 loss = mini_step(loader=loaders[split], validation_loss_mode=True)
                 for key in loss.keys():
-                    split_loss[key] += loss[key].detach().cpu()
+                    split_loss[key] += loss[key].item()
             split_loss = dict(split_loss)
             for key in split_loss.keys():
                 split_loss[key] /= cfg.eval_iters
