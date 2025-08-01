@@ -8,7 +8,44 @@ from delphi.multimodal import Modality
 from delphi.tokenizer import Tokenizer
 
 
-def sort_by_time(T: np.ndarray, *args):
+def add_no_event(
+    X: np.ndarray,
+    T: np.ndarray,
+    rng: np.random.Generator,
+    interval: float,
+    mode: str,
+    token: int = 1,
+) -> tuple[np.ndarray, np.ndarray]:
+
+    B = X.shape[0]
+    max_age = np.max(T)
+    N = int(max_age // interval)
+
+    if mode == "random":
+        no_event_T = rng.integers(1, int(max_age - interval), (B, N))
+    elif mode == "regular":
+        no_event_T = np.linspace(1, int(max_age) - interval, num=N) * np.ones((B, 1))
+    else:
+        raise ValueError
+
+    no_event_T = no_event_T.astype(np.float32)
+    no_event_X = np.full(no_event_T.shape, token)
+
+    T_cp = T.copy()
+    T_cp[T_cp < 0] = 0
+    min_T = np.min(T_cp, axis=1, keepdims=True)
+    max_T = np.max(T, axis=1, keepdims=True)
+    out_of_time = (no_event_T <= min_T) | (no_event_T >= max_T)
+    no_event_X[out_of_time] = 0
+    no_event_T[out_of_time] = -1e4
+
+    X = np.hstack((X, no_event_X))
+    T = np.hstack((T, no_event_T))
+
+    return X, T
+
+
+def sort_by_time(T: np.ndarray, *args: np.ndarray):
 
     s = np.argsort(T, axis=1)
     T = np.take_along_axis(T, s, axis=1)
@@ -19,7 +56,7 @@ def sort_by_time(T: np.ndarray, *args):
     return T, *[np.take_along_axis(arr, s, axis=1) for arr in args]
 
 
-def trim_margin(reference: np.ndarray, *args, trim_val: Any):
+def trim_margin(reference: np.ndarray, *args: np.ndarray, trim_val: Any):
 
     margin = np.min(np.sum(reference == trim_val, axis=1))
 
@@ -40,11 +77,9 @@ class AddNoEvent:
         seed: int,
         interval_in_years: int = 5,
         mode: Literal["regular", "random"] = "random",
-        max_age_in_years: Optional[float] = None,
     ):
 
         self.rng = np.random.default_rng(seed)
-        self.max_age_in_years = max_age_in_years
         self.no_event_interval = interval_in_years * DAYS_PER_YEAR
 
         assert mode in [
@@ -65,37 +100,17 @@ class AddNoEvent:
         biomarker_X: dict[str, np.ndarray],
     ):
 
-        n_participants = X.shape[0]
-        if self.max_age_in_years is None:
-            max_age = np.max(T)
-        else:
-            max_age = self.max_age_in_years * DAYS_PER_YEAR
-
-        n_no_events = int(max_age // self.no_event_interval)
-        if self.mode == "random":
-            no_event_timesteps = self.rng.integers(
-                1, int(max_age - self.no_event_interval), (n_participants, n_no_events)
-            )
-        elif self.mode == "regular":
-            no_event_timesteps = np.linspace(
-                1, int(max_age) - self.no_event_interval, num=n_no_events
-            ) * np.ones((n_participants, 1))
-        no_event_timesteps = no_event_timesteps.astype(np.float32)
-        no_event_tokens = np.full(no_event_timesteps.shape, self.tokenizer["no_event"])
-
-        T_cp = T.copy()
-        T_cp[T_cp < 0] = 0
-        min_T = np.min(T_cp, axis=1, keepdims=True)
-        max_T = np.max(T, axis=1, keepdims=True)
-        out_of_time_range = (no_event_timesteps <= min_T) | (
-            no_event_timesteps >= max_T
+        X, T = add_no_event(
+            X=X,
+            T=T,
+            rng=self.rng,
+            interval=self.no_event_interval,
+            mode=self.mode,
+            token=self.tokenizer["no_event"],
         )
-        no_event_tokens[out_of_time_range] = 0
-        no_event_timesteps[out_of_time_range] = -1e4
 
-        X = np.hstack((X, no_event_tokens))
-        T = np.hstack((T, no_event_timesteps))
-        M = np.hstack((M, (no_event_tokens != 0).astype(np.int8)))
+        no_event_X = X[:, M.shape[1] :]
+        M = np.hstack((M, (no_event_X != 0).astype(np.int8)))
 
         return X, T, M, biomarker_X
 
