@@ -120,11 +120,15 @@ class M4Dataset:
 
     def __init__(self, cfg: UKBDataConfig, memmap: bool = False):
 
-        base_tokenizer, self.p2i, self.participants, self.tokens, self.time_steps = (
-            load_core_data_package(cfg=cfg, memmap=memmap)
-        )
-        self.start_pos = self.p2i["start_pos"].to_dict()
-        self.seq_len = self.p2i["seq_len"].to_dict()
+        (
+            base_tokenizer,
+            self.start_pos,
+            self.seq_len,
+            self.participants,
+            self.tokens,
+            self.time_steps,
+            self.rng,
+        ) = load_core_data_package(cfg=cfg, memmap=memmap)
 
         cfg.expansion_packs.sort()
         self.expansion_packs = []

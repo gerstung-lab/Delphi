@@ -7,7 +7,12 @@ import pandas as pd
 import yaml
 from scipy.sparse import coo_array
 
-from delphi.data.transform import TransformArgs, parse_transform
+from delphi.data.transform import (
+    TransformArgs,
+    parse_transform,
+    sort_by_time,
+    trim_margin,
+)
 from delphi.env import DELPHI_DATA_DIR
 from delphi.tokenizer import Tokenizer
 
@@ -149,6 +154,9 @@ def load_core_data_package(cfg: BaseDataConfig, memmap: bool = False):
         tokenizer = yaml.safe_load(f)
 
     p2i = pd.read_csv(dataset_dir / "p2i.csv", index_col="pid")
+    start_pos = p2i["start_pos"].to_dict()
+    seq_len = p2i["seq_len"].to_dict()
+
     participants_path = Path(DELPHI_DATA_DIR) / cfg.subject_list
     tokens_path = dataset_dir / "data.bin"
     time_steps_path = dataset_dir / "time.bin"
@@ -161,4 +169,6 @@ def load_core_data_package(cfg: BaseDataConfig, memmap: bool = False):
         tokens = np.fromfile(tokens_path, dtype=np.uint32)
         timesteps = np.fromfile(time_steps_path, dtype=np.uint32)
 
-    return tokenizer, p2i, participants, tokens, timesteps
+    rng = np.random.default_rng(cfg.seed)
+
+    return tokenizer, start_pos, seq_len, participants, tokens, timesteps, rng
