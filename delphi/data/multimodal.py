@@ -271,6 +271,40 @@ def load_sequences(
         yield P, X, T, M, biomarker_data
 
 
+def load_prompt_sequences(
+    it: Iterator, dataset: "M4Dataset", start_age: float, no_event_token: int
+) -> Iterator:
+
+    for idx in it:
+
+        P, X, T, M, biomarker_data = dataset.get_batch(idx)
+
+        too_old = T > start_age
+        to_keep = ~too_old
+        for modality, modality_data in biomarker_data.items():
+            sub_idx, pos_idx = np.where(M == modality.value)
+            biomarker_data[modality] = modality_data[to_keep[sub_idx, pos_idx], :]
+        X[too_old] = 0
+        T[too_old] = -1e4
+        M[too_old] = 0
+
+        pad = ((0, 0), (0, 1))
+        X = np.pad(X, pad, "constant", constant_values=no_event_token)
+        T = np.pad(T, pad, "constant", constant_values=start_age)
+        M = np.pad(M, pad, "constant", constant_values=1)
+
+        T, M, X = sort_by_time(T, M, X)
+        M, T, X = trim_margin(M, T, X, trim_val=0)
+
+        P = torch.tensor(P, dtype=torch.long)
+        X = torch.tensor(X, dtype=torch.long)
+        T = torch.tensor(T)
+        M = torch.tensor(M, dtype=torch.long)
+        biomarker_data = biomarker_to_tensor(biomarker_data=biomarker_data)
+
+    yield P, X, T, M, biomarker_data
+
+
 def pad_trailing_biomarkers(
     X: torch.Tensor,
     T: torch.Tensor,
@@ -284,41 +318,3 @@ def pad_trailing_biomarkers(
         T = torch.cat([T, T[:, -1:]], dim=1)
 
     return X, T, M
-
-
-class PromptDataset(M4Dataset):
-
-    def __init__(
-        self,
-        cfg: UKBDataConfig,
-        start_age_in_years: float,
-    ):
-
-        super().__init__(cfg=cfg)
-
-        self.start_age = start_age_in_years * 365.25
-        first_timestep = self.time_steps[self.start_pos]
-        last_timestep = self.time_steps[self.start_pos + self.seq_len - 1]
-        time_mask = (first_timestep < self.start_age) & (last_timestep > self.start_age)
-
-        self.participants = self.participants[time_mask]
-        self.seq_len = self.seq_len[time_mask]
-        self.start_pos = self.start_pos[time_mask]
-
-    def get_batch(self, batch_idx):
-
-        P, X, T, M, biomarker_X = super().get_raw_batch(batch_idx)
-
-        X[T > self.start_age] = 0
-        T[T > self.start_age] = -1e4
-
-        X = np.pad(
-            X,
-            ((0, 0), (0, 1)),
-            mode="constant",
-            constant_values=self.tokenizer["no_event"],
-        )
-        T = np.pad(T, ((0, 0), (0, 1)), mode="constant", constant_values=self.start_age)
-
-        # TODO: remove biomarkers after prompt_age
-        return P, X, T, M, biomarker_X
