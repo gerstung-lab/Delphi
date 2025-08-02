@@ -222,11 +222,11 @@ class M4Dataset:
             M = np.concatenate((M, m_M), axis=1)
             X = np.concatenate((X, np.zeros_like(m_T, dtype=np.int8)), axis=1)
 
-        return P, X, T, M, biomarker_X
+        return X, T, M, biomarker_X
 
     def get_batch(self, batch_idx):
 
-        P, X, T, M, biomarker_X = self.get_raw_batch(batch_idx)
+        X, T, M, biomarker_X = self.get_raw_batch(batch_idx)
 
         for transform in self.transforms:
             X, T, M, biomarker_X = transform(
@@ -239,7 +239,7 @@ class M4Dataset:
         T, M, X = sort_by_time(T, M, X)
         M, T, X = trim_margin(M, T, X, trim_val=0)
 
-        return P, X, T, M, biomarker_X
+        return X, T, M, biomarker_X
 
 
 def biomarker_to_tensor(
@@ -260,15 +260,14 @@ def load_sequences(
 
     for idx in it:
 
-        P, X, T, M, biomarker_data = dataset.get_batch(idx)
+        X, T, M, biomarker_data = dataset.get_batch(idx)
 
-        P = torch.tensor(P, dtype=torch.long)
         X = torch.tensor(X, dtype=torch.long)
         T = torch.tensor(T)
         M = torch.tensor(M, dtype=torch.long)
         biomarker_data = biomarker_to_tensor(biomarker_data=biomarker_data)
 
-        yield P, X, T, M, biomarker_data
+        yield X, T, M, biomarker_data
 
 
 def load_prompt_sequences(
@@ -277,7 +276,7 @@ def load_prompt_sequences(
 
     for idx in it:
 
-        P, X, T, M, biomarker_data = dataset.get_batch(idx)
+        X, T, M, biomarker_data = dataset.get_batch(idx)
 
         too_old = T > start_age
         to_keep = ~too_old
@@ -296,13 +295,12 @@ def load_prompt_sequences(
         T, M, X = sort_by_time(T, M, X)
         M, T, X = trim_margin(M, T, X, trim_val=0)
 
-        P = torch.tensor(P, dtype=torch.long)
         X = torch.tensor(X, dtype=torch.long)
         T = torch.tensor(T)
         M = torch.tensor(M, dtype=torch.long)
         biomarker_data = biomarker_to_tensor(biomarker_data=biomarker_data)
 
-    yield P, X, T, M, biomarker_data
+    yield X, T, M, biomarker_data
 
 
 def pad_trailing_biomarkers(

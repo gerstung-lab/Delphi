@@ -242,7 +242,7 @@ def train(cfg: TrainConfig):
         loader: Iterator, validation_loss_mode: bool = False
     ) -> dict[str, torch.Tensor]:
 
-        _, X, T, M, biomarker_X = next(loader)
+        X, T, M, biomarker_X = next(loader)
         X, T, M = pad_trailing_biomarkers(X, T, M)
         X, T, M = X.to(cfg.device), T.to(cfg.device), M.to(cfg.device)
         biomarker_X = {k: v.to(cfg.device) for k, v in biomarker_X.items()}
