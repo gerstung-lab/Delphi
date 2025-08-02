@@ -223,14 +223,15 @@ class TrainLogger:
     def eval_step(self, step: int, loss: dict[str, float]):
 
         lossf = 0.0
-        log_dict = {"step": step, "val/loss": lossf}
+        log_dict = {"step": step}
         for loss_key, loss_pt in loss.items():
             metric = f"val/{loss_key}"
-            log_dict[metric] = loss_pt
+            log_dict[metric] = loss_pt  # type: ignore
             if metric not in self.addon_metrics:
                 wandb.define_metric(metric, step_metric="step")
                 self.addon_metrics.add(metric)
             lossf += loss_pt
+        log_dict["val/loss"] = lossf  # type: ignore
 
         print(f"iter {step}: val loss {lossf:.4f}")
         if self.cfg.always_ckpt_after_eval or lossf < self.best_val_loss:
@@ -260,7 +261,6 @@ class TrainLogger:
         lossf = 0.0
         log_dict = {
             "step": step,
-            "train/loss": lossf,
             "lr": self.scheduler.get_last_lr()[0],
         }
         if step % self.cfg.log_interval == 0:
@@ -271,6 +271,7 @@ class TrainLogger:
                     wandb.define_metric(metric, step_metric="step")
                     self.addon_metrics.add(metric)
                 lossf += loss_pt.item()
+            log_dict["train/loss"] = lossf
 
             print(f"iter {step}: loss {lossf:.4f}")
             if self.wandb:
