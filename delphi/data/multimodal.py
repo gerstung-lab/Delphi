@@ -56,9 +56,7 @@ class Biomarker:
 
         return participants_with_data
 
-    def get_raw_batch(
-        self, pids: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def get_batch(self, pids: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 
         batch_data = []
         batch_time = []
@@ -192,7 +190,7 @@ class M4Dataset:
         ]
         return token_keys
 
-    def get_raw_batch(self, batch_idx: np.ndarray):
+    def get_batch(self, batch_idx: np.ndarray):
 
         P = self.participants[batch_idx]
         X = []
@@ -216,7 +214,7 @@ class M4Dataset:
         M[X > 0] = 1
         biomarker_X = {}
         for modality, dataset in self.mod_ds.items():
-            m_X, m_T, _ = dataset.get_raw_batch(P)
+            m_X, m_T, _ = dataset.get_batch(P)
             biomarker_X[modality] = m_X
 
             m_M = np.zeros_like(m_T, dtype=np.int8)
@@ -225,12 +223,6 @@ class M4Dataset:
             T = np.concatenate((T, m_T), axis=1)
             M = np.concatenate((M, m_M), axis=1)
             X = np.concatenate((X, np.zeros_like(m_T, dtype=np.int8)), axis=1)
-
-        return X, T, M, biomarker_X
-
-    def get_batch(self, batch_idx):
-
-        X, T, M, biomarker_X = self.get_raw_batch(batch_idx)
 
         for transform in self.transforms:
             X, T, M, biomarker_X = transform(
