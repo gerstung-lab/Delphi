@@ -131,7 +131,8 @@ def train(cfg: TrainConfig):
     if cfg.infer_val_subject_filters:
         cfg.val_data.must_have_biomarkers = cfg.train_data.must_have_biomarkers
     if cfg.infer_val_transforms:
-        cfg.val_data.transforms = cfg.train_data.transforms
+        cfg.val_data.no_event_interval = cfg.train_data.no_event_interval
+        cfg.val_data.block_size = cfg.train_data.block_size
     print("validation dataset")
     val_ds = M4Dataset(cfg=cfg.val_data, memmap=cfg.memmap)
 

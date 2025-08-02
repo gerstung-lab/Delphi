@@ -1,6 +1,7 @@
+import functools
 import os
 from dataclasses import dataclass, field
-from typing import Iterator
+from typing import Iterator, Optional
 
 import numpy as np
 import pandas as pd
@@ -12,9 +13,8 @@ from delphi.data.core import (
     collate_batch_data,
     collate_batch_time,
     load_core_data_package,
-    load_transforms,
 )
-from delphi.data.transform import sort_by_time, trim_margin
+from delphi.data.transform import add_no_event, crop_priority, sort_by_time, trim_margin
 from delphi.env import DELPHI_DATA_DIR
 from delphi.multimodal import Modality
 from delphi.tokenizer import Tokenizer, update_tokenizer
@@ -22,6 +22,8 @@ from delphi.tokenizer import Tokenizer, update_tokenizer
 
 @dataclass
 class UKBDataConfig(BaseDataConfig):
+    no_event_interval: Optional[int] = None
+    block_size: Optional[int] = None
     expansion_pack_dir: str = "ukb_real_data/expansion_packs"
     expansion_packs: list[str] = field(default_factory=list)
     biomarker_dir: str = "ukb_real_data/biomarkers"
@@ -172,7 +174,25 @@ class M4Dataset:
             ]
         print(f"{self.participants.size}/{old_n} remaining")
 
-        self.transforms = load_transforms(cfg=cfg, tokenizer=self.tokenizer)
+        if cfg.no_event_interval is not None:
+            self.add_no_event = functools.partial(
+                add_no_event,
+                rng=self.rng,
+                interval=cfg.no_event_interval,
+                token=self.tokenizer["no_event"],
+            )
+        else:
+            self.add_no_event = lambda *args: args
+        if cfg.block_size is not None:
+            self.crop_priority = functools.partial(
+                crop_priority,
+                rng=self.rng,
+                priority_tokens=None,
+                priority_modality=None,
+                block_size=cfg.block_size,
+            )
+        else:
+            self.crop_priority = lambda *args: args
 
         print(f"built dataset!")
 
@@ -210,6 +230,8 @@ class M4Dataset:
         X = collate_batch_data(X)
         T = collate_batch_time(T)
 
+        X, T = self.add_no_event(X, T)
+
         M = np.zeros_like(X, dtype=np.int8)
         M[X > 0] = 1
         biomarker_X = {}
@@ -224,13 +246,7 @@ class M4Dataset:
             M = np.concatenate((M, m_M), axis=1)
             X = np.concatenate((X, np.zeros_like(m_T, dtype=np.int8)), axis=1)
 
-        for transform in self.transforms:
-            X, T, M, biomarker_X = transform(
-                X=X,
-                T=T,
-                M=M,
-                biomarker_X=biomarker_X,
-            )
+        X, T, M, biomarker_X = self.crop_priority(X, T, M, biomarker_X)
 
         T, M, X = sort_by_time(T, M, X)
         M, T, X = trim_margin(M, T, X, trim_val=0)

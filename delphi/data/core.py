@@ -8,8 +8,6 @@ import yaml
 from scipy.sparse import coo_array
 
 from delphi.data.transform import (
-    TransformArgs,
-    parse_transform,
     sort_by_time,
     trim_margin,
 )
@@ -132,16 +130,6 @@ class BaseDataConfig:
     data_dir: str = "ukb_real_data"
     subject_list: str = "participants.bin"
     seed: int = 42
-    transforms: Optional[List[TransformArgs]] = None
-
-
-def load_transforms(cfg: BaseDataConfig, tokenizer: Tokenizer):
-    transforms = []
-    if cfg.transforms is not None:
-        for transform in cfg.transforms:
-            transform = parse_transform(transform, tokenizer=tokenizer, seed=cfg.seed)
-            transforms.append(transform)
-    return transforms
 
 
 def load_core_data_package(cfg: BaseDataConfig, memmap: bool = False):
