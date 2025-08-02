@@ -80,6 +80,45 @@ def crop_contiguous(
             return X[:, cut]
 
 
+def crop_priority(
+    X: np.ndarray,
+    T: np.ndarray,
+    M: np.ndarray,
+    biomarker_X: dict[Modality, np.ndarray],
+    priority_tokens: Optional[np.ndarray],
+    priority_modality: Optional[np.ndarray],
+    block_size: int,
+    rng: np.random.Generator,
+):
+    """
+    crop the input data to a fixed block size, prioritizing certain tokens and modalities and preferentially crop out padding tokens
+    """
+
+    priority_np = np.zeros(M.shape, dtype=np.uint8)
+    priority_np[M > 0] = 1
+    if priority_tokens is not None:
+        priority_np[np.isin(X, priority_tokens)] = 2
+    if priority_modality is not None:
+        priority_np[np.isin(M, priority_modality)] = 2
+
+    tiebreaker = rng.integers(0, M.shape[1], size=M.shape, dtype=np.uint32)
+    s = np.lexsort((tiebreaker, priority_np), axis=1)
+    s_inv = np.argsort(s, axis=1)
+    to_keep = np.zeros_like(M, dtype=bool)
+    to_keep[:, -block_size:] = True
+    to_keep = np.take_along_axis(to_keep, s_inv, axis=1)
+
+    for modality, m_X in biomarker_X.items():
+        sub_idx, pos_idx = np.where(M == modality.value)
+        biomarker_X[modality] = m_X[to_keep[sub_idx, pos_idx], :]
+
+    M = M[to_keep].reshape(M.shape[0], -1)
+    X = X[to_keep].reshape(X.shape[0], -1)
+    T = T[to_keep].reshape(T.shape[0], -1)
+
+    return X, T, M, biomarker_X
+
+
 @dataclass
 class TransformArgs:
     name: str
@@ -132,40 +171,6 @@ class AddNoEvent:
         return X, T, M, biomarker_X
 
 
-class AugmentLifestyle:
-
-    def __init__(
-        self,
-        tokenizer: Tokenizer,
-        seed: int,
-        lifestyle_tokens: list[str],
-        min_time: float = -20 * DAYS_PER_YEAR,
-        max_time: float = 40 * DAYS_PER_YEAR,
-    ):
-
-        self.rng = np.random.default_rng(seed)
-        self.lifestyle_tokens = np.array(tokenizer.encode(lifestyle_tokens))
-        self.min_time = min_time
-        self.max_time = max_time
-
-    def __call__(
-        self,
-        X: np.ndarray,
-        T: np.ndarray,
-        M: np.ndarray,
-        biomarker_X: dict[str, np.ndarray],
-    ):
-
-        is_lifestyle = np.isin(X, self.lifestyle_tokens)
-        if is_lifestyle.sum() > 0:
-            augment = self.rng.integers(
-                int(self.min_time), int(self.max_time), (is_lifestyle.sum(),)
-            )
-            T[is_lifestyle] += augment
-
-        return X, T, M, biomarker_X
-
-
 class CropBlockSize:
 
     def __init__(
@@ -194,38 +199,27 @@ class CropBlockSize:
         M: np.ndarray,
         biomarker_X: dict[Modality, np.ndarray],
     ):
-        """
-        crop the input data to a fixed block size, prioritizing certain tokens and modalities and preferentially crop out padding tokens
-        """
 
-        priority_np = np.zeros(M.shape, dtype=np.uint8)
-        priority_np[M > 0] = 1
-        if hasattr(self, "priority_tokens"):
-            priority_np[np.isin(X, self.priority_tokens)] = 2
-        if hasattr(self, "priority_modality"):
-            priority_np[np.isin(M, self.priority_modality)] = 2
-
-        tiebreaker = self.rng.integers(0, M.shape[1], size=M.shape, dtype=np.uint32)
-        s = np.lexsort((tiebreaker, priority_np), axis=1)
-        s_inv = np.argsort(s, axis=1)
-        to_keep = np.zeros_like(M, dtype=bool)
-        to_keep[:, -self.block_size :] = True
-        to_keep = np.take_along_axis(to_keep, s_inv, axis=1)
-
-        for modality, m_X in biomarker_X.items():
-            sub_idx, pos_idx = np.where(M == modality.value)
-            biomarker_X[modality] = m_X[to_keep[sub_idx, pos_idx], :]
-
-        M = M[to_keep].reshape(M.shape[0], -1)
-        X = X[to_keep].reshape(X.shape[0], -1)
-        T = T[to_keep].reshape(T.shape[0], -1)
+        X, T, M, biomarker_X = crop_priority(
+            X=X,
+            T=T,
+            M=M,
+            biomarker_X=biomarker_X,
+            priority_tokens=(
+                self.priority_tokens if hasattr(self, "priority_tokens") else None
+            ),
+            priority_modality=(
+                self.priority_modality if hasattr(self, "priority_modality") else None
+            ),
+            block_size=self.block_size,
+            rng=self.rng,
+        )
 
         return X, T, M, biomarker_X
 
 
 transform_registry = {
     "no-event": AddNoEvent,
-    "augment-lifestyle": AugmentLifestyle,
     "crop-block-size": CropBlockSize,
     # Add other transforms here
 }
