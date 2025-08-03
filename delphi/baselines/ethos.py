@@ -75,7 +75,11 @@ def _estimate_time_bins(sample_t: np.ndarray, n_tokens: int):
     percentiles = np.linspace(0, 100, num=n_tokens + 1)
     percentiles = percentiles[:-1]
 
-    return np.round(np.percentile(delta, q=percentiles), decimals=1)
+    time_bins = np.round(np.percentile(delta, q=percentiles), decimals=1)
+    n_uniq = len(np.unique(time_bins))
+    assert n_uniq == len(time_bins), "too many time tokens!"
+
+    return time_bins
 
 
 class EthosDataset:
