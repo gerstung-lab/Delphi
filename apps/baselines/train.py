@@ -9,6 +9,7 @@ from delphi.data import core
 from delphi.env import DELPHI_CKPT_DIR
 from delphi.experiment import BaseTrainer, TrainBaseConfig
 from delphi.log import TrainLogConfig
+from delphi.model import delphi
 from delphi.model.config import GPT2Config, parse_token_list
 from delphi.optim import OptimConfig
 
@@ -42,6 +43,12 @@ def experiment(cfg: TrainConfig):
         cfg.model["motor_task_tokens"] = train_ds.tokenizer.encode(motor_task_tokens)  # type: ignore
         model_cls = motor.Model
         model_cfg_cls = motor.ModelConfig
+        trainer_cls = BaseTrainer
+        loader = core.load_sequences
+    elif cfg.model_type == "delphi":
+        train_ds, val_ds = core.build_datasets(cfg.train_data, cfg.val_data)
+        model_cls = delphi.Model
+        model_cfg_cls = delphi.ModelConfig
         trainer_cls = BaseTrainer
         loader = core.load_sequences
     else:
