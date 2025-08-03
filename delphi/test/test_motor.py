@@ -1,6 +1,6 @@
 import torch
 
-from delphi.model.loss import broadcast_delta_t, piecewise_time, time_to_event
+from delphi.baselines.motor import broadcast_delta_t, piecewise_time, time_to_event
 
 
 def no_out_of_range_idx(token_index: torch.Tensor, seq_len: int):
