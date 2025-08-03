@@ -69,7 +69,10 @@ def crop_contiguous(
     L = X.shape[1]
 
     if L <= block_size:
-        return X, *args
+        if args:
+            return X, *args
+        else:
+            return X
     else:
         start = rng.integers(0, L - block_size + 1)
         cut = slice(start, start + block_size)

@@ -1,6 +1,6 @@
 model_type: ethos
 ckpt_dir: ethos
-eval_interval: 25
+eval_interval: 500
 eval_iters: 25
 eval_only: false
 init_from: scratch

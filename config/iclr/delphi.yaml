@@ -1,12 +1,12 @@
 model_type: delphi
 ckpt_dir: delphi-mini
-eval_interval: 25
+eval_interval: 500
 eval_iters: 25
 eval_only: false
 init_from: scratch
 seed: 42
 gradient_accumulation_steps: 1
-batch_size: 512
+batch_size: 256
 device: cuda
 train_data:
   data_dir: ukb_real_data
