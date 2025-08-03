@@ -209,7 +209,7 @@ class Delphi(torch.nn.Module):
                 t1=targets_age,
                 attn_mask=attn_mask,
                 mask_ties=self.config.mask_ties,
-                eps=0.0 if self.config.loss.zero_inflate else 1.0,
+                eps=0.0 if self.config.zero_inflate else 1.0,
             )
 
             is_valid_target = target_mask(targets, ignore_tokens=ignored_tokens)
@@ -219,8 +219,8 @@ class Delphi(torch.nn.Module):
             loss_dt = torch.mean(loss_dt[is_valid_target])
 
             loss = {
-                "loss_ce": loss_ce * self.config.loss.ce_beta,
-                "loss_dt": loss_dt * self.config.loss.dt_beta,
+                "loss_ce": loss_ce * self.config.ce_beta,
+                "loss_dt": loss_dt * self.config.dt_beta,
             }
         else:
             # inference-time mini-optimization: only forward the lm_head on the very last position

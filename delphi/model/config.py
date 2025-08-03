@@ -13,14 +13,6 @@ class BiomarkerEmbedConfig:
 
 
 @dataclass
-class LossConfig:
-    ce_beta: float = 1.0
-    dt_beta: float = 1.0
-    zero_inflate: bool = False
-    zero_inflate_projector: str = "linear"
-
-
-@dataclass
 class GPT2Config:
     vocab_size: Optional[int] = None
     n_layer: int = 12
@@ -40,12 +32,15 @@ class DelphiConfig(GPT2Config):
     ignore_tokens: list = field(default_factory=lambda: [0])
     biomarkers: dict[str, BiomarkerEmbedConfig] = field(default_factory=dict)
     modality_emb: bool = False
-    loss: LossConfig = field(default_factory=LossConfig)
+    ce_beta: float = 1.0
+    dt_beta: float = 1.0
+    zero_inflate: bool = False
+    zero_inflate_projector: str = "linear"
 
 
 def validate_model_config(config: DelphiConfig):
     assert (
-        config.mask_ties != config.loss.zero_inflate
+        config.mask_ties != config.zero_inflate
     ), "mask_ties and zero_inflate cannot be both True or both False"
 
 

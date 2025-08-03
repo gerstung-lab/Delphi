@@ -22,16 +22,8 @@ train_data:
     - ops
     - prescriptions
     - summary_ops
-  transforms:
-    - name: no-event
-      args:
-        interval_in_years: 5
-        mode: random
-    - name: crop-block-size
-      args:
-        block_size: 64
-        priority_tokens: [male, female]
-        priority_modality: [prs]
+  no_event_interval: 5
+  block_size: 64
 infer_val_biomarkers: true
 infer_val_expansion_packs: true
 infer_val_transforms: true
@@ -123,10 +115,9 @@ model:
       projector: linear
       input_size: 1
   modality_emb: true
-  loss:
-    ce_beta: 1.0
-    dt_beta: 1.0
-    zero_inflate: false
+  ce_beta: 1.0
+  dt_beta: 1.0
+  zero_inflate: false
 log:
   wandb_log: true
   wandb_project: ${ckpt_dir}

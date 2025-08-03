@@ -24,15 +24,15 @@ class CompetingExpHead(nn.Module):
         super().__init__()
         self.config = config
 
-        if config.loss.zero_inflate:
+        if config.zero_inflate:
             assert config.vocab_size is not None
-            if config.loss.zero_inflate_projector == "linear":
+            if config.zero_inflate_projector == "linear":
                 self.pi_head = nn.Linear(config.vocab_size, 1, bias=False)
-            elif config.loss.zero_inflate_projector == "mlp":
+            elif config.zero_inflate_projector == "mlp":
                 self.pi_head = ZeroInflateProjector(config)
             else:
                 raise ValueError(
-                    f"Unknown pi_projector: {config.loss.zero_inflate_projector}"
+                    f"Unknown pi_projector: {config.zero_inflate_projector}"
                 )
 
     def forward(
@@ -46,7 +46,7 @@ class CompetingExpHead(nn.Module):
         ldt = -torch.log(delta_t + torch.tensor(self.config.t_min))
         exp_log_likelihood = lse - torch.exp(lse - ldt)
 
-        if self.config.loss.zero_inflate:
+        if self.config.zero_inflate:
             pi = self.pi_head(logits).squeeze()
             zero_case = -(F.softplus(-pi + lse) - F.softplus(-pi))
             nonzero_case = -(exp_log_likelihood - pi - F.softplus(-pi))
