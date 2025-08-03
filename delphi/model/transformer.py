@@ -17,6 +17,7 @@ from delphi.model.components import (
 from delphi.model.config import DelphiConfig, GPT2Config
 from delphi.model.loss import CompetingExpHead, CrossEntropyHead
 from delphi.sampler import sample_competing_exponentials, truncate_top_k
+from delphi.tokenizer import load_tokenizer_from_yaml
 
 
 class LayerNorm(nn.Module):
@@ -266,7 +267,7 @@ class Delphi(torch.nn.Module):
         return idx, age, modality, biomarker
 
 
-def load_model(
+def load_ckpt(
     ckpt_path,
     model_cls=Delphi,
     model_cfg_cls=DelphiConfig,
@@ -292,4 +293,6 @@ def load_model(
     for param in model.parameters():
         param.data = param.data.to(dtype=param_dtype)
 
-    return model, train_cfg
+    tokenizer = load_tokenizer_from_yaml(ckpt_path / "tokenizer.yaml")
+
+    return model, train_cfg, tokenizer

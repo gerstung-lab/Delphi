@@ -75,23 +75,13 @@ class Tokenizer:
 
 
 def load_tokenizer_from_yaml(
-    filepath: str,
+    filepath: str | os.PathLike,
 ) -> Tokenizer:
     assert os.path.exists(filepath), f"tokenizer file {filepath} does not exist"
     with open(filepath, "r") as f:
         name2id = yaml.safe_load(f)
 
     return Tokenizer(name2id=name2id)
-
-
-def load_tokenizer_from_ckpt(
-    ckpth_path,
-) -> Tokenizer:
-
-    tokenizer_path = os.path.join(ckpth_path, "tokenizer.yaml")
-    tokenizer = load_tokenizer_from_yaml(tokenizer_path)
-
-    return tokenizer
 
 
 def update_tokenizer(base_tokenizer: dict, add_tokenizer: dict) -> tuple[dict, int]:
