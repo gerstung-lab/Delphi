@@ -55,8 +55,6 @@ def experiment(cfg: TrainConfig):
         raise ValueError
 
     tokenizer = train_ds.tokenizer
-    tokenizer.save_to_yaml(filepath=run_dir / "tokenizer.yaml")
-
     model_cfg = model_cfg_cls(**cfg.model)
     if model_cfg.vocab_size is None:
         model_cfg.vocab_size = tokenizer.vocab_size

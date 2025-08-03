@@ -116,7 +116,6 @@ def train(cfg: TrainConfig):
     print("training dataset")
     train_ds = M4Dataset(cfg=cfg.train_data, memmap=cfg.memmap)
     tokenizer = train_ds.tokenizer
-    tokenizer.save_to_yaml(os.path.join(run_dir, "tokenizer.yaml"))
     train_it = train_iter(rng=rng, total_size=len(train_ds), batch_size=cfg.batch_size)
     train_loader = load_sequences(it=train_it, dataset=train_ds)
 
@@ -230,6 +229,7 @@ def train(cfg: TrainConfig):
         cfg=cfg.log,
         exp_cfg=asdict(cfg),
         dump_dir=run_dir,
+        tokenizer=tokenizer.to_dict(),
         model=model,  # type: ignore
         optimizer=optimizer,
         scheduler=scheduler,

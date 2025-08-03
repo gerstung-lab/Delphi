@@ -48,6 +48,9 @@ class Tokenizer:
 
         return self.name2id[key]
 
+    def to_dict(self):
+        return self.name2id
+
     def encode(self, token: Union[str, list]) -> Union[int, list]:
         if isinstance(token, list):
             for t in token:
@@ -69,19 +72,6 @@ class Tokenizer:
             if token not in self.id2name.keys():
                 raise KeyError(f"disease ID {token} not found in tokenizer.")
             return self.id2name[token]
-
-    def save_to_yaml(
-        self,
-        filepath: str | os.PathLike,
-    ) -> None:
-
-        with open(filepath, "w") as f:
-            yaml.dump(
-                self.name2id,
-                f,
-                default_flow_style=False,
-                sort_keys=False,
-            )
 
 
 def load_tokenizer_from_yaml(

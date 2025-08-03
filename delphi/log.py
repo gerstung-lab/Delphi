@@ -7,6 +7,7 @@ from typing import Optional
 import numpy as np
 import torch
 import wandb
+import yaml
 from omegaconf import OmegaConf
 
 
@@ -166,6 +167,7 @@ class TrainLogger:
         exp_cfg: dict,
         dump_dir: str,
         model: torch.nn.Module,
+        tokenizer: dict,
         optimizer: torch.optim.Optimizer,
         scheduler: torch.optim.lr_scheduler.LambdaLR,
     ):
@@ -199,6 +201,14 @@ class TrainLogger:
         os.makedirs(dump_dir, exist_ok=True)
         with open(os.path.join(dump_dir, "config.yaml"), "w") as f:
             OmegaConf.save(config=exp_cfg, f=f)
+
+        with open(os.path.join(dump_dir, "tokenizer.yaml"), "w") as f:
+            yaml.dump(
+                tokenizer,
+                f,
+                default_flow_style=False,
+                sort_keys=False,
+            )
 
         self.best_val_loss = float("inf")
 
