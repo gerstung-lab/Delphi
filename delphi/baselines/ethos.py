@@ -13,6 +13,7 @@ from delphi.data.core import (
     load_core_data_package,
 )
 from delphi.data.transform import add_no_event, crop_contiguous, sort_by_time
+from delphi.experiment import BaseTrainer
 from delphi.model.components import target_mask
 from delphi.model.config import GPT2Config
 from delphi.model.loss import CrossEntropyHead
@@ -24,7 +25,6 @@ from delphi.model.transformer import (
     initialize_weights,
 )
 from delphi.tokenizer import Tokenizer, update_tokenizer
-from delphi.trainer import BaseTrainer
 
 
 @dataclass

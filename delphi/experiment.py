@@ -1,0 +1,199 @@
+import os
+from collections import defaultdict
+from contextlib import nullcontext
+from dataclasses import asdict, dataclass, field
+from typing import Any, Callable, Iterable, Iterator
+
+import numpy as np
+import torch
+
+from delphi.data.core import train_iter
+from delphi.env import DELPHI_CKPT_DIR
+from delphi.log import TrainLogConfig, TrainLogger
+from delphi.optim import OptimConfig, configure_optimizers
+
+
+@dataclass
+class TrainBaseConfig:
+    ckpt_dir: str = "."
+    eval_interval: int = 2000
+    eval_iters: int = 200
+    eval_only: bool = False  # if True, script exits right after the first eval
+    init_from: str = "scratch"
+
+    seed: int = 42
+    gradient_accumulation_steps: int = 1  # used to simulate larger batch sizes
+    batch_size: int = 128
+    # if gradient_accumulation_steps > 1, this is the micro-batch size
+
+    # system
+    device: str = "cpu"
+    # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
+    dtype: str = "float32"
+    # 'bfloat16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
+    compile: bool = False  # use PyTorch 2.0 to compile the model to be faster
+
+    train_data: dict = field(default_factory=dict)
+    val_data: dict = field(default_factory=dict)
+
+    model: dict = field(default_factory=dict)
+
+    optim: OptimConfig = field(default_factory=OptimConfig)
+
+    log: TrainLogConfig = field(default_factory=TrainLogConfig)
+
+
+class BaseTrainer:
+
+    def __init__(
+        self,
+        cfg: TrainBaseConfig,
+        model: torch.nn.Module,
+        train_ds: Any,
+        val_ds: Any,
+        loader: Callable,
+    ):
+
+        self.cfg = cfg
+        self.device = cfg.device
+        self.device_type = (
+            "cuda" if "cuda" in cfg.device else "cpu"
+        )  # for later use in torch.autocast
+        # note: float16 data type will automatically use a GradScaler
+        self.ptdtype = {
+            "float32": torch.float32,
+            "float64": torch.float64,
+            "bfloat16": torch.bfloat16,
+            "float16": torch.float16,
+        }[cfg.dtype]
+        if self.device_type == "cuda" and self.ptdtype == "float16":
+            self.ctx = torch.autocast(device_type=self.device_type, dtype=self.ptdtype)
+        else:
+            self.ctx = nullcontext()
+
+        self.model = model
+        self.optimizer, self.scheduler = configure_optimizers(
+            model=model, cfg=cfg.optim, device_type=self.device_type
+        )
+        self.scaler = torch.GradScaler(
+            device=self.device_type, enabled=(cfg.dtype == "float16")
+        )
+
+        rng = np.random.default_rng(cfg.seed)
+        train_it = train_iter(
+            rng=rng, total_size=len(train_ds), batch_size=cfg.batch_size
+        )
+        self.train_loader = loader(it=train_it, dataset=train_ds)
+        self.estimate_loaders = {
+            "train": loader(
+                it=train_iter(
+                    rng=np.random.default_rng(cfg.seed),
+                    total_size=len(train_ds),
+                    batch_size=cfg.batch_size,
+                ),
+                dataset=train_ds,
+            ),
+            "val": loader(
+                it=train_iter(
+                    rng=np.random.default_rng(cfg.seed),
+                    total_size=len(val_ds),
+                    batch_size=cfg.batch_size,
+                ),
+                dataset=val_ds,
+            ),
+        }
+
+        run_dir = os.path.normpath(
+            os.path.join(DELPHI_CKPT_DIR, cfg.ckpt_dir, cfg.log.run_name)
+        )
+        self.logger = TrainLogger(
+            cfg=cfg.log,
+            exp_cfg=asdict(cfg),
+            dump_dir=run_dir,
+            model=model,  # type: ignore
+            optimizer=self.optimizer,
+            scheduler=self.scheduler,
+        )
+
+        self.iter_num = 0
+
+    def mini_step(self, loader: Iterator, *args, **kwargs) -> dict[str, torch.Tensor]:
+        X, T = next(loader)
+        X, T = X.to(self.device), T.to(self.device)
+        X_t0, X_t1 = X[:, :-1], X[:, 1:]
+        T_t0, T_t1 = T[:, :-1], T[:, 1:]
+
+        with self.ctx:
+            _, loss, _ = self.model(idx=X_t0, targets=X_t1, age=T_t0, targets_age=T_t1)
+
+        return loss
+
+    @torch.no_grad()
+    def estimate_loss(
+        self, loaders: dict[str, Iterator], *args, **kwargs
+    ) -> tuple[dict, dict]:
+        self.model.eval()
+        eval_loss = {}
+        for split in ["train", "val"]:
+            split_loss = defaultdict(float)
+            for _ in range(self.cfg.eval_iters):
+                loss = self.mini_step(loader=loaders[split])
+                for key in loss.keys():
+                    split_loss[key] += loss[key].item()
+            split_loss = dict(split_loss)
+            for key in split_loss.keys():
+                split_loss[key] /= self.cfg.eval_iters
+            eval_loss[split] = split_loss
+
+        self.model.train()
+
+        return eval_loss["train"], eval_loss["val"]
+
+    def train(self):
+
+        self.model.to(self.device)
+        if self.cfg.compile:
+            print("compiling the model... (takes a ~minute)")
+            self.model = torch.compile(self.model)
+
+        while True:
+
+            # evaluate the loss on train/val sets and write checkpoints
+            if self.iter_num % self.cfg.eval_interval == 0 and self.iter_num > 0:
+                _, val_loss = self.estimate_loss(self.estimate_loaders)
+                self.logger.eval_step(step=self.iter_num, loss=val_loss)
+
+            if self.iter_num == 0 and self.cfg.eval_only:
+                break
+
+            # forward backward update, with optional gradient accumulation to simulate larger batch size
+            # and using the GradScaler if data type is float16``
+            for _ in range(self.cfg.gradient_accumulation_steps):
+                loss = self.mini_step(loader=self.train_loader)
+
+                # backward pass, with gradient scaling if training in fp16
+                loss_agg = sum([loss[key] for key in loss.keys()])
+                self.scaler.scale(loss_agg).backward()  # type: ignore
+
+            # clip the gradient
+            if self.cfg.optim.grad_clip != 0.0:
+                self.scaler.unscale_(self.optimizer)
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), self.cfg.optim.grad_clip
+                )
+
+            self.logger.train_step(step=self.iter_num, loss=loss)
+            # step the optimizer and scaler if training in fp16
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+            # flush the gradients as soon as we can, no need for this memory anymore
+            self.optimizer.zero_grad(set_to_none=True)
+            self.scheduler.step()
+
+            self.logger.ckpt_step(step=self.iter_num)
+
+            self.iter_num += 1
+
+            # termination conditions
+            if self.iter_num > self.cfg.optim.max_iters:
+                break
