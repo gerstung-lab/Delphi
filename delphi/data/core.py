@@ -1,13 +1,17 @@
+import functools
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, List, Optional
+from typing import Iterator, Optional
 
 import numpy as np
 import pandas as pd
+import torch
 import yaml
 from scipy.sparse import coo_array
 
 from delphi.data.transform import (
+    add_no_event,
+    crop_contiguous,
     sort_by_time,
     trim_margin,
 )
@@ -130,6 +134,99 @@ class BaseDataConfig:
     data_dir: str = "ukb_real_data"
     subject_list: str = "participants.bin"
     seed: int = 42
+    no_event_interval: Optional[float] = 5
+    block_size: Optional[int] = 64
+
+
+class BaseDataset:
+
+    def __init__(self, cfg: BaseDataConfig, memmap: bool = False):
+
+        (
+            tokenizer,
+            self.start_pos,
+            self.seq_len,
+            self.participants,
+            self.tokens,
+            self.time_steps,
+            self.rng,
+        ) = load_core_data_package(cfg=cfg, memmap=memmap)
+        self.tokenizer = Tokenizer(tokenizer)
+
+        if cfg.no_event_interval is not None:
+            self.add_no_event = functools.partial(
+                add_no_event,
+                rng=self.rng,
+                interval=cfg.no_event_interval,
+                token=self.tokenizer["no_event"],
+            )
+        else:
+            self.add_no_event = lambda *args: args
+
+        if cfg.block_size is not None:
+            self.crop_block_size = functools.partial(
+                crop_contiguous, block_size=cfg.block_size, rng=self.rng
+            )
+        else:
+            self.crop_block_size = lambda *args: args
+
+    def __len__(self):
+        return self.participants.size
+
+    @property
+    def vocab_size(self):
+        return self.tokenizer.vocab_size
+
+    def get_batch(self, batch_idx: np.ndarray):
+
+        P = self.participants[batch_idx]
+        X = []
+        T = []
+        for i, pid in enumerate(P):
+            i = self.start_pos[pid]
+            l = self.seq_len[pid]
+            x_pid = self.tokens[i : i + l]
+            t_pid = self.time_steps[i : i + l]
+            X.append(x_pid)
+            T.append(t_pid)
+
+        X = collate_batch_data(X)
+        T = collate_batch_time(T)
+
+        X, T = self.add_no_event(X, T)
+        T, X = sort_by_time(T, X)
+        X, T = trim_margin(X, T, trim_val=0)
+        X, T = self.crop_block_size(X, T)
+
+        return X, T
+
+
+def build_datasets(train_cfg_dict, val_cfg_dict):
+
+    train_cfg = BaseDataConfig(**train_cfg_dict)
+    val_cfg = BaseDataConfig(**val_cfg_dict)
+
+    val_cfg.no_event_interval = train_cfg.no_event_interval
+    val_cfg.block_size = train_cfg.block_size
+
+    train_ds = BaseDataset(train_cfg)
+    val_ds = BaseDataset(val_cfg)
+
+    return train_ds, val_ds
+
+
+def load_sequences(
+    it: Iterator,
+    dataset: BaseDataset,
+) -> Iterator:
+
+    for idx in it:
+
+        X, T = dataset.get_batch(idx)
+        X = torch.tensor(X, dtype=torch.long)
+        T = torch.tensor(T, dtype=torch.float32)
+
+        yield X, T
 
 
 def load_core_data_package(cfg: BaseDataConfig, memmap: bool = False):
