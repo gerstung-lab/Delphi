@@ -18,10 +18,6 @@ class LossConfig:
     dt_beta: float = 1.0
     zero_inflate: bool = False
     zero_inflate_projector: str = "linear"
-    motor: bool = False
-    motor_n_hidden: int = 32
-    motor_time_bins: list = field(default_factory=list)
-    motor_task_tokens: list = field(default_factory=list)
 
 
 @dataclass
@@ -33,6 +29,7 @@ class GPT2Config:
     dropout: float = 0.0
     token_dropout: float = 0.0
     bias: bool = True
+    block_size: int = 64
 
 
 @dataclass
