@@ -29,10 +29,8 @@ from delphi.tokenizer import Tokenizer, update_tokenizer
 
 @dataclass
 class DataConfig(BaseDataConfig):
-    block_size: int = 64
     n_time_tokens: int = 10
     time_bins: list = field(default_factory=list)
-    no_event_interval: Optional[int] = None
 
 
 def is_strictly_ascending(arr: np.ndarray):
@@ -134,14 +132,19 @@ class EthosDataset:
                 token=self.tokenizer["no_event"],
                 rng=self.rng,
             )
+        else:
+            self.add_no_event = lambda *args: args
         self.ethos_sequence = partial(
             create_ethos_sequence,
             offset=self.time_token_offset,
             time_bins=self.time_bins,
         )
-        self.crop_block_size = partial(
-            crop_contiguous, block_size=cfg.block_size, rng=self.rng
-        )
+        if cfg.block_size is not None:
+            self.crop_block_size = partial(
+                crop_contiguous, block_size=cfg.block_size, rng=self.rng
+            )
+        else:
+            self.crop_block_size = lambda *args: args
 
     def __len__(self):
         return self.participants.size
@@ -180,10 +183,9 @@ class EthosDataset:
         X = collate_batch_data(X)
         T = collate_batch_time(T)
 
-        if hasattr(self, "add_no_event"):
-            X, T = self.add_no_event(X=X, T=T)
+        X, T = self.add_no_event(X, T)
         X = self.ethos_sequence(X=X, T=T)
-        X = self.crop_block_size(X=X)
+        X = self.crop_block_size(X)
 
         return X
 
@@ -194,6 +196,9 @@ def build_datasets(train_cfg_dict: dict, val_cfg_dict: dict):
     val_cfg = DataConfig(**val_cfg_dict)
 
     train_ds = EthosDataset(train_cfg)
+
+    val_cfg.no_event_interval = train_cfg.no_event_interval
+    val_cfg.block_size = train_cfg.block_size
     val_cfg.time_bins = train_ds.time_bins.tolist()
 
     val_ds = EthosDataset(val_cfg)
