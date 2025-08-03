@@ -75,7 +75,7 @@ def _estimate_time_bins(sample_t: np.ndarray, n_tokens: int):
     percentiles = np.linspace(0, 100, num=n_tokens + 1)
     percentiles = percentiles[:-1]
 
-    return np.percentile(delta, q=percentiles)
+    return np.round(np.percentile(delta, q=percentiles), decimals=1)
 
 
 class EthosDataset:
@@ -96,23 +96,26 @@ class EthosDataset:
 
         if len(cfg.time_bins) == 0:
             assert cfg.n_time_tokens is not None
-            print(f"\t - time bins not defined; estimating time bins...")
+            print(f"\t- time bins not defined; estimating time bins...")
             self.time_bins = self.estimate_time_bins(n_tokens=cfg.n_time_tokens)
         else:
-            print(f"\t - time bins found!")
+            print(f"\t- time bins found!")
             self.time_bins = np.array(cfg.time_bins)
             assert is_strictly_ascending(self.time_bins)
+        print(f"\t- time bins:")
+        for i in range(len(self.time_bins) - 1):
+            print(f"\t\t- {self.time_bins[i]} – {self.time_bins[i+1]}")
 
         n_bins = len(self.time_bins)
         time_tokenizer = dict()
         for i in range(n_bins):
-            start = int(self.time_bins[i])
+            start = self.time_bins[i]
             token = i + 1
             if i < n_bins - 1:
-                end = int(self.time_bins[i + 1])
+                end = self.time_bins[i + 1]
                 time_tokenizer[f"time-{start}-{end}"] = token
             else:
-                time_tokenizer[f"time-beyond-{start}"] = token
+                time_tokenizer[f"time-{start}-inf"] = token
 
         tokenizer, self.time_token_offset = update_tokenizer(
             base_tokenizer=base_tokenizer, add_tokenizer=time_tokenizer
@@ -139,9 +142,9 @@ class EthosDataset:
     def __len__(self):
         return self.participants.size
 
-    def estimate_time_bins(self, n_tokens: int, sample_size: int = 10000):
+    def estimate_time_bins(self, n_tokens: int, sample_size: int = 100000):
 
-        print(f"\t - estimating based on {sample_size} samples...")
+        print(f"\t- estimating based on {sample_size} samples...")
 
         pids = self.participants[
             self.rng.permutation(np.arange(len(self)))[np.arange(sample_size)]
