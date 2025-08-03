@@ -175,10 +175,6 @@ def train(cfg: TrainConfig):
         ignore_tokens = list(ignore_tokens)
     cfg.model.ignore_tokens = train_ds.tokenizer.encode(ignore_tokens)  # type: ignore
 
-    if cfg.model.loss.motor:
-        motor_task_tokens = parse_token_list(cfg.model.loss.motor_task_tokens)
-        cfg.model.loss.motor_task_tokens = train_ds.tokenizer.encode(motor_task_tokens)  # type: ignore
-
     iter_num = 0
 
     if cfg.init_from == "scratch":
