@@ -72,6 +72,7 @@ class BaseTrainer:
             self.ctx = nullcontext()
 
         self.model = model
+        self.model.to(self.device)
         self.optimizer, self.scheduler = configure_optimizers(
             model=model, cfg=cfg.optim, device_type=self.device_type
         )
@@ -152,7 +153,6 @@ class BaseTrainer:
 
     def train(self):
 
-        self.model.to(self.device)
         if self.cfg.compile:
             print("compiling the model... (takes a ~minute)")
             self.model = torch.compile(self.model)
