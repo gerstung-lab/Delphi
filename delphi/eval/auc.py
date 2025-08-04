@@ -197,12 +197,14 @@ def calibrate_auc(
             else:
                 raise NotImplementedError
 
-            batch_X = batch_X.numpy()
-            batch_T = batch_T.numpy()
+            batch_X = batch_X.detach().cpu().numpy()
+            batch_T = batch_T.detach().cpu().numpy()
             idx_lst.extend([x[t != -1e4] for x, t in zip(batch_X, batch_T)])
             age_lst.extend([t[t != -1e4] for t, t in zip(batch_X, batch_T)])
             batch_sub_idx, batch_pos_idx = np.nonzero(batch_T != -1e4)
-            logits_lst.append(batch_logits[batch_sub_idx, batch_pos_idx].numpy())
+            logits_lst.append(
+                batch_logits[batch_sub_idx, batch_pos_idx].detach().cpu().numpy()
+            )
 
     X = core.collate_batch_data(idx_lst)
     T = core.collate_batch_time(age_lst)
