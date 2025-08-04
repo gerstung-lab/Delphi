@@ -169,6 +169,7 @@ def calibrate_auc(
     model, _, tokenizer = load_ckpt(
         ckpt, model_cls=model_cls, model_cfg_cls=model_cfg_cls
     )
+    model.to(device)
     model.eval()
 
     ds = build_ds(task_args.data)
