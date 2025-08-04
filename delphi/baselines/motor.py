@@ -31,7 +31,7 @@ class MotorHead(nn.Module):
         super().__init__()
         self.config = config
         self.time_bins = torch.Tensor(self.config.motor_time_bins)
-        self.task_tokens = torch.Tensor(self.config.motor_task_tokens)
+        self.register_buffer("task_tokens", torch.Tensor(self.config.motor_task_tokens))
         self.n_bins = len(self.time_bins) - 1
 
         assert config.vocab_size is not None
