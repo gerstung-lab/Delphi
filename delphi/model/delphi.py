@@ -94,3 +94,27 @@ class Model(torch.nn.Module):
             loss = None
 
         return logits, loss, att
+
+    def eval_step(
+        self,
+        idx: torch.Tensor,
+        age: torch.Tensor,
+    ):
+
+        _, seq_len = idx.shape
+        assert seq_len <= self.config.block_size
+        token_emb = self.token_embed(idx)
+        age_emb = self.age_embed(age.unsqueeze(-1))
+        x = token_emb + age_emb
+
+        attn_mask = causal_attention_mask(pad=(idx > 0))
+        att = []
+        for block in self.transformer_blocks:
+            x, a = block(x, attn_mask)
+            att.append(a)
+        x = self.ln_f(x)
+        att = torch.stack(att)
+
+        logits = self.lm_head(x)
+
+        return logits, idx, age

@@ -52,17 +52,23 @@ def create_ethos_sequence(
 
     B = X.shape[0]
     L = X.shape[1] + deltas.shape[1]
+
     event_pos = np.arange(0, L, step=2)
     event_pos = np.broadcast_to(event_pos, (B, event_pos.size))
+    is_event = np.ones_like(event_pos)
+
     time_pos = np.arange(1, L, step=2)
     time_pos = np.tile(time_pos, (B, 1))
     time_pos[is_pad | same_time] = -1
+    is_time = np.zeros_like(time_pos)
+
     pos = np.hstack((event_pos, time_pos))
     tokens = np.hstack((X, deltas))
+    is_event = np.hstack([is_event, is_time]).astype(bool)
 
-    _, tokens = sort_by_time(pos, tokens)
+    _, tokens, is_event = sort_by_time(pos, tokens, is_event)
 
-    return tokens
+    return tokens, is_event
 
 
 def _estimate_time_bins(sample_t: np.ndarray, n_tokens: int):
@@ -78,6 +84,20 @@ def _estimate_time_bins(sample_t: np.ndarray, n_tokens: int):
     assert n_uniq == len(time_bins), "too many time tokens!"
 
     return time_bins
+
+
+def parse_time_bins(tokenizer: Tokenizer):
+
+    time_bins = list()
+    token_map = tokenizer.to_dict()
+    for token_key, token_val in token_map.items():
+        token_key = str(token_key)
+        if "time" in token_key:
+            start = float(token_key.split("-")[1])
+            end = float(token_key.split("-")[2])
+            time_bins.append(start)
+
+    return np.array(time_bins)
 
 
 class EthosDataset:
@@ -284,6 +304,45 @@ class Model(torch.nn.Module):
             loss = None
 
         return logits, loss
+
+    def eval_step(self, idx: torch.Tensor, age: torch.Tensor, time_bins: np.ndarray):
+
+        raw_idx = idx.clone()
+        raw_seq_len = idx.shape[1]
+        assert self.config.vocab_size is not None
+        max_event_token = self.config.vocab_size - len(time_bins) - 1
+
+        ethos_idx, is_event = create_ethos_sequence(
+            X=idx.numpy(), T=age.numpy(), time_bins=time_bins, offset=max_event_token
+        )
+        idx = torch.tensor(ethos_idx).to(idx.device)
+
+        batch_size, seq_len = idx.shape
+        assert seq_len <= self.config.block_size
+        x = self.token_embed(idx)
+
+        pos = torch.arange(seq_len, device=idx.device).view(1, -1).repeat(batch_size, 1)
+
+        is_pad = idx == 0
+        offset = is_pad.sum(dim=1, keepdim=True)
+        pos = torch.clamp(pos - offset, min=0)
+        x += self.pos_embed(pos)
+
+        attn_mask = causal_attention_mask(pad=(idx > 0))
+
+        att = []
+        for block in self.transformer_blocks:
+            x, a = block(x, attn_mask)
+            att.append(a)
+        x = self.ln_f(x)
+        att = torch.stack(att)
+
+        logits = self.lm_head(x)
+
+        logits = logits[is_event, :]
+        logits = logits.reshape(batch_size, raw_seq_len, -1)
+
+        return logits, raw_idx, age
 
 
 class Trainer(BaseTrainer):

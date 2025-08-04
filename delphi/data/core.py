@@ -201,6 +201,11 @@ class BaseDataset:
         return X, T
 
 
+def build_dataset(cfg: dict):
+
+    return BaseDataset(BaseDataConfig(**cfg))
+
+
 def build_datasets(train_cfg_dict, val_cfg_dict):
 
     train_cfg = BaseDataConfig(**train_cfg_dict)

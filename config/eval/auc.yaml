@@ -1,7 +1,14 @@
-task_name: auc-min_tim_gap_${task_args.min_time_gap}-event_input_only_${task_args.event_input_only}
+task_name: auc-min_tim_gap_${task_args.min_time_gap}
 task_type: auc
 task_input: forward
 task_args:
+  model_type: ethos
+  data:
+    data_dir: ukb_real_data
+    subject_list: ukb_real_data/participants/val_fold.bin
+    no_event_interval: 5
+    block_size: 256
+    seed: 42
   disease_lst: config/disease_list/doi.yaml
   min_time_gap: 0.1
   age_groups:

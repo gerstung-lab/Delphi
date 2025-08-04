@@ -1,16 +1,24 @@
 import json
+import math
 import os
 from dataclasses import dataclass, field
+from itertools import zip_longest
 from typing import Optional
 
 import numpy as np
+import torch
 import yaml
 from tqdm import tqdm
 
-from delphi import DAYS_PER_YEAR
-from delphi.data.core import subsample_tricolumnar, tricolumnar_to_2d
+from delphi import DAYS_PER_YEAR, experiment
+from delphi.baselines import ethos
+from delphi.data import core
+from delphi.data.transform import sort_by_time
 from delphi.eval import eval_task
-from delphi.tokenizer import Gender, load_tokenizer_from_yaml
+from delphi.model import delphi
+from delphi.model.config import GPT2Config
+from delphi.model.transformer import load_ckpt
+from delphi.tokenizer import Gender
 
 
 @dataclass
@@ -24,11 +32,15 @@ class TimeBins:
 
 @dataclass
 class CalibrateAUCArgs:
+    model_type: str = "delphi"
+    data: dict = field(default_factory=dict)
     disease_lst: str = ""
     age_groups: TimeBins = field(default_factory=TimeBins)
     min_time_gap: float = 0.1
     event_input_only: bool = True
     subsample: Optional[int] = None
+    device: str = "cpu"
+    batch_size: int = 128
 
 
 def parse_time_bins(time_bins: TimeBins) -> list[tuple[int, int]]:
@@ -122,6 +134,11 @@ def corrective_indices(T0: np.ndarray, T1: np.ndarray, offset: float):
     return C
 
 
+def move_batch_to_device(args, device: str):
+
+    return tuple([arg.to(device) for arg in args])
+
+
 @eval_task.register
 def calibrate_auc(
     task_args: CalibrateAUCArgs,
@@ -131,28 +148,66 @@ def calibrate_auc(
     **kwargs,
 ) -> None:
 
-    age_groups = parse_time_bins(task_args.age_groups)
-    age_group_keys = [f"{start}-{end}" for start, end in age_groups]
-    with open(task_args.disease_lst, "r") as f:
-        disease_lst = yaml.safe_load(f)
+    if task_args.model_type == "ethos":
+        model_cls = ethos.Model
+        model_cfg_cls = GPT2Config
+        build_ds = core.build_dataset
+        loader = core.load_sequences
+    elif task_args.model_type == "delphi":
+        model_cls = delphi.Model
+        model_cfg_cls = delphi.ModelConfig
+        build_ds = core.build_dataset
+        loader = core.load_sequences
+    elif task_args.model_type == "motor":
+        raise NotImplementedError
+    elif task_args.model_type == "delphi-m4":
+        raise NotImplementedError
+    else:
+        raise ValueError
 
-    logbook_path = os.path.join(ckpt, task_input, f"{task_name}.json")
-    logbook = {}
-
-    tokenizer = load_tokenizer_from_yaml(os.path.join(ckpt, "tokenizer.yaml"))
-
-    input_dir = os.path.join(ckpt, task_input)
-    logits_path = os.path.join(input_dir, "logits.bin")
-    xt_path = os.path.join(input_dir, "gen.bin")
-    logits = np.memmap(logits_path, dtype=np.float16, mode="r").reshape(
-        -1, tokenizer.vocab_size
+    device = task_args.device
+    model, _, tokenizer = load_ckpt(
+        ckpt, model_cls=model_cls, model_cfg_cls=model_cfg_cls
     )
-    XT = np.fromfile(xt_path, dtype=np.uint32).reshape(-1, 3)
+    model.eval()
 
-    XT, logits = subsample_tricolumnar(
-        XT=XT, logits=logits, subsample=task_args.subsample
+    ds = build_ds(task_args.data)
+    n_participants = len(ds) if task_args.subsample is None else task_args.subsample
+    it = core.eval_iter(total_size=n_participants, batch_size=128)
+    data_loader = loader(it=it, dataset=ds)
+    data_loader = tqdm(
+        data_loader, total=math.ceil(n_participants / task_args.batch_size), leave=True
     )
-    X, T = tricolumnar_to_2d(XT)
+
+    idx_lst = list()
+    age_lst = list()
+    logits_lst = list()
+    with torch.no_grad():
+        for batch_input in data_loader:
+            batch_input = move_batch_to_device(batch_input, device=device)
+
+            if task_args.model_type == "delphi":
+                batch_logits, batch_X, batch_T = model.eval_step(*batch_input)
+            elif task_args.model_type == "ethos":
+                time_bins = ethos.parse_time_bins(tokenizer)
+                batch_logits, batch_X, batch_T = model.eval_step(
+                    *batch_input, time_bins=time_bins
+                )
+            else:
+                raise NotImplementedError
+
+            batch_X = batch_X.numpy()
+            batch_T = batch_T.numpy()
+            idx_lst.extend([x[t != -1e4] for x, t in zip(batch_X, batch_T)])
+            age_lst.extend([t[t != -1e4] for t, t in zip(batch_X, batch_T)])
+            batch_sub_idx, batch_pos_idx = np.nonzero(batch_T != -1e4)
+            logits_lst.append(batch_logits[batch_sub_idx, batch_pos_idx].numpy())
+
+    X = core.collate_batch_data(idx_lst)
+    T = core.collate_batch_time(age_lst)
+    T, X = sort_by_time(T, X)
+    logits = np.concatenate(logits_lst)
+
     sub_idx, pos_idx = np.nonzero(T != -1e4)
 
     max_len = T.shape[1] - 1
@@ -174,12 +229,6 @@ def calibrate_auc(
     offset_pos_idx = offset_pos_idx[has_input]
     logits_idx = logits_idx[has_input]
 
-    if task_args.event_input_only:
-        is_event = X_t0[sub_idx, offset_pos_idx] > 0
-        sub_idx, pos_idx = sub_idx[is_event], pos_idx[is_event]
-        offset_pos_idx = offset_pos_idx[is_event]
-        logits_idx = logits_idx[is_event]
-
     logits_idx = logits_idx[np.arange(logits_idx.shape[0]) + offset_pos_idx - pos_idx]
     t_t0 = T_t0[sub_idx, offset_pos_idx]
     targets = X_t1[sub_idx, pos_idx]
@@ -192,6 +241,13 @@ def calibrate_auc(
         "either": is_female | is_male,
     }
 
+    age_groups = parse_time_bins(task_args.age_groups)
+    age_group_keys = [f"{start}-{end}" for start, end in age_groups]
+
+    with open(task_args.disease_lst, "r") as f:
+        disease_lst = yaml.safe_load(f)
+
+    logbook = {}
     for disease in tqdm(disease_lst):
         logbook[disease] = {}
         dis_token = tokenizer[disease]
@@ -239,5 +295,6 @@ def calibrate_auc(
                 "dis_count": len(all_dis),
             }
 
+    logbook_path = os.path.join(ckpt, f"{task_name}.json")
     with open(logbook_path, "w") as f:
         json.dump(logbook, f, indent=4)
