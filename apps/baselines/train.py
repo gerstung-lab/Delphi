@@ -39,8 +39,11 @@ def experiment(cfg: TrainConfig):
         loader = ethos.load_sequences
     elif cfg.model_type == "motor":
         train_ds, val_ds = core.build_datasets(cfg.train_data, cfg.val_data)
-        motor_task_tokens = parse_token_list(cfg.model["motor_task_tokens"])
-        cfg.model["motor_task_tokens"] = train_ds.tokenizer.encode(motor_task_tokens)  # type: ignore
+        if cfg.model["motor_task_tokens"] != "all":
+            motor_task_tokens = parse_token_list(cfg.model["motor_task_tokens"])
+            cfg.model["motor_task_tokens"] = train_ds.tokenizer.encode(motor_task_tokens)  # type: ignore
+        else:
+            cfg.model["motor_task_tokens"] = list(range(1, train_ds.vocab_size))
         model_cls = motor.Model
         model_cfg_cls = motor.ModelConfig
         trainer_cls = BaseTrainer
