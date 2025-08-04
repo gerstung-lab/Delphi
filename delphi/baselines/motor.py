@@ -255,7 +255,10 @@ class Model(torch.nn.Module):
                 h=x, age=age, targets=targets, targets_age=targets_age
             )
 
-            loss = {"loss_ce": loss_ce, "loss_motor": loss_motor}
+            loss = {
+                "loss_ce": loss_ce * self.config.ce_beta,
+                "loss_motor": loss_motor * self.config.motor_beta,
+            }
         else:
             logits = self.lm_head(x[:, [-1], :])
             loss = None
