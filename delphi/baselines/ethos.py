@@ -313,7 +313,10 @@ class Model(torch.nn.Module):
         max_event_token = self.config.vocab_size - len(time_bins) - 1
 
         ethos_idx, is_event = create_ethos_sequence(
-            X=idx.numpy(), T=age.numpy(), time_bins=time_bins, offset=max_event_token
+            X=idx.detach().cpu().numpy(),
+            T=age.detach().cpu().numpy(),
+            time_bins=time_bins,
+            offset=max_event_token,
         )
         idx = torch.tensor(ethos_idx).to(idx.device)
 
