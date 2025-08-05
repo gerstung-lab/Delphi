@@ -10,13 +10,10 @@ import yaml
 from tqdm import tqdm
 
 from delphi import DAYS_PER_YEAR
-from delphi.baselines import ethos, motor
 from delphi.data import core
 from delphi.data.transform import sort_by_time
 from delphi.eval import eval_task
-from delphi.model import delphi
-from delphi.model.config import GPT2Config
-from delphi.model.transformer import load_ckpt
+from delphi.experiment import load_ckpt
 from delphi.tokenizer import Gender
 
 
@@ -31,7 +28,6 @@ class TimeBins:
 
 @dataclass
 class CalibrateAUCArgs:
-    model_type: str = "delphi"
     data: dict = field(default_factory=dict)
     disease_lst: str = ""
     age_groups: TimeBins = field(default_factory=TimeBins)
@@ -147,37 +143,15 @@ def calibrate_auc(
     **kwargs,
 ) -> None:
 
-    if task_args.model_type == "ethos":
-        model_cls = ethos.Model
-        model_cfg_cls = GPT2Config
-        build_ds = core.build_dataset
-        loader = core.load_sequences
-    elif task_args.model_type == "delphi":
-        model_cls = delphi.Model
-        model_cfg_cls = delphi.ModelConfig
-        build_ds = core.build_dataset
-        loader = core.load_sequences
-    elif task_args.model_type == "motor":
-        model_cls = motor.Model
-        model_cfg_cls = motor.ModelConfig
-        build_ds = core.build_dataset
-        loader = core.load_sequences
-    elif task_args.model_type == "delphi-m4":
-        raise NotImplementedError
-    else:
-        raise ValueError
-
     device = task_args.device
-    model, _, tokenizer = load_ckpt(
-        ckpt, model_cls=model_cls, model_cfg_cls=model_cfg_cls
-    )
+    model, _, tokenizer = load_ckpt(ckpt)
     model.to(device)
     model.eval()
 
-    ds = build_ds(task_args.data)
+    ds = core.build_dataset(task_args.data)
     n_participants = len(ds) if task_args.subsample is None else task_args.subsample
     it = core.eval_iter(total_size=n_participants, batch_size=128)
-    data_loader = loader(it=it, dataset=ds)
+    data_loader = core.load_sequences(it=it, dataset=ds)
     data_loader = tqdm(
         data_loader, total=math.ceil(n_participants / task_args.batch_size), leave=True
     )
@@ -189,17 +163,7 @@ def calibrate_auc(
         for batch_input in data_loader:
             batch_input = move_batch_to_device(batch_input, device=device)
 
-            if task_args.model_type == "delphi":
-                batch_logits, batch_X, batch_T = model.eval_step(*batch_input)
-            elif task_args.model_type == "ethos":
-                time_bins = ethos.parse_time_bins(tokenizer)
-                batch_logits, batch_X, batch_T = model.eval_step(
-                    *batch_input, time_bins=time_bins
-                )
-            elif task_args.model_type == "motor":
-                batch_logits, batch_X, batch_T = model.eval_step(*batch_input)
-            else:
-                raise ValueError
+            batch_logits, batch_X, batch_T = model.eval_step(*batch_input)
 
             batch_X = batch_X.detach().cpu().numpy()
             batch_T = batch_T.detach().cpu().numpy()

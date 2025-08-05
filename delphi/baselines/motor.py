@@ -225,6 +225,7 @@ def broadcast_delta_t(
 
 
 class Model(torch.nn.Module):
+    model_type = "motor"
 
     def __init__(self, config: ModelConfig):
         super().__init__()

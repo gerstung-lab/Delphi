@@ -87,7 +87,7 @@ def experiment(cfg: TrainConfig):
             pieces = motor.estimate_pieces(
                 X=X,
                 T=T,
-                task_tokens=cfg.model["motor_task_tokens"],
+                task_tokens=cfg.model["motor_task_tokens"],  # type: ignore
                 n_pieces=cfg.model["motor_n_pieces"],
                 vocab_size=train_ds.vocab_size,
             )

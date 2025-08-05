@@ -1,13 +1,10 @@
 import math
-from pathlib import Path
 from typing import Optional
 
 import torch
 import torch.nn as nn
-from omegaconf import OmegaConf
 from torch.nn import functional as F
 
-from delphi.config import dataclass_from_dict
 from delphi.model.components import (
     DelphiEmbedding,
     causal_attention_mask,
@@ -145,6 +142,7 @@ def initialize_weights(model: torch.nn.Module, config: GPT2Config):
 
 
 class Delphi(torch.nn.Module):
+    model_type = "delphi-m4"
 
     def __init__(self, config: DelphiConfig):
         super().__init__()
@@ -265,34 +263,3 @@ class Delphi(torch.nn.Module):
         modality = torch.cat((modality, modality_ext), dim=1)
 
         return idx, age, modality, biomarker
-
-
-def load_ckpt(
-    ckpt_path,
-    model_cls=Delphi,
-    model_cfg_cls=DelphiConfig,
-):
-
-    ckpt_path = Path(ckpt_path)
-    train_cfg = OmegaConf.load(ckpt_path / "config.yaml")
-    ckpt_dict = torch.load(
-        ckpt_path / "ckpt.pt",
-        map_location=torch.device("cpu") if not torch.cuda.is_available() else None,
-    )
-
-    param_dtype = dict(
-        float32=torch.float32,
-        float64=torch.float64,
-        float16=torch.float16,
-        bfloat16=torch.bfloat16,
-    )[train_cfg.dtype]
-    model_cfg = dataclass_from_dict(model_cfg_cls, train_cfg.model, strict=False)
-    model = model_cls(model_cfg)
-    model.load_state_dict(ckpt_dict["model"])
-    model = model.eval()
-    for param in model.parameters():
-        param.data = param.data.to(dtype=param_dtype)
-
-    tokenizer = load_tokenizer_from_yaml(ckpt_path / "tokenizer.yaml")
-
-    return model, train_cfg, tokenizer

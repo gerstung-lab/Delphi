@@ -220,6 +220,7 @@ class TrainLogger:
 
         checkpoint = {
             "model": self.model.state_dict(),
+            "model_type": self.model.model_type,
             "optimizer": self.optimizer.state_dict(),
             "model_args": self.exp_cfg["model"],
             "iter_num": step,

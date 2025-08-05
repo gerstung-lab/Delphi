@@ -2,15 +2,22 @@ import os
 from collections import defaultdict
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
 import numpy as np
 import torch
+from omegaconf import OmegaConf
 
+from delphi.baselines import ethos, motor
+from delphi.config import dataclass_from_dict
 from delphi.data.core import train_iter
 from delphi.env import DELPHI_CKPT_DIR
 from delphi.log import TrainLogConfig, TrainLogger
+from delphi.model import delphi
+from delphi.model.transformer import Delphi, DelphiConfig
 from delphi.optim import OptimConfig, configure_optimizers
+from delphi.tokenizer import Tokenizer, load_tokenizer_from_yaml
 
 
 @dataclass
@@ -198,3 +205,39 @@ class BaseTrainer:
             # termination conditions
             if self.iter_num > self.cfg.optim.max_iters:
                 break
+
+
+def load_ckpt(ckpt_path):
+
+    ckpt_path = Path(ckpt_path)
+    train_cfg = OmegaConf.load(ckpt_path / "config.yaml")
+    ckpt_dict = torch.load(
+        ckpt_path / "ckpt.pt",
+        map_location=torch.device("cpu") if not torch.cuda.is_available() else None,
+    )
+    model_type = ckpt_dict["model_type"]
+    if model_type == "delphi":
+        model_cfg_cls = delphi.ModelConfig
+        model_cls = delphi.Model
+    elif model_type == "delphi-m4":
+        model_cfg_cls = DelphiConfig
+        model_cls = Delphi
+    elif model_type == "ethos":
+        model_cfg_cls = ethos.ModelConfig
+        model_cls = ethos.Model
+    elif model_type == "motor":
+        model_cfg_cls = motor.ModelConfig
+        model_cls = motor.Model
+    else:
+        raise ValueError
+
+    model_cfg = dataclass_from_dict(
+        model_cfg_cls, ckpt_dict["model_args"], strict=False
+    )
+    model = model_cls(model_cfg)  # type: ignore
+    model.load_state_dict(ckpt_dict["model"])
+    model = model.eval()
+
+    tokenizer = load_tokenizer_from_yaml(ckpt_path / "tokenizer.yaml")
+
+    return model, train_cfg, tokenizer

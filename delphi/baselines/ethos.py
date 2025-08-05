@@ -94,6 +94,7 @@ class ModelConfig(GPT2Config):
 
 
 class Model(torch.nn.Module):
+    model_type = "ethos"
 
     def __init__(self, config: ModelConfig):
         super().__init__()
