@@ -2,7 +2,6 @@ import json
 import math
 import os
 from dataclasses import dataclass, field
-from itertools import zip_longest
 from typing import Optional
 
 import numpy as np
@@ -10,8 +9,8 @@ import torch
 import yaml
 from tqdm import tqdm
 
-from delphi import DAYS_PER_YEAR, experiment
-from delphi.baselines import ethos
+from delphi import DAYS_PER_YEAR
+from delphi.baselines import ethos, motor
 from delphi.data import core
 from delphi.data.transform import sort_by_time
 from delphi.eval import eval_task
@@ -159,7 +158,10 @@ def calibrate_auc(
         build_ds = core.build_dataset
         loader = core.load_sequences
     elif task_args.model_type == "motor":
-        raise NotImplementedError
+        model_cls = motor.Model
+        model_cfg_cls = motor.ModelConfig
+        build_ds = core.build_dataset
+        loader = core.load_sequences
     elif task_args.model_type == "delphi-m4":
         raise NotImplementedError
     else:
@@ -194,8 +196,10 @@ def calibrate_auc(
                 batch_logits, batch_X, batch_T = model.eval_step(
                     *batch_input, time_bins=time_bins
                 )
+            elif task_args.model_type == "motor":
+                batch_logits, batch_X, batch_T = model.eval_step(*batch_input)
             else:
-                raise NotImplementedError
+                raise ValueError
 
             batch_X = batch_X.detach().cpu().numpy()
             batch_T = batch_T.detach().cpu().numpy()

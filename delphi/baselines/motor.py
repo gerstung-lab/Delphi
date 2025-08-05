@@ -75,9 +75,9 @@ class MotorHead(nn.Module):
         self,
         h: torch.Tensor,
         age: torch.Tensor,
-        targets_age: torch.Tensor,
-        targets: torch.Tensor,
-    ) -> torch.Tensor:
+        targets_age: Optional[torch.Tensor] = None,
+        targets: Optional[torch.Tensor] = None,
+    ) -> tuple[Optional[torch.Tensor], torch.Tensor]:
 
         batch_size, seq_len = h.shape[0], h.shape[1]
         # h: [B, L, H]
@@ -89,30 +89,35 @@ class MotorHead(nn.Module):
         # h: [B, L, P, V]
         log_lambda = self.head[1](h)
 
-        # tte: [B, L, V]
-        tte, no_future_event, _ = time_to_event(
-            age=age,
-            targets_age=targets_age,
-            targets=targets,
-            task_tokens=self.task_tokens,
-            vocab_size=self.config.vocab_size,  # type: ignore
-        )
+        if targets is not None:
+            assert targets_age is not None
+            # tte: [B, L, V]
+            tte, no_future_event, _ = time_to_event(
+                age=age,
+                targets_age=targets_age,
+                targets=targets,
+                task_tokens=self.task_tokens,
+                vocab_size=self.config.vocab_size,  # type: ignore
+            )
 
-        # last_censor: [B, L]
-        last_censor = targets_age[:, -1].view(-1, 1) - age
+            # last_censor: [B, L]
+            last_censor = targets_age[:, -1].view(-1, 1) - age
 
-        surv_or_event_time, occur_in_piece = piecewise_time(
-            tte=tte,
-            no_future_event=no_future_event,
-            last_censor=last_censor,
-            time_bins=self.time_bins,
-        )
+            surv_or_event_time, occur_in_piece = piecewise_time(
+                tte=tte,
+                no_future_event=no_future_event,
+                last_censor=last_censor,
+                time_bins=self.time_bins,
+            )
 
-        ll_survival = (-torch.exp(log_lambda) * surv_or_event_time).mean()
-        ll_to_event = (log_lambda * occur_in_piece.float()).mean()
-        nll_loss = -(ll_survival + ll_to_event)
+            ll_survival = (-torch.exp(log_lambda) * surv_or_event_time).mean()
+            ll_to_event = (log_lambda * occur_in_piece.float()).mean()
+            nll_loss = -(ll_survival + ll_to_event)
 
-        return nll_loss
+        else:
+            nll_loss = None
+
+        return nll_loss, log_lambda
 
 
 def piecewise_time(
@@ -275,7 +280,7 @@ class Model(torch.nn.Module):
             loss_ce = torch.mean(loss_ce[is_valid_target])
 
             assert targets_age is not None
-            loss_motor = self.motor_head(
+            loss_motor, log_lambda = self.motor_head(
                 h=x, age=age, targets=targets, targets_age=targets_age
             )
 
@@ -284,7 +289,52 @@ class Model(torch.nn.Module):
                 "loss_motor": loss_motor * self.config.motor_beta,
             }
         else:
-            logits = self.lm_head(x[:, [-1], :])
-            loss = None
+            loss, log_lambda = self.motor_head(h=x, age=age)
 
-        return logits, loss, att
+        return log_lambda, loss, att
+
+    def eval_step(self, idx: torch.Tensor, age: torch.Tensor):
+
+        batch_size, seq_len = idx.shape
+        assert seq_len <= self.config.block_size
+        token_emb = self.token_embed(idx)
+        age_emb = self.age_embed(age.unsqueeze(-1))
+        x = token_emb + age_emb
+
+        attn_mask = causal_attention_mask(pad=(idx > 0))
+        att = []
+        for block in self.transformer_blocks:
+            x, a = block(x, attn_mask)
+            att.append(a)
+        x = self.ln_f(x)
+        att = torch.stack(att)
+
+        # log_lambda: [B, L, P, V]
+        _, log_lambda = self.motor_head(h=x, age=age)
+        log_lambda = log_lambda[:, :, :-1, :]
+
+        pieces = self.motor_head.time_bins
+        piece_duration = torch.diff(pieces)[:-1]
+
+        eps = 1e-6
+        weighted_avg_lamba = (
+            torch.exp(log_lambda)
+            * piece_duration.view(1, 1, -1, 1)
+            / piece_duration.sum()
+        ).sum(dim=-2)
+        log_task_lambda = torch.log(weighted_avg_lamba + eps)
+
+        # log_lambda[i][j][k] = log_task_lambda[i][j][r] where r = rank of k in task tokens
+        # self[i][j][index[i][j][k]] = src[i][j][k]  # if dim == 2
+        ranked_task_tokens, _ = torch.sort(self.motor_head.task_tokens)
+        ranked_task_tokens = torch.broadcast_to(
+            ranked_task_tokens, (batch_size, seq_len, -1)
+        ).long()
+        log_lambda = torch.full(
+            (batch_size, seq_len, self.config.vocab_size), fill_value=float("nan")
+        )
+        log_lambda = log_lambda.scatter_(
+            dim=2, index=ranked_task_tokens, src=log_task_lambda
+        )
+
+        return log_lambda, idx, age
