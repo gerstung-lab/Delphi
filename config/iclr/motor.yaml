@@ -19,6 +19,7 @@ val_data:
   subject_list: ukb_real_data/participants/val_fold.bin
   seed: 42
 model:
+  vocab_size: 1270
   n_layer: 12
   n_head: 12
   n_embd: 120
@@ -29,17 +30,13 @@ model:
   ce_beta: 0.0
   motor_beta: 1.0
   motor_n_hidden: 32
-  motor_time_bins:
-    - 0
-    - 300
-    - 600
-    - 900
-    - 1200
+  motor_n_pieces: 8
+  motor_pieces: null
   motor_task_tokens: all
 log:
   wandb_log: true
   wandb_project: ${ckpt_dir}
-  run_name: baseline
+  run_name: ${model.motor_n_pieces}_pieces_${model.motor_n_hidden}_hidden
   log_interval: 25
   always_ckpt_after_eval: true
   ckpt_interval: null

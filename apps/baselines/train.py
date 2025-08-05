@@ -2,6 +2,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
 from omegaconf import OmegaConf
 
 from delphi.baselines import ethos, motor
@@ -44,6 +45,24 @@ def experiment(cfg: TrainConfig):
             cfg.model["motor_task_tokens"] = train_ds.tokenizer.encode(motor_task_tokens)  # type: ignore
         else:
             cfg.model["motor_task_tokens"] = list(range(1, train_ds.vocab_size))
+
+        if cfg.model["motor_pieces"] is None:
+            rng = np.random.default_rng()
+            sample_idx = rng.permutation(np.arange(len(train_ds)))[:100000]
+            X, T = train_ds.get_batch(sample_idx)
+
+            pieces = motor.estimate_pieces(
+                X=X,
+                T=T,
+                task_tokens=cfg.model["motor_task_tokens"],
+                n_pieces=cfg.model["motor_n_pieces"],
+                vocab_size=train_ds.vocab_size,
+            )
+            cfg.model["motor_pieces"] = pieces.tolist()
+        print(f"motor time pieces:")
+        for i in range(len(pieces) - 1):
+            print(f"\t- {pieces[i]} – {pieces[i+1]}")
+
         model_cls = motor.Model
         model_cfg_cls = motor.ModelConfig
         trainer_cls = BaseTrainer

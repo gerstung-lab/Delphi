@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -16,12 +17,35 @@ from delphi.model.transformer import (
 )
 
 
+def estimate_pieces(
+    X: np.ndarray, T: np.ndarray, task_tokens: list, vocab_size: int, n_pieces: int
+):
+
+    targets = torch.from_numpy(X[:, 1:])
+    age, targets_age = torch.from_numpy(T[:, :-1]), torch.from_numpy(T[:, 1:])
+
+    tte, _, _ = time_to_event(
+        age=age,
+        targets_age=targets_age,
+        targets=targets,
+        task_tokens=torch.Tensor(task_tokens),
+        vocab_size=vocab_size,
+    )
+
+    pieces = np.percentile(tte.ravel(), np.linspace(0, 100, n_pieces + 1))
+    pieces[0] = 0
+    pieces[-1] = float("inf")
+
+    return pieces
+
+
 @dataclass
 class ModelConfig(GPT2Config):
     ce_beta: float = 0.0
     motor_beta: float = 1.0
     motor_n_hidden: int = 32
-    motor_time_bins: list = field(default_factory=list)
+    motor_n_pieces: int = 8
+    motor_pieces: Optional[list] = None
     motor_task_tokens: list = field(default_factory=list)
 
 
@@ -30,7 +54,7 @@ class MotorHead(nn.Module):
     def __init__(self, config: ModelConfig):
         super().__init__()
         self.config = config
-        self.time_bins = torch.Tensor(self.config.motor_time_bins)
+        self.register_buffer("time_bins", torch.Tensor(self.config.motor_pieces))
         self.register_buffer("task_tokens", torch.Tensor(self.config.motor_task_tokens))
         self.n_bins = len(self.time_bins) - 1
 
