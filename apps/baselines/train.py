@@ -48,7 +48,7 @@ def experiment(cfg: TrainConfig):
 
         if cfg.model["motor_pieces"] is None:
             rng = np.random.default_rng()
-            sample_idx = rng.permutation(np.arange(len(train_ds)))[:100000]
+            sample_idx = rng.permutation(np.arange(len(train_ds)))[:10000]
             X, T = train_ds.get_batch(sample_idx)
 
             pieces = motor.estimate_pieces(
