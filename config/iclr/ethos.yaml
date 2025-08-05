@@ -12,7 +12,6 @@ train_data:
   data_dir: ukb_real_data
   subject_list: ukb_real_data/participants/train_fold.bin
   seed: 42
-  n_time_tokens: 100
   block_size: ${model.block_size}
   no_event_interval: 5
 val_data:
@@ -20,6 +19,8 @@ val_data:
   subject_list: ukb_real_data/participants/val_fold.bin
   seed: 42
 model:
+  base_vocab_size: 1270
+  vocab_size: 1370
   n_layer: 12
   n_head: 12
   n_embd: 120
@@ -27,10 +28,12 @@ model:
   token_dropout: 0.0
   bias: true
   block_size: 256
+  n_time_tokens: 100
+  time_bins: []
 log:
   wandb_log: true
   wandb_project: ${ckpt_dir}
-  run_name: ${train_data.n_time_tokens}_time_tokens
+  run_name: ${model.n_time_tokens}_time_tokens
   log_interval: 25
   always_ckpt_after_eval: true
   ckpt_interval: null

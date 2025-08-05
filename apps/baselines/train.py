@@ -11,8 +11,9 @@ from delphi.env import DELPHI_CKPT_DIR
 from delphi.experiment import BaseTrainer, TrainBaseConfig
 from delphi.log import TrainLogConfig
 from delphi.model import delphi
-from delphi.model.config import GPT2Config, parse_token_list
+from delphi.model.config import parse_token_list
 from delphi.optim import OptimConfig
+from delphi.tokenizer import Tokenizer, update_tokenizer
 
 
 @dataclass
@@ -32,14 +33,46 @@ def experiment(cfg: TrainConfig):
     run_dir = Path(DELPHI_CKPT_DIR) / cfg.log.run_name
     os.makedirs(run_dir, exist_ok=True)
 
+    train_ds, val_ds = core.build_datasets(cfg.train_data, cfg.val_data)
+    loader = core.load_sequences
+
     if cfg.model_type == "ethos":
-        train_ds, val_ds = ethos.build_datasets(cfg.train_data, cfg.val_data)
+
+        if len(cfg.model["time_bins"]) == 0:
+            assert cfg.model["n_time_tokens"] is not None
+            print(f"\t- time bins not defined; estimating time bins...")
+
+            rng = np.random.default_rng(cfg.seed)
+            sample_idx = rng.permutation(np.arange(len(train_ds)))[:10000]
+            _, T = train_ds.get_batch(sample_idx)
+
+            cfg.model["time_bins"] = ethos.estimate_time_bins(
+                sample_t=T[T != -1e4], n_tokens=cfg.model["n_time_tokens"]
+            ).tolist()
+
+        print(f"time bins:")
+        for i in range(len(cfg.model["time_bins"]) - 1):
+            print(f"\t\t- {cfg.model['time_bins'][i]} – {cfg.model['time_bins'][i+1]}")
+
+        n_bins = len(cfg.model["time_bins"])
+        time_tokenizer = dict()
+        for i in range(n_bins):
+            start = cfg.model["time_bins"][i]
+            token = i + 1
+            if i < n_bins - 1:
+                end = cfg.model["time_bins"][i + 1]
+                time_tokenizer[f"time-{start}-{end}"] = token
+            else:
+                time_tokenizer[f"time-{start}-inf"] = token
+
+        tokenizer, _ = update_tokenizer(
+            base_tokenizer=train_ds.tokenizer.to_dict(), add_tokenizer=time_tokenizer
+        )
+        train_ds.tokenizer = Tokenizer(tokenizer)
+
         model_cls = ethos.Model
-        model_cfg_cls = GPT2Config
-        trainer_cls = ethos.Trainer
-        loader = ethos.load_sequences
+        model_cfg_cls = ethos.ModelConfig
     elif cfg.model_type == "motor":
-        train_ds, val_ds = core.build_datasets(cfg.train_data, cfg.val_data)
         if cfg.model["motor_task_tokens"] != "all":
             motor_task_tokens = parse_token_list(cfg.model["motor_task_tokens"])
             cfg.model["motor_task_tokens"] = train_ds.tokenizer.encode(motor_task_tokens)  # type: ignore
@@ -65,37 +98,20 @@ def experiment(cfg: TrainConfig):
 
         model_cls = motor.Model
         model_cfg_cls = motor.ModelConfig
-        trainer_cls = BaseTrainer
-        loader = core.load_sequences
     elif cfg.model_type == "delphi":
-        train_ds, val_ds = core.build_datasets(cfg.train_data, cfg.val_data)
         model_cls = delphi.Model
         model_cfg_cls = delphi.ModelConfig
-        trainer_cls = BaseTrainer
-        loader = core.load_sequences
     else:
         raise ValueError
 
-    tokenizer = train_ds.tokenizer
     model_cfg = model_cfg_cls(**cfg.model)
-    if model_cfg.vocab_size is None:
-        model_cfg.vocab_size = tokenizer.vocab_size
-        print(
-            f"\nvocab_size not set, using vocab size of training dataset's tokenizer: {model_cfg.vocab_size}"
-        )
-    else:
-        print(f"vocab_size: {model_cfg.vocab_size}")
-        assert (
-            model_cfg.vocab_size == tokenizer.vocab_size
-        ), f"inconsistent vocab size between tokenizer ({tokenizer.vocab_size}) and model"
-
     if cfg.init_from == "scratch":
         print("Initializing a new model from scratch")
         model = model_cls(model_cfg)  # type: ignore
     else:
         raise NotImplementedError
 
-    trainer = trainer_cls(
+    trainer = BaseTrainer(
         cfg=cfg,
         model=model,
         train_ds=train_ds,

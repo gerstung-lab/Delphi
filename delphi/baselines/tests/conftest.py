@@ -1,12 +1,9 @@
-from pathlib import Path
-
 import numpy as np
 import pytest
 import torch
-from pytest import Config, FixtureRequest, Metafunc, Parser
+from pytest import FixtureRequest
 
 from delphi import DAYS_PER_YEAR
-from delphi.env import DELPHI_DATA_DIR
 
 
 @pytest.fixture(scope="class", params=[1, 10, 50])
@@ -32,6 +29,11 @@ def time_bins(request: FixtureRequest):
 
 @pytest.fixture(scope="class", params=[1, 20])
 def n_tasks(request: FixtureRequest):
+    return request.param
+
+
+@pytest.fixture(scope="class", params=[1, 10])
+def n_time_tokens(request: FixtureRequest):
     return request.param
 
 
@@ -97,6 +99,16 @@ def targets_age(case_generator: CaseGenerator):
 @pytest.fixture(scope="class")
 def age(case_generator: CaseGenerator):
     return case_generator.age
+
+
+@pytest.fixture(scope="class")
+def timesteps(case_generator: CaseGenerator):
+    return case_generator.timesteps
+
+
+@pytest.fixture(scope="class")
+def tokens(case_generator: CaseGenerator):
+    return case_generator.tokens
 
 
 @pytest.fixture(scope="class")

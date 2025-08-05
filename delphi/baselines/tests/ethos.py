@@ -1,55 +1,21 @@
-import numpy as np
 import torch
 
-from delphi import DAYS_PER_YEAR
-from delphi.baselines.ethos import _estimate_time_bins, create_ethos_sequence
-
-batch_size = 10
-seq_len = 60
-vocab_size = 100
-n_time_tokens = 10
-
-max_age = 100 * DAYS_PER_YEAR
-torch.manual_seed(42)
-
-sample_shape = (batch_size, seq_len)
-timesteps = torch.randint(0, int(max_age), sample_shape)
-timesteps, _ = torch.sort(timesteps, dim=1)
-tokens = torch.randint(1, vocab_size, sample_shape)
-
-max_pad = int(seq_len / 2)
-pad_idx = torch.randint(0, max_pad, (batch_size,))
-pad_mask = torch.arange(seq_len).reshape(1, -1) <= pad_idx.reshape(-1, 1)
-
-tokens[pad_mask] = 0
-timesteps[pad_mask] = -1e4
-
-timesteps_flat = timesteps.ravel().numpy()
-timesteps_flat = timesteps_flat[timesteps_flat != -1e4]
+from delphi.baselines.ethos import create_ethos_sequence, estimate_time_bins
 
 
-def test_time_bin_estimates():
+def no_missing_event_tokens(tokens: torch.Tensor, ethos_tokens: torch.Tensor):
 
-    time_bins = _estimate_time_bins(sample_t=timesteps_flat, n_tokens=n_time_tokens)
-
-    assert len(time_bins) == n_time_tokens
-    assert time_bins[0] > 0
-    assert time_bins[1] < timesteps.max()
-
-
-def no_missing_event_tokens(tokens: np.ndarray, ethos_tokens: np.ndarray):
-
-    _, uniq_count = np.unique(tokens, return_counts=True)
-    _, ethos_uniq_count = np.unique(ethos_tokens, return_counts=True)
+    _, uniq_count = torch.unique(tokens, return_counts=True)
+    _, ethos_uniq_count = torch.unique(ethos_tokens, return_counts=True)
 
     uniq_count = uniq_count[1:]
     ethos_uniq_count = ethos_uniq_count[1 : 1 + len(uniq_count)]
 
-    return np.array_equal(uniq_count, ethos_uniq_count)
+    return torch.equal(uniq_count, ethos_uniq_count)
 
 
 def correct_num_of_time_tokens(
-    tokens: np.ndarray, timesteps: np.ndarray, ethos_tokens: np.ndarray
+    tokens: torch.Tensor, timesteps: torch.Tensor, ethos_tokens: torch.Tensor
 ):
 
     for i in range(tokens.shape[0]):
@@ -59,7 +25,7 @@ def correct_num_of_time_tokens(
 
         t = timesteps[i, :]
         t = t[t != -1e4]
-        delta_t = np.diff(t)
+        delta_t = torch.diff(t)
         n_time_tokens = (delta_t > 0).sum()
 
         n_ethos_tokens = (ethos_tokens[i, :] > 0).sum()
@@ -72,22 +38,36 @@ def correct_num_of_time_tokens(
     return True
 
 
-def test_ethos_sequence():
+class TestEthos:
 
-    time_bins = _estimate_time_bins(sample_t=timesteps_flat, n_tokens=n_time_tokens)
+    def test_ethos_sequence(
+        self,
+        tokens: torch.Tensor,
+        timesteps: torch.Tensor,
+        n_time_tokens: int,
+        vocab_size: int,
+    ):
 
-    ethos_tokens = create_ethos_sequence(
-        X=tokens.numpy(),
-        T=timesteps.numpy(),
-        offset=vocab_size - 1,
-        time_bins=time_bins,
-    )
+        timesteps_flat = timesteps[timesteps != -1e4].ravel()
+        time_bins = estimate_time_bins(
+            sample_t=timesteps_flat.numpy(), n_tokens=n_time_tokens
+        )
+        assert time_bins[0] > 0
+        if n_time_tokens > 1:
+            assert time_bins[1] < timesteps.max()
 
-    max_token = vocab_size - 1 + n_time_tokens
-    assert ethos_tokens.max() == max_token
+        ethos_tokens, _ = create_ethos_sequence(
+            X=tokens,
+            T=timesteps,
+            offset=vocab_size - 1,
+            time_bins=torch.from_numpy(time_bins),
+        )
 
-    assert no_missing_event_tokens(tokens=tokens.numpy(), ethos_tokens=ethos_tokens)
+        max_token = vocab_size - 1 + n_time_tokens
+        assert ethos_tokens.max() == max_token
 
-    assert correct_num_of_time_tokens(
-        tokens=tokens.numpy(), ethos_tokens=ethos_tokens, timesteps=timesteps.numpy()
-    )
+        assert no_missing_event_tokens(tokens=tokens, ethos_tokens=ethos_tokens)
+
+        assert correct_num_of_time_tokens(
+            tokens=tokens, ethos_tokens=ethos_tokens, timesteps=timesteps
+        )
