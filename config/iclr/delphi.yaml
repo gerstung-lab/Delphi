@@ -26,6 +26,11 @@ model:
   token_dropout: 0.0
   bias: true
   block_size: 256
+  t_min: 1.0
+  ce_beta: 1.0
+  dt_beta: 1.0
+  zero_inflate: false
+  zero_inflate_projetor: linear
 log:
   wandb_log: true
   wandb_project: ${ckpt_dir}
