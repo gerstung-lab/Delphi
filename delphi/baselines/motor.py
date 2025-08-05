@@ -311,18 +311,20 @@ class Model(torch.nn.Module):
 
         # log_lambda: [B, L, P, V]
         _, log_lambda = self.motor_head(h=x, age=age)
-        log_lambda = log_lambda[:, :, :-1, :]
 
         pieces = self.motor_head.time_bins
-        piece_duration = torch.diff(pieces)[:-1]
-
-        eps = 1e-6
-        weighted_avg_lamba = (
-            torch.exp(log_lambda)
-            * piece_duration.view(1, 1, -1, 1)
-            / piece_duration.sum()
-        ).sum(dim=-2)
-        log_task_lambda = torch.log(weighted_avg_lamba + eps)
+        if len(pieces) == 2:
+            log_task_lambda = log_lambda.squeeze(-2)
+        else:
+            piece_duration = torch.diff(pieces)[:-1]
+            log_lambda = log_lambda[:, :, :-1, :]
+            weighted_avg_lamba = (
+                torch.exp(log_lambda)
+                * piece_duration.view(1, 1, -1, 1)
+                / piece_duration.sum()
+            ).sum(dim=-2)
+            eps = 1e-6
+            log_task_lambda = torch.log(weighted_avg_lamba + eps)
 
         # log_lambda[i][j][k] = log_task_lambda[i][j][r] where r = rank of k in task tokens
         # self[i][j][index[i][j][k]] = src[i][j][k]  # if dim == 2
