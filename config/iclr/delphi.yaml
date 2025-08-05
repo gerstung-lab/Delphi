@@ -29,7 +29,7 @@ model:
 log:
   wandb_log: true
   wandb_project: ${ckpt_dir}
-  run_name: delphi-baseline
+  run_name: delphi_no_event_${train_data.no_event_interval}
   log_interval: 25
   always_ckpt_after_eval: true
   ckpt_interval: null
