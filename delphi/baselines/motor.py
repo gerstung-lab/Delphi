@@ -330,8 +330,11 @@ class Model(torch.nn.Module):
         ranked_task_tokens = torch.broadcast_to(
             ranked_task_tokens, (batch_size, seq_len, -1)
         ).long()
+        # non-task tokens have nan for lambda's
         log_lambda = torch.full(
-            (batch_size, seq_len, self.config.vocab_size), fill_value=float("nan")
+            (batch_size, seq_len, self.config.vocab_size),
+            fill_value=float("nan"),
+            device=log_task_lambda.device,
         )
         log_lambda = log_lambda.scatter_(
             dim=2, index=ranked_task_tokens, src=log_task_lambda
