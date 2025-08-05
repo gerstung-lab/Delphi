@@ -47,7 +47,7 @@ def experiment(cfg: TrainConfig):
             cfg.model["motor_task_tokens"] = list(range(1, train_ds.vocab_size))
 
         if cfg.model["motor_pieces"] is None:
-            rng = np.random.default_rng()
+            rng = np.random.default_rng(cfg.seed)
             sample_idx = rng.permutation(np.arange(len(train_ds)))[:10000]
             X, T = train_ds.get_batch(sample_idx)
 
