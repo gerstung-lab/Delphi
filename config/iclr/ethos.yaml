@@ -27,7 +27,7 @@ model:
   dropout: 0.1
   token_dropout: 0.0
   bias: true
-  block_size: 256
+  block_size: 512
   n_time_tokens: 100
   time_bins: []
 log:
