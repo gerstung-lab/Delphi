@@ -27,7 +27,6 @@ class GPT2Config:
 @dataclass
 class DelphiConfig(GPT2Config):
     vocab_size: Optional[int] = None
-    t_min: float = 1.0
     # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
     mask_ties: bool = False
     ignore_tokens: list = field(default_factory=lambda: [0])

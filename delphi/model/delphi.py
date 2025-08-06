@@ -18,7 +18,6 @@ from delphi.model.transformer import (
 
 @dataclass
 class ModelConfig(GPT2Config):
-    t_min: float = 1.0
     ce_beta: float = 1.0
     dt_beta: float = 1.0
     zero_inflate: bool = False
