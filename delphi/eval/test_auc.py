@@ -14,7 +14,7 @@ def ordinal_mann_whitney_auc(x1: np.ndarray, x2: np.ndarray) -> float:
     return U1 / n1 / n2
 
 
-def test_mann_whitney_auc():
+def test_equivalence():
 
     rng = np.random.default_rng()
     x12 = rng.choice(20, size=10, replace=False)
