@@ -19,6 +19,7 @@ val_data:
   subject_list: ukb_real_data/participants/val_fold.bin
   seed: 42
 model:
+  vocab_size: 1270
   n_layer: 12
   n_head: 12
   n_embd: 120
@@ -30,7 +31,7 @@ model:
   ce_beta: 1.0
   dt_beta: 1.0
   zero_inflate: false
-  zero_inflate_projetor: linear
+  zero_inflate_projector: linear
 log:
   wandb_log: true
   wandb_project: ${ckpt_dir}
@@ -40,7 +41,7 @@ log:
   ckpt_interval: null
 optim:
   learning_rate: 6e-4
-  max_iters: 10000
+  max_iters: 50000
   weight_decay: 2e-1
   lr_decay_iters: ${optim.max_iters}
   min_lr: 6e-5

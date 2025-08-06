@@ -42,7 +42,7 @@ log:
   ckpt_interval: null
 optim:
   learning_rate: 6e-4
-  max_iters: 10000
+  max_iters: 50000
   weight_decay: 2e-1
   lr_decay_iters: ${optim.max_iters}
   min_lr: 6e-5
