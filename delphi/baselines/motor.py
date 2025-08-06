@@ -216,12 +216,11 @@ def time_to_event(
 
 
 def broadcast_delta_t(
-    age: torch.Tensor,
-    targets_age: torch.Tensor,
+    age: torch.Tensor, targets_age: torch.Tensor, eps: float = 1.0
 ) -> torch.Tensor:
 
     delta_t = targets_age.unsqueeze(-2) - age.unsqueeze(-1)  # [B, L, L]
-    return delta_t  # [B, L, L]
+    return torch.clamp(delta_t, min=eps)  # [B, L, L]
 
 
 class Model(torch.nn.Module):

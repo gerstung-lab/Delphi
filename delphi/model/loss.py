@@ -42,8 +42,8 @@ class CompetingExpHead(nn.Module):
     ) -> torch.Tensor:
 
         lse = torch.logsumexp(logits, -1)
-        lse = -torch.log(torch.exp(-lse) + 1e-6)
-        ldt = -torch.log(delta_t + 1e-6)
+        lse = -torch.log(torch.exp(-lse) + 1.0)
+        ldt = -torch.log(delta_t + 1.0)
         exp_log_likelihood = lse - torch.exp(lse - ldt)
 
         if self.config.zero_inflate:
