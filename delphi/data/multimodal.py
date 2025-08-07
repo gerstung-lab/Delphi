@@ -312,7 +312,7 @@ def load_prompt_sequences(
         M = torch.tensor(M, dtype=torch.long)
         biomarker_data = biomarker_to_tensor(biomarker_data=biomarker_data)
 
-    yield X, T, M, biomarker_data
+        yield X, T, M, biomarker_data
 
 
 def pad_trailing_biomarkers(
