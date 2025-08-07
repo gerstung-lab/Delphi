@@ -142,9 +142,7 @@ def move_batch_to_device(args, device: str):
 def calibrate_auc(
     task_args: CalibrateAUCArgs,
     task_name: str,
-    task_input: str,
     ckpt: str,
-    **kwargs,
 ) -> None:
 
     device = task_args.device

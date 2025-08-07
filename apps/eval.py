@@ -29,7 +29,6 @@ task_type_to_args_type = {
 class TaskConfig:
     task_name: str
     task_type: str
-    task_input: str
     task_args: Any
 
 
@@ -48,7 +47,6 @@ def eval(cfg: TaskConfig, ckpt: str):
     eval_task(
         task_args,
         task_name=cfg.task_name,
-        task_input=cfg.task_input,
         ckpt=ckpt,
     )
 
