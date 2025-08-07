@@ -1,0 +1,15 @@
+task_name: future
+task_type: future
+task_args:
+  data:
+    data_dir: ukb_real_data
+    subject_list: ukb_real_data/participants/val_fold.bin
+    no_event_interval: 5
+    block_size: 256
+    seed: 42
+  disease_lst:
+    - config/disease_list/doi.yaml
+  n_samples_per_person: 32
+  age_at_prompt: 40
+  termination_tokens:
+    - death

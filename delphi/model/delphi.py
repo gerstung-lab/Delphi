@@ -14,6 +14,7 @@ from delphi.model.transformer import (
     count_params,
     initialize_weights,
 )
+from delphi.sampler import sample_competing_exponentials, truncate_top_k
 
 
 @dataclass
@@ -118,3 +119,32 @@ class Model(torch.nn.Module):
         logits = self.lm_head(x)
 
         return logits, idx, age
+
+    @torch.no_grad()
+    def next_token(
+        self,
+        idx: torch.Tensor,
+        age: torch.Tensor,
+        temperature: float = 1.0,
+        top_k: Optional[int] = None,
+        no_repeat: bool = True,
+    ):
+
+        logits, _, _ = self.forward(idx, age)
+        logits = logits[:, -1, :] / temperature
+
+        if top_k is not None:
+            logits = truncate_top_k(logits, top_k)
+
+        if no_repeat:
+            fill = idx + 0
+            fill[fill == 1] = 0
+            logits = logits.scatter_(1, fill, -torch.inf)
+
+        idx_next, time_til_next = sample_competing_exponentials(logits)
+        age_next = age[..., [-1]] + time_til_next
+
+        idx = torch.cat((idx, idx_next), dim=1)
+        age = torch.cat((age, age_next), dim=1)
+
+        return idx, age

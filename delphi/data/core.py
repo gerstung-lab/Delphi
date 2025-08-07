@@ -234,6 +234,35 @@ def load_sequences(
         yield X, T
 
 
+def load_prompt_sequences(it: Iterator, dataset: BaseDataset, start_age: float):
+
+    for idx in it:
+
+        X, T = dataset.get_batch(idx)
+
+        too_old = T > start_age
+        X[too_old] = 0
+        T[too_old] = -1e4
+
+        pad = ((0, 0), (0, 1))
+        no_event_token = dataset.tokenizer["no_event"]
+        X = np.pad(X, pad, "constant", constant_values=no_event_token)
+        T = np.pad(T, pad, "constant", constant_values=start_age)
+
+        T, X = sort_by_time(T, X)
+        X, T = trim_margin(X, T, trim_val=0)
+
+        X = torch.tensor(X, dtype=torch.long)
+        T = torch.tensor(T, dtype=torch.float32)
+
+        yield X, T
+
+
+def duplicate_participants(X: torch.Tensor, T: torch.Tensor, n_repeat: int):
+
+    return X.repeat(n_repeat, 1), T.repeat(n_repeat, 1)
+
+
 def load_core_data_package(cfg: BaseDataConfig, memmap: bool = False):
 
     dataset_dir = Path(DELPHI_DATA_DIR) / cfg.data_dir

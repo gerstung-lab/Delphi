@@ -5,7 +5,6 @@ import torch
 import torch.nn.functional as F
 
 from delphi import DAYS_PER_YEAR
-from delphi.eval import clock
 
 
 def truncate_top_k(logits: torch.Tensor, k: int) -> torch.Tensor:
@@ -93,13 +92,10 @@ class CausalSamplerConfig:
     termination_tokens: list[str] = field(default_factory=list)
 
 
-@clock
 @torch.no_grad()
 def generate(
     model: torch.nn.Module,
-    idx: torch.Tensor,
-    age: torch.Tensor,
-    addon: list,
+    model_input: list | tuple,
     seed: int,
     max_age: float,  # in days
     termination_tokens: torch.Tensor,
@@ -107,20 +103,16 @@ def generate(
     top_k: Optional[int] = None,
     temperature: float = 1.0,
 ):
-    """
-    Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
-    the sequence max_new_tokens times, feeding the predictions back into the model each time.
-    Most likely you'll want to make sure to be in model.eval() mode of operation for this.
-    """
 
     torch.manual_seed(seed)
 
     while True:
 
-        idx, age, *addon = model.next_token(
-            idx, age, *addon, no_repeat=no_repeat, top_k=top_k, temperature=temperature
+        model_input = model.next_token(
+            *model_input, no_repeat=no_repeat, top_k=top_k, temperature=temperature
         )
 
+        idx, age = model_input[0], model_input[1]
         is_termination_token = torch.isin(idx, termination_tokens)
         if torch.logical_or(
             is_termination_token.any(-1), (age[:, -1] > max_age).any(-1)
@@ -137,6 +129,6 @@ def generate(
     idx[pad] = 0
     age[pad] = -10000
 
-    logits, _, _ = model(idx, age, *addon)
+    logits, _, _ = model(*model_input)
 
     return idx, age, logits

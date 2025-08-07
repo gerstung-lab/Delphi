@@ -1,6 +1,5 @@
 task_name: auc-min_tim_gap_${task_args.min_time_gap}
 task_type: auc
-task_input: forward
 task_args:
   data:
     data_dir: ukb_real_data

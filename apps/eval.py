@@ -8,21 +8,16 @@ from omegaconf import OmegaConf
 from delphi.env import DELPHI_CKPT_DIR
 from delphi.eval import clock, eval_task
 from delphi.eval.auc import CalibrateAUCArgs
+from delphi.eval.future_risks import FutureArgs
 
 
 class TaskType(Enum):
     AUC = "auc"
-    # COMPARE_AUC = "compare_auc"
-    # CUMUL_RISK_AUC = "cumul_risk_auc"
-    # NORM_RISK_AUC = "norm_risk_auc"
+    FUTURE = "future"
     # CALIBRATION = "calibration"
-    # INCIDENCE = "incidence"
-    # BURDEN = "burden"
 
 
-task_type_to_args_type = {
-    TaskType.AUC: CalibrateAUCArgs,
-}
+task_type_to_args_type = {TaskType.AUC: CalibrateAUCArgs, TaskType.FUTURE: FutureArgs}
 
 
 @dataclass
