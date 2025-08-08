@@ -47,6 +47,60 @@ def sample_zero_inflated_exponentials(
     return next_token, time_til_next
 
 
+def homogenize_piecewise_lambda(log_lambda: torch.Tensor, piece_edges: torch.Tensor):
+
+    if len(piece_edges) == 2:
+        return log_lambda.squeeze(-2)
+    else:
+        piece_interval = torch.diff(piece_edges)
+        if piece_edges[-1] == float("inf"):
+            piece_interval = piece_interval[:-1]
+            log_lambda = log_lambda[:, :, :-1, :]
+        weighted_avg_lamba = (
+            torch.exp(log_lambda)
+            * piece_interval.view(1, 1, -1, 1)
+            / piece_interval.sum()
+        ).sum(dim=-2)
+        eps = 1e-6
+        return torch.log(weighted_avg_lamba + eps)
+
+
+def sample_piecewise_exponentials(
+    log_lambda: torch.Tensor, piece_edges: torch.Tensor, task_tokens: torch.Tensor
+):
+
+    B, P, K = log_lambda.shape
+
+    piece_interval = torch.diff(piece_edges)
+    if piece_edges[-1] == float("inf"):
+        piece_interval = piece_interval[:-1]
+        log_lambda = log_lambda[:, :-1, :]
+    hazard_rates = (
+        torch.exp(log_lambda) * piece_interval.view(1, -1, 1) / piece_interval.sum()
+    )
+    cumul_hazard_rates = torch.cumsum(hazard_rates, dim=1)
+
+    u = torch.rand((B, K), device=log_lambda.device).log().unsqueeze(1)
+    residue_u = u - cumul_hazard_rates
+    _, in_piece = torch.max((residue_u > 0).float(), dim=1)
+    in_piece = in_piece.unsqueeze(1)
+    piece_log_lambda = torch.gather(input=log_lambda, index=in_piece, dim=1).squeeze(1)
+    piece_residue_u = torch.gather(input=residue_u, index=in_piece, dim=1).squeeze(1)
+    piece_start = piece_edges[:-1][in_piece].squeeze(1)
+
+    ranked_task_tokens, _ = torch.sort(task_tokens)
+    next_sample = torch.clamp(
+        -torch.exp(-piece_log_lambda) * piece_residue_u, min=0, max=DAYS_PER_YEAR * 80
+    ).min(1)
+    next_task = next_sample[1][:, None]
+    next_time = next_sample[0][:, None] + torch.gather(
+        input=piece_start, index=next_task, dim=1
+    )
+    next_token = ranked_task_tokens[next_task].long()
+
+    return next_token, next_time
+
+
 @torch.no_grad()
 def generate(
     model: torch.nn.Module,

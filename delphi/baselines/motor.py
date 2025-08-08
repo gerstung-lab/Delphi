@@ -15,6 +15,7 @@ from delphi.model.transformer import (
     count_params,
     initialize_weights,
 )
+from delphi.sampler import homogenize_piecewise_lambda, sample_piecewise_exponentials
 
 
 def estimate_pieces(
@@ -74,7 +75,7 @@ class MotorHead(nn.Module):
     def forward(
         self,
         h: torch.Tensor,
-        age: torch.Tensor,
+        age: Optional[torch.Tensor] = None,
         targets_age: Optional[torch.Tensor] = None,
         targets: Optional[torch.Tensor] = None,
     ) -> tuple[Optional[torch.Tensor], torch.Tensor]:
@@ -90,6 +91,7 @@ class MotorHead(nn.Module):
         log_lambda = self.head[1](h)
 
         if targets is not None:
+            assert age is not None
             assert targets_age is not None
             # tte: [B, L, V]
             tte, no_future_event, _ = time_to_event(
@@ -289,7 +291,7 @@ class Model(torch.nn.Module):
                 "loss_motor": loss_motor * self.config.motor_beta,
             }
         else:
-            loss, log_lambda = self.motor_head(h=x, age=age)
+            loss, log_lambda = self.motor_head(h=x[:, [-1], :])
 
         return log_lambda, loss, att
 
@@ -312,19 +314,9 @@ class Model(torch.nn.Module):
         # log_lambda: [B, L, P, V]
         _, log_lambda = self.motor_head(h=x, age=age)
 
-        pieces = self.motor_head.time_bins
-        if len(pieces) == 2:
-            log_task_lambda = log_lambda.squeeze(-2)
-        else:
-            piece_duration = torch.diff(pieces)[:-1]
-            log_lambda = log_lambda[:, :, :-1, :]
-            weighted_avg_lamba = (
-                torch.exp(log_lambda)
-                * piece_duration.view(1, 1, -1, 1)
-                / piece_duration.sum()
-            ).sum(dim=-2)
-            eps = 1e-6
-            log_task_lambda = torch.log(weighted_avg_lamba + eps)
+        log_task_lambda = homogenize_piecewise_lambda(
+            log_lambda=log_lambda, piece_edges=self.motor_head.time_bins
+        )
 
         # log_lambda[i][j][k] = log_task_lambda[i][j][r] where r = rank of k in task tokens
         # self[i][j][index[i][j][k]] = src[i][j][k]  # if dim == 2
@@ -343,3 +335,19 @@ class Model(torch.nn.Module):
         )
 
         return log_lambda, idx, age
+
+    @torch.no_grad()
+    def next_token(self, idx: torch.Tensor, age: torch.Tensor, **kwargs):
+        log_lambda, _, _ = self.forward(idx, age)
+        idx_next, time_til_next = sample_piecewise_exponentials(
+            log_lambda.squeeze(1),
+            self.motor_head.time_bins,
+            self.motor_head.task_tokens,
+        )
+
+        age_next = age[..., [-1]] + time_til_next
+
+        idx = torch.cat((idx, idx_next), dim=1)
+        age = torch.cat((age, age_next), dim=1)
+
+        return idx, age
