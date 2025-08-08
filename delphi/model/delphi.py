@@ -53,13 +53,7 @@ class Model(torch.nn.Module):
         self.ce_head = CrossEntropyHead(config)
         self.dt_head = CompetingExpHead(config)  # type: ignore
 
-    def forward(
-        self,
-        idx: torch.Tensor,
-        age: torch.Tensor,
-        targets: Optional[torch.Tensor] = None,
-        targets_age: Optional[torch.Tensor] = None,
-    ):
+    def forward_backbone(self, idx: torch.Tensor, age: torch.Tensor):
 
         _, seq_len = idx.shape
         assert seq_len <= self.config.block_size
@@ -74,6 +68,18 @@ class Model(torch.nn.Module):
             att.append(a)
         x = self.ln_f(x)
         att = torch.stack(att)
+
+        return x, att
+
+    def forward(
+        self,
+        idx: torch.Tensor,
+        age: torch.Tensor,
+        targets: Optional[torch.Tensor] = None,
+        targets_age: Optional[torch.Tensor] = None,
+    ):
+
+        x, att = self.forward_backbone(idx=idx, age=age)
 
         if targets is not None:
             logits = self.lm_head(x)
@@ -102,20 +108,7 @@ class Model(torch.nn.Module):
         age: torch.Tensor,
     ):
 
-        _, seq_len = idx.shape
-        assert seq_len <= self.config.block_size
-        token_emb = self.token_embed(idx)
-        age_emb = self.age_embed(age.unsqueeze(-1))
-        x = token_emb + age_emb
-
-        attn_mask = causal_attention_mask(pad=(idx > 0))
-        att = []
-        for block in self.transformer_blocks:
-            x, a = block(x, attn_mask)
-            att.append(a)
-        x = self.ln_f(x)
-        att = torch.stack(att)
-
+        x, _ = self.forward_backbone(idx=idx, age=age)
         logits = self.lm_head(x)
 
         return logits, idx, age
@@ -146,5 +139,7 @@ class Model(torch.nn.Module):
 
         idx = torch.cat((idx, idx_next), dim=1)
         age = torch.cat((age, age_next), dim=1)
+
+        logits = self.eval_step(idx=idx, age=age)
 
         return idx, age
