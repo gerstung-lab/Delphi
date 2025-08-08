@@ -295,7 +295,7 @@ class Model(torch.nn.Module):
 
         return log_lambda, loss, att
 
-    def eval_step(self, idx: torch.Tensor, age: torch.Tensor):
+    def eval_step(self, idx: torch.Tensor, age: torch.Tensor, horizon: float):
 
         batch_size, seq_len = idx.shape
         assert seq_len <= self.config.block_size
@@ -315,7 +315,9 @@ class Model(torch.nn.Module):
         _, log_lambda = self.motor_head(h=x, age=age)
 
         log_task_lambda = homogenize_piecewise_lambda(
-            log_lambda=log_lambda, piece_edges=self.motor_head.time_bins
+            log_lambda=log_lambda,
+            piece_edges=self.motor_head.time_bins,
+            horizon=horizon,
         )
 
         # log_lambda[i][j][k] = log_task_lambda[i][j][r] where r = rank of k in task tokens

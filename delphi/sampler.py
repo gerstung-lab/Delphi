@@ -47,22 +47,21 @@ def sample_zero_inflated_exponentials(
     return next_token, time_til_next
 
 
-def homogenize_piecewise_lambda(log_lambda: torch.Tensor, piece_edges: torch.Tensor):
+def homogenize_piecewise_lambda(
+    log_lambda: torch.Tensor, piece_edges: torch.Tensor, horizon: float
+) -> torch.Tensor:
 
-    if len(piece_edges) == 2:
-        return log_lambda.squeeze(-2)
-    else:
-        piece_interval = torch.diff(piece_edges)
-        if piece_edges[-1] == float("inf"):
-            piece_interval = piece_interval[:-1]
-            log_lambda = log_lambda[:, :, :-1, :]
-        weighted_avg_lamba = (
-            torch.exp(log_lambda)
-            * piece_interval.view(1, 1, -1, 1)
-            / piece_interval.sum()
-        ).sum(dim=-2)
-        eps = 1e-6
-        return torch.log(weighted_avg_lamba + eps)
+    right_edges = piece_edges[:-1]
+    too_far = right_edges > horizon
+    piece_edges = piece_edges.clamp(None, horizon)
+    piece_interval = torch.diff(piece_edges)
+    piece_interval[too_far] = 0
+    weighted_avg_lamba = (
+        torch.exp(log_lambda) * piece_interval.view(1, 1, -1, 1) / piece_interval.sum()
+    ).sum(dim=-2, keepdim=False)
+    eps = 1e-6
+
+    return torch.log(weighted_avg_lamba + eps)
 
 
 def sample_piecewise_exponentials(

@@ -165,7 +165,9 @@ def calibrate_auc(
         for batch_input in data_loader:
             batch_input = move_batch_to_device(batch_input, device=device)
 
-            batch_logits, batch_X, batch_T = model.eval_step(*batch_input)
+            batch_logits, batch_X, batch_T = model.eval_step(
+                *batch_input, horizon=task_args.age_groups.bin_width * DAYS_PER_YEAR
+            )
 
             batch_X = batch_X.detach().cpu().numpy()
             batch_T = batch_T.detach().cpu().numpy()
