@@ -82,16 +82,6 @@ def sample_comorbid_based_on_cutoff(
     return comorbid_tokens, time_til_tokens
 
 
-@dataclass
-class CausalSamplerConfig:
-    seed: int = 42
-    no_repeat: bool = True
-    top_k: Optional[int] = None
-    temperature: float = 1.0
-    max_age_in_years: float = 80
-    termination_tokens: list[str] = field(default_factory=list)
-
-
 @torch.no_grad()
 def generate(
     model: torch.nn.Module,
@@ -114,9 +104,15 @@ def generate(
 
         idx, age = model_input[0], model_input[1]
         is_termination_token = torch.isin(idx, termination_tokens)
-        if torch.logical_or(
-            is_termination_token.any(-1), (age[:, -1] > max_age).any(-1)
-        ).all():
+        exceed_block_size = idx.shape[1] > model.config.block_size
+        if (
+            torch.logical_or(
+                is_termination_token.any(-1), (age[:, -1] > max_age).any(-1)
+            )
+            .all()
+            .item()
+            or exceed_block_size
+        ):
             break
 
     exceed_max_age = age > max_age
@@ -129,6 +125,6 @@ def generate(
     idx[pad] = 0
     age[pad] = -10000
 
-    logits, _, _ = model(*model_input)
+    logits, _, _ = model.eval_step(*model_input)
 
     return idx, age, logits
