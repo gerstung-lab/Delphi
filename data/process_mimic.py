@@ -6,12 +6,14 @@ import numpy as np
 import pandas as pd
 import yaml
 from safetensors import safe_open
+from tqdm import tqdm
 
 from delphi.env import DELPHI_DATA_DIR
 from delphi.tokenizer import FEMALE, MALE, NO_EVENT, PADDING
 
 raw_mimic_dir = Path(os.environ["RAW_MIMIC_DIR"])
 mimic_dir = Path(DELPHI_DATA_DIR) / "mimic"
+os.makedirs(mimic_dir, exist_ok=True)
 
 vocab_df = pd.read_csv(raw_mimic_dir / "train/vocab_t4542.csv", header=None)
 vocab_df = vocab_df.replace({"GENDER//F": FEMALE, "GENDER//M": MALE})
@@ -47,7 +49,8 @@ non_time_tokens = np.concatenate((np.array([PADDING, NO_EVENT]), non_time_tokens
 remapped_tokenizer = dict(
     zip(non_time_tokens.tolist(), np.arange(len(non_time_tokens)).tolist())
 )
-with open(f"data/mimic/tokenizer.yaml", "w") as f:
+tokenizer_path = Path(mimic_dir) / "tokenizer.yaml"
+with open(tokenizer_path, "w") as f:
     yaml.dump(remapped_tokenizer, f, default_flow_style=False, sort_keys=False)
 
 
@@ -77,7 +80,7 @@ train_pids = list()
 test_pids = list()
 
 offset = 0
-for shard_fp in shard_fps:
+for shard_fp in tqdm(shard_fps):
 
     with safe_open(shard_fp, framework="numpy") as f:
 
