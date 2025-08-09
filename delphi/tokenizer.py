@@ -4,16 +4,10 @@ from typing import Union
 
 import yaml
 
-
-class Gender(Enum):
-    MALE = "male"
-    FEMALE = "female"
-
-
-class CoreEvents(Enum):
-    NO_EVENT = "no_event"
-    PADDING = "padding"
-    DEATH = "death"
+MALE = "male"
+FEMALE = "female"
+NO_EVENT = "no_event"
+PADDING = "padding"
 
 
 class Tokenizer:
@@ -21,20 +15,16 @@ class Tokenizer:
     def __init__(self, name2id: dict) -> None:
 
         self.name2id = name2id
-        core_events = {e.value for e in CoreEvents}
-        missing_core_events = core_events - set(self.name2id.keys())
         assert (
-            missing_core_events == set()
-        ), f"missing core events in tokenizer: {missing_core_events}"
-        assert (
-            Gender.MALE.value in self.name2id.keys()
-            and Gender.FEMALE.value in self.name2id.keys()
+            MALE in self.name2id.keys()
+            and FEMALE in self.name2id.keys()
+            and NO_EVENT in self.name2id.keys()
+            and PADDING in self.name2id.keys()
         )
 
         assert len(self.name2id.values()) == len(
             set(self.name2id.values())
         ), "tokens must be unique"
-        assert self.name2id[CoreEvents.PADDING.value] == 0, "padding token must be 0"
 
         self.id2name = {v: k for k, v in self.name2id.items()}
         self.vocab_size = len(self.name2id)

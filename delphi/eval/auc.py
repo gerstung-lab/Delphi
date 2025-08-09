@@ -15,7 +15,7 @@ from delphi.data import core
 from delphi.data.transform import sort_by_time
 from delphi.eval import eval_task
 from delphi.experiment import load_ckpt
-from delphi.tokenizer import Gender
+from delphi.tokenizer import FEMALE, MALE
 
 
 @dataclass
@@ -208,8 +208,8 @@ def calibrate_auc(
     t_t0 = T_t0[sub_idx, offset_pos_idx]
     targets = X_t1[sub_idx, pos_idx]
 
-    is_female = (X_t0 == tokenizer[Gender.FEMALE.value]).any(axis=1)[sub_idx]
-    is_male = (X_t0 == tokenizer[Gender.MALE.value]).any(axis=1)[sub_idx]
+    is_female = (X_t0 == tokenizer[FEMALE]).any(axis=1)[sub_idx]
+    is_male = (X_t0 == tokenizer[MALE]).any(axis=1)[sub_idx]
     is_gender_dict = {
         "female": is_female,
         "male": is_male,
