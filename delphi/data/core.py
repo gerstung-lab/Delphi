@@ -281,7 +281,7 @@ def load_core_data_package(cfg: BaseDataConfig, memmap: bool = False):
     start_pos = p2i["start_pos"].to_dict()
     seq_len = p2i["seq_len"].to_dict()
 
-    participants_path = Path(DELPHI_DATA_DIR) / cfg.subject_list
+    participants_path = dataset_dir / cfg.subject_list
     tokens_path = dataset_dir / "data.bin"
     time_steps_path = dataset_dir / "time.bin"
     if memmap:

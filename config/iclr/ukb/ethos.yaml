@@ -9,8 +9,9 @@ gradient_accumulation_steps: 1
 batch_size: 256
 device: cuda
 data:
-  train_subject_list: ukb_real_data/participants/train_fold.bin
-  val_subject_list: ukb_real_data/participants/val_fold.bin
+  data_dir: ukb_real_data
+  train_subject_list: participants/train_fold.bin
+  val_subject_list: participants/val_fold.bin
   seed: 42
   block_size: ${model.block_size}
   no_event_interval: 5
