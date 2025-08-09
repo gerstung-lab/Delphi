@@ -7,7 +7,7 @@ checkpoints
 wandb
 common_commands.txt
 data/ukb_real_data
-data/ukb_simulated_data_large
+data/mimic
 data/multimodal
 data/.gitattributes
 .ipynb_checkpoints
