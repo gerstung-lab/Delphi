@@ -1,4 +1,5 @@
 import functools
+from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Optional
@@ -206,13 +207,17 @@ def build_dataset(cfg: dict):
     return BaseDataset(BaseDataConfig(**cfg))
 
 
-def build_datasets(train_cfg_dict, val_cfg_dict):
+def build_datasets(data_dict: dict):
 
-    train_cfg = BaseDataConfig(**train_cfg_dict)
-    val_cfg = BaseDataConfig(**val_cfg_dict)
-
-    val_cfg.no_event_interval = train_cfg.no_event_interval
-    val_cfg.block_size = train_cfg.block_size
+    train_cfg = BaseDataConfig(
+        data_dir="ukb_real_data",
+        subject_list=data_dict["train_subject_list"],
+        seed=data_dict["seed"],
+        no_event_interval=data_dict["no_event_interval"],
+        block_size=data_dict["block_size"],
+    )
+    val_cfg = copy(train_cfg)
+    val_cfg.subject_list = data_dict["val_subject_list"]
 
     train_ds = BaseDataset(train_cfg)
     val_ds = BaseDataset(val_cfg)

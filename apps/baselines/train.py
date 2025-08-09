@@ -20,8 +20,7 @@ from delphi.tokenizer import Tokenizer, update_tokenizer
 class TrainConfig(TrainBaseConfig):
 
     model_type: str = "ethos"
-    train_data: dict = field(default_factory=dict)
-    val_data: dict = field(default_factory=dict)
+    data: dict = field(default_factory=dict)
     model: dict = field(default_factory=dict)
 
     optim: OptimConfig = field(default_factory=OptimConfig)
@@ -33,7 +32,7 @@ def experiment(cfg: TrainConfig):
     run_dir = Path(DELPHI_CKPT_DIR) / cfg.log.run_name
     os.makedirs(run_dir, exist_ok=True)
 
-    train_ds, val_ds = core.build_datasets(cfg.train_data, cfg.val_data)
+    train_ds, val_ds = core.build_datasets(cfg.data)
     loader = core.load_sequences
 
     if cfg.model_type == "ethos":
