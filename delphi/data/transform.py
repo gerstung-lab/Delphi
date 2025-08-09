@@ -2,7 +2,6 @@ from typing import Any, Optional
 
 import numpy as np
 
-from delphi import DAYS_PER_YEAR
 from delphi.multimodal import Modality
 
 
@@ -17,13 +16,16 @@ def add_no_event(
 
     B = X.shape[0]
     max_age = np.max(T)
-    interval *= DAYS_PER_YEAR
-    N = int(max_age // interval)
+    min_age = max(np.min(T), 0)
+    age_range = max_age - min_age
+    N = int(age_range // interval)
 
     if mode == "random":
-        no_event_T = rng.integers(1, int(max_age - interval), (B, N))
+        no_event_T = rng.integers(min_age, int(max_age - interval), (B, N))
     elif mode == "regular":
-        no_event_T = np.linspace(1, int(max_age) - interval, num=N) * np.ones((B, 1))
+        no_event_T = np.linspace(min_age, int(max_age) - interval, num=N) * np.ones(
+            (B, 1)
+        )
     else:
         raise ValueError
 

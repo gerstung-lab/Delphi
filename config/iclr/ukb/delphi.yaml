@@ -14,7 +14,7 @@ data:
   val_subject_list: participants/val_fold.bin
   seed: 42
   block_size: ${model.block_size}
-  no_event_interval: 5
+  no_event_interval: 1826.25
 model:
   vocab_size: 1270
   n_layer: 12
