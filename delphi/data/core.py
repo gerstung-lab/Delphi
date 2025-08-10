@@ -188,16 +188,15 @@ class BaseDataset:
             l = self.seq_len[pid]
             x_pid = self.tokens[i : i + l]
             t_pid = self.time_steps[i : i + l]
+
+            x_pid, t_pid = self.add_no_event(x_pid, t_pid)
+            x_pid, t_pid = self.crop_block_size(x_pid, t_pid)
+
             X.append(x_pid)
             T.append(t_pid)
 
         X = collate_batch_data(X)
         T = collate_batch_time(T)
-
-        X, T = self.add_no_event(X, T)
-        T, X = sort_by_time(T, X)
-        X, T = trim_margin(X, T, trim_val=0)
-        X, T = self.crop_block_size(X, T)
 
         return X, T
 
@@ -210,7 +209,7 @@ def build_dataset(cfg: dict):
 def build_datasets(data_dict: dict):
 
     train_cfg = BaseDataConfig(
-        data_dir="ukb_real_data",
+        data_dir=data_dict["data_dir"],
         subject_list=data_dict["train_subject_list"],
         seed=data_dict["seed"],
         no_event_interval=data_dict["no_event_interval"],

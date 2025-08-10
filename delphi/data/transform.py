@@ -6,44 +6,36 @@ from delphi.multimodal import Modality
 
 
 def add_no_event(
-    X: np.ndarray,
-    T: np.ndarray,
+    x: np.ndarray,
+    t: np.ndarray,
     rng: np.random.Generator,
     interval: float,
     mode: str = "random",
     token: int = 1,
 ) -> tuple[np.ndarray, np.ndarray]:
 
-    B = X.shape[0]
-    max_age = np.max(T)
-    min_age = max(np.min(T), 0)
+    max_age = np.max(t)
+    min_age = max(np.min(t), 0)
     age_range = max_age - min_age
-    N = int(age_range // interval)
+    n = int(age_range // interval)
 
     if mode == "random":
-        no_event_T = rng.integers(min_age, int(max_age - interval), (B, N))
+        no_event_t = rng.integers(min_age, int(max_age - interval), (n,))
     elif mode == "regular":
-        no_event_T = np.linspace(min_age, int(max_age) - interval, num=N) * np.ones(
-            (B, 1)
-        )
+        no_event_t = np.linspace(min_age, int(max_age) - interval, num=n)
     else:
         raise ValueError
 
-    no_event_T = no_event_T.astype(np.float32)
-    no_event_X = np.full(no_event_T.shape, token)
+    no_event_t = no_event_t.astype(np.float32)
+    no_event_X = np.full(no_event_t.shape, token)
 
-    T_cp = T.copy()
-    T_cp[T_cp < 0] = 0
-    min_T = np.min(T_cp, axis=1, keepdims=True)
-    max_T = np.max(T, axis=1, keepdims=True)
-    out_of_time = (no_event_T <= min_T) | (no_event_T >= max_T)
-    no_event_X[out_of_time] = 0
-    no_event_T[out_of_time] = -1e4
+    x = np.concatenate((x, no_event_X))
+    t = np.concatenate((t, no_event_t))
 
-    X = np.hstack((X, no_event_X))
-    T = np.hstack((T, no_event_T))
+    s = np.argsort(t)
+    x, t = x[s], t[s]
 
-    return X, T
+    return x, t
 
 
 def sort_by_time(T: np.ndarray, *args: np.ndarray):
@@ -65,23 +57,23 @@ def trim_margin(reference: np.ndarray, *args: np.ndarray, trim_val: Any):
 
 
 def crop_contiguous(
-    X: np.ndarray, *args: np.ndarray, block_size: int, rng: np.random.Generator
+    x: np.ndarray, *args: np.ndarray, block_size: int, rng: np.random.Generator
 ):
 
-    L = X.shape[1]
+    L = x.shape[0]
 
     if L <= block_size:
         if args:
-            return X, *args
+            return x, *args
         else:
-            return X
+            return x
     else:
         start = rng.integers(0, L - block_size + 1)
         cut = slice(start, start + block_size)
         if args:
-            return X[:, cut], *[arr[:, cut] for arr in args]
+            return x[cut], *[arr[cut] for arr in args]
         else:
-            return X[:, cut]
+            return x[cut]
 
 
 def crop_priority(
