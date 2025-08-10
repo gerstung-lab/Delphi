@@ -8,7 +8,6 @@ from delphi.model.components import AgeEncoding, target_mask
 from delphi.model.config import GPT2Config
 from delphi.model.loss import CompetingExpHead, CrossEntropyHead
 from delphi.model.transformer import (
-    causal_attention_mask,
     count_params,
     initialize_weights,
 )
@@ -66,8 +65,8 @@ class Model(torch.nn.Module):
         age_emb = self.age_embed(age.unsqueeze(-1))
         x = token_emb + age_emb
 
-        attn_mask = causal_attention_mask(pad=(idx > 0))
-        output_dict = self.gpt2(inputs_embeds=x, attention_mask=attn_mask)
+        attn_mask = idx > 0
+        output_dict = self.gpt2(inputs_embeds=x, attention_mask=attn_mask.long())
         logits = output_dict.logits
 
         if targets is not None:
