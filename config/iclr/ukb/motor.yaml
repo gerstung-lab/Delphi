@@ -20,8 +20,6 @@ model:
   n_layer: 12
   n_head: 12
   n_embd: 120
-  dropout: 0.1
-  token_dropout: 0.0
   bias: true
   block_size: 256
   ce_beta: 0.0

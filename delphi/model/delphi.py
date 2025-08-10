@@ -36,6 +36,9 @@ class Model(torch.nn.Module):
             n_embd=config.n_embd,
             n_layer=config.n_layer,
             n_head=config.n_head,
+            resid_pdrop=config.resid_pdrop,
+            embd_pdrop=config.embd_pdrop,
+            attn_pdrop=config.attn_pdrop,
         )
         self.gpt2 = transformers.GPT2LMHeadModel(gpt2_config)
         self.token_embed = self.gpt2.transformer.wte

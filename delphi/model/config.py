@@ -18,8 +18,9 @@ class GPT2Config:
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
-    dropout: float = 0.0
-    token_dropout: float = 0.0
+    resid_pdrop: float = 0.1
+    embd_pdrop: float = 0.1
+    attn_pdrop: float = 0.1
     bias: bool = True
     block_size: int = 64
 
