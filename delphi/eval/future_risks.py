@@ -111,7 +111,7 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
     it = core.eval_iter(total_size=n_participants, batch_size=n_persons_per_batch)
     data_loader = prompt_loader(it=it, dataset=ds, start_age=prompt_age)
     data_loader = tqdm(
-        data_loader, total=math.ceil(n_participants / task_args.batch_size), leave=True
+        data_loader, total=math.ceil(n_participants / n_persons_per_batch), leave=True
     )
     gt_it = core.eval_iter(total_size=n_participants, batch_size=n_persons_per_batch)
     gt_loader = loader(it=gt_it, dataset=ds)
@@ -129,7 +129,7 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
             batch_input = duplicate_participants(
                 *batch_input, n_repeat=task_args.n_samples_per_person
             )
-            _, age, logits = generate(
+            tokens, age, logits = generate(
                 model=model,
                 model_input=batch_input,
                 seed=task_args.seed,
@@ -139,17 +139,38 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
                 max_age=task_args.max_age_in_years * DAYS_PER_YEAR,
                 termination_tokens=termination_tokens,
             )
-            batch_risks = integrate_risk(
-                x=logits,
-                t=age,
-                start=task_args.age_at_prompt * DAYS_PER_YEAR,
-                end=float("inf"),
-            )
-            batch_risks = batch_risks.reshape(
-                -1, task_args.n_samples_per_person, batch_risks.shape[-1]
-            )
-            batch_risks = torch.nanmean(batch_risks, dim=-2, keepdim=False)
-            future_risks.append(batch_risks.detach().cpu().numpy())
+            B, L, V = logits.shape
+            n_sample = task_args.n_samples_per_person
+            n_person = int(B / n_sample)
+
+            if model.model_type == "delphi":
+                batch_risks = integrate_risk(
+                    x=logits,
+                    t=age,
+                    start=task_args.age_at_prompt * DAYS_PER_YEAR,
+                    end=float("inf"),
+                )
+                batch_risks = batch_risks.reshape(-1, n_sample, V)
+                batch_risks = torch.nanmean(batch_risks, dim=-2, keepdim=False)
+                future_risks.append(batch_risks.detach().cpu().numpy())
+            elif model.model_type == "ethos":
+                tokens_aft_prompt = tokens.clone()
+                tokens_aft_prompt[age > prompt_age] = 0
+                tokens_aft_prompt = tokens_aft_prompt.reshape((n_person, n_sample, L))
+                occur = torch.zeros(
+                    (n_person, n_sample, V), device=logits.device
+                ).long()
+                occur = occur.scatter_(
+                    dim=-1,
+                    index=tokens_aft_prompt,
+                    src=torch.ones_like(tokens_aft_prompt),
+                )
+                batch_risks = torch.mean(occur.float(), dim=-2, keepdim=False)
+                future_risks.append(batch_risks.detach().cpu().numpy())
+            elif model.model_type == "motor":
+                raise NotImplementedError
+            else:
+                raise ValueError
 
             batch_truth = next(gt_loader)
             batch_truth = move_batch_to_device(batch_truth, device=device)
@@ -174,7 +195,6 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
 
     labels = np.vstack(labels)
     future_risks = np.vstack(future_risks)
-    print(future_risks)
 
     logbook = {}
     for i in range(2, labels.shape[1]):
