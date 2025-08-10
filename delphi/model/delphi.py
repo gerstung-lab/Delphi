@@ -2,14 +2,12 @@ from dataclasses import dataclass
 from typing import Optional
 
 import torch
-import torch.nn as nn
+import transformers
 
 from delphi.model.components import AgeEncoding, target_mask
 from delphi.model.config import GPT2Config
 from delphi.model.loss import CompetingExpHead, CrossEntropyHead
 from delphi.model.transformer import (
-    Block,
-    LayerNorm,
     causal_attention_mask,
     count_params,
     initialize_weights,
@@ -31,45 +29,28 @@ class Model(torch.nn.Module):
     def __init__(self, config: ModelConfig):
         super().__init__()
         self.config = config
-        self.build_model(config)
-        initialize_weights(self, config=config)
-        n_params = count_params(self)
-        print("number of parameters: %.2fM" % (n_params / 1e6,))
-
-    def build_model(self, config: ModelConfig):
-
-        assert config.vocab_size is not None
-        self.token_embed = nn.Embedding(
-            num_embeddings=config.vocab_size, embedding_dim=config.n_embd
-        )
         self.age_embed = AgeEncoding(config=config)
-        self.dropout = nn.Dropout(p=config.dropout)
-        self.transformer_blocks = nn.ModuleList(
-            [Block(config) for _ in range(config.n_layer)]
+
+        gpt2_config = transformers.GPT2Config(
+            vocab_size=config.vocab_size,
+            n_positions=config.block_size,
+            n_embd=config.n_embd,
+            n_layer=config.n_layer,
+            n_head=config.n_head,
         )
-        self.ln_f = LayerNorm(config.n_embd, bias=config.bias)
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.token_embed.weight = self.lm_head.weight
+        self.gpt2 = transformers.GPT2LMHeadModel(gpt2_config)
+        self.token_embed = self.gpt2.transformer.wte
+
         self.ce_head = CrossEntropyHead(config)
         self.dt_head = CompetingExpHead(config)  # type: ignore
 
-    def forward_backbone(self, idx: torch.Tensor, age: torch.Tensor):
+        initialize_weights(self, config=config)
+        self.gpt2.transformer.wpe.weight.data *= 0
+        for param in self.gpt2.transformer.wpe.parameters():
+            param.requires_grad = False
 
-        _, seq_len = idx.shape
-        assert seq_len <= self.config.block_size
-        token_emb = self.token_embed(idx)
-        age_emb = self.age_embed(age.unsqueeze(-1))
-        x = token_emb + age_emb
-
-        attn_mask = causal_attention_mask(pad=(idx > 0))
-        att = []
-        for block in self.transformer_blocks:
-            x, a = block(x, attn_mask)
-            att.append(a)
-        x = self.ln_f(x)
-        att = torch.stack(att)
-
-        return x, att
+        n_params = count_params(self)
+        print("number of parameters: %.2fM" % (n_params / 1e6,))
 
     def forward(
         self,
@@ -79,10 +60,17 @@ class Model(torch.nn.Module):
         targets_age: Optional[torch.Tensor] = None,
     ):
 
-        x, att = self.forward_backbone(idx=idx, age=age)
+        _, seq_len = idx.shape
+        assert seq_len <= self.config.block_size
+        token_emb = self.token_embed(idx)
+        age_emb = self.age_embed(age.unsqueeze(-1))
+        x = token_emb + age_emb
+
+        attn_mask = causal_attention_mask(pad=(idx > 0))
+        output_dict = self.gpt2(inputs_embeds=x, attention_mask=attn_mask)
+        logits = output_dict.logits
 
         if targets is not None:
-            logits = self.lm_head(x)
             is_valid_target = target_mask(x1=targets, ignore_tokens=[])
 
             loss_ce = self.ce_head(logits=logits, targets=targets)
@@ -97,21 +85,9 @@ class Model(torch.nn.Module):
                 "loss_dt": loss_dt * self.config.dt_beta,
             }
         else:
-            logits = self.lm_head(x[:, [-1], :])
             loss = None
 
-        return logits, loss, att
-
-    def eval_step(
-        self,
-        idx: torch.Tensor,
-        age: torch.Tensor,
-    ):
-
-        x, _ = self.forward_backbone(idx=idx, age=age)
-        logits = self.lm_head(x)
-
-        return logits, idx, age
+        return logits, loss
 
     @torch.no_grad()
     def next_token(
@@ -123,7 +99,7 @@ class Model(torch.nn.Module):
         no_repeat: bool = True,
     ):
 
-        logits, _, _ = self.forward(idx, age)
+        logits, _ = self.forward(idx, age)
         logits = logits[:, -1, :] / temperature
 
         if top_k is not None:
@@ -140,6 +116,6 @@ class Model(torch.nn.Module):
         idx = torch.cat((idx, idx_next), dim=1)
         age = torch.cat((age, age_next), dim=1)
 
-        logits = self.eval_step(idx=idx, age=age)
+        logits = self.forward(idx=idx, age=age)
 
         return idx, age

@@ -59,23 +59,22 @@ def configure_optimizers(
     # separate out all parameters to those that will and won't experience regularizing weight decay
     decay = set()
     no_decay = set()
-    whitelist_weight_modules = (torch.nn.Linear,)
     blacklist_weight_modules = (torch.nn.LayerNorm, LayerNorm, torch.nn.Embedding)
     for mn, m in model.named_modules():
-        for pn, p in m.named_parameters():
-            fpn = "%s.%s" % (mn, pn) if mn else pn  # full param name
-            # random note: because named_modules and named_parameters are recursive
-            # we will see the same tensors p many many times. but doing it this way
-            # allows us to know which parent module any tensor p belongs to...
-            if pn.endswith("bias"):
-                # all biases will not be decayed
-                no_decay.add(fpn)
-            elif pn.endswith("weight") and isinstance(m, whitelist_weight_modules):
-                # weights of whitelist modules will be weight decayed
-                decay.add(fpn)
-            elif pn.endswith("weight") and isinstance(m, blacklist_weight_modules):
-                # weights of blacklist modules will NOT be weight decayed
-                no_decay.add(fpn)
+        if len(list(m.children())) == 0:
+            for pn, p in m.named_parameters():
+                fpn = "%s.%s" % (mn, pn) if mn else pn  # full param name
+                # random note: because named_modules and named_parameters are recursive
+                # we will see the same tensors p many many times. but doing it this way
+                # allows us to know which parent module any tensor p belongs to...
+                if pn.endswith("bias"):
+                    # all biases will not be decayed
+                    no_decay.add(fpn)
+                elif pn.endswith("weight") and isinstance(m, blacklist_weight_modules):
+                    # weights of blacklist modules will NOT be weight decayed
+                    no_decay.add(fpn)
+                else:
+                    decay.add(fpn)
 
     # subtle: 'transformer.wte.weight' and 'lm_head.weight' are tied, so they
     # will appear in the no_decay and decay sets respectively after the above.
@@ -83,7 +82,7 @@ def configure_optimizers(
     # will only return the first occurrence, key'd by 'transformer.wte.weight', below.
     # so let's manually remove 'lm_head.weight' from decay set. This will include
     # this tensor into optimization via transformer.wte.weight only, and not decayed.
-    decay.remove("lm_head.weight")
+    decay.remove("gpt2.lm_head.weight")
 
     # validate that we considered every parameter
     param_dict = {pn: p for pn, p in model.named_parameters()}

@@ -133,7 +133,7 @@ class BaseTrainer:
         T_t0, T_t1 = T[:, :-1], T[:, 1:]
 
         with self.ctx:
-            _, loss, _ = self.model(idx=X_t0, targets=X_t1, age=T_t0, targets_age=T_t1)
+            _, loss = self.model(idx=X_t0, targets=X_t1, age=T_t0, targets_age=T_t1)
 
         return loss
 
