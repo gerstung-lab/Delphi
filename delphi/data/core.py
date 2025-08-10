@@ -198,6 +198,8 @@ class BaseDataset:
         X = collate_batch_data(X)
         T = collate_batch_time(T)
 
+        T, X = sort_by_time(T, X)
+
         return X, T
 
 
