@@ -106,7 +106,6 @@ def experiment(cfg: TrainConfig):
 
     model_cfg = model_cfg_cls(**cfg.model)
     if cfg.init_from == "scratch":
-        print("Initializing a new model from scratch")
         model = model_cls(model_cfg)  # type: ignore
     else:
         raise NotImplementedError

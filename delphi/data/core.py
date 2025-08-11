@@ -147,10 +147,13 @@ class BaseDataset:
         if dist.is_initialized():
             self.world_size = dist.get_world_size()
             self.rank = dist.get_rank()
-            print(f"distributed dataset for worker {self.rank}/{self.world_size}")
+            print(
+                f"building distributed dataset for worker {self.rank}/{self.world_size}"
+            )
         else:
             self.world_size = 1
             self.rank = 0
+            print("building non-distributed dataset")
 
         (
             tokenizer,
@@ -287,9 +290,7 @@ def duplicate_participants(X: torch.Tensor, T: torch.Tensor, n_repeat: int):
 def load_core_data_package(cfg: BaseDataConfig, memmap: bool = False):
 
     dataset_dir = Path(DELPHI_DATA_DIR) / cfg.data_dir
-    print(f"building dataset at {dataset_dir}")
     tokenizer_path = dataset_dir / "tokenizer.yaml"
-    print(f"\t– loading tokenizer from {tokenizer_path}")
     with open(tokenizer_path, "r") as f:
         tokenizer = yaml.safe_load(f)
 
