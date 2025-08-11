@@ -84,11 +84,11 @@ class TrainLogger:
         ckpt_fname: str = "ckpt.pt",
     ):
         if self.backend.is_master_process():
-            if isinstance(model, torch.nn.parallel.DistributedDataParallel):
-                model = model.module
+            if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
+                model = self.model.module
             checkpoint = {
-                "model": self.model.state_dict(),
-                "model_type": self.model.model_type,
+                "model": model.state_dict(),
+                "model_type": model.model_type,
                 "optimizer": self.optimizer.state_dict(),
                 "model_args": self.exp_cfg["model"],
                 "iter_num": step,
