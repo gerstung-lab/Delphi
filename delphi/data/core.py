@@ -148,12 +148,11 @@ class BaseDataset:
             self.world_size = dist.get_world_size()
             self.rank = dist.get_rank()
             print(
-                f"building distributed dataset for worker {self.rank}/{self.world_size}"
+                f"\t- building distributed dataset for worker {self.rank}/{self.world_size}"
             )
         else:
             self.world_size = 1
             self.rank = 0
-            print("building non-distributed dataset")
 
         (
             tokenizer,
@@ -232,7 +231,9 @@ def build_datasets(data_dict: dict):
     val_cfg = copy(train_cfg)
     val_cfg.subject_list = data_dict["val_subject_list"]
 
+    print(f"train dataset:")
     train_ds = BaseDataset(train_cfg)
+    print(f"validation dataset:")
     val_ds = BaseDataset(val_cfg)
 
     return train_ds, val_ds

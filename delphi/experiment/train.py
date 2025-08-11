@@ -25,16 +25,13 @@ class BaseTrainer:
     def __init__(
         self,
         cfg: TrainBaseConfig,
+        backend: distributed.backend.DistributedBackend,
         model: torch.nn.Module,
         train_ds: Any,
         val_ds: Any,
         loader: Callable,
     ):
-        print(f"CUDA available: {torch.cuda.is_available()}")
-        print(
-            f"Environment vars: RANK={os.environ.get('RANK')}, WORLD_SIZE={os.environ.get('WORLD_SIZE')}"
-        )
-        self.backend = distributed.make_backend_from_args(cfg)
+        self.backend = backend
         cfg = self.backend.get_adjusted_args_for_process(cfg)
 
         self.cfg = cfg

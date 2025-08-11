@@ -3,8 +3,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+import torch
 from omegaconf import OmegaConf
 
+from delphi import distributed
 from delphi.baselines import ethos, motor
 from delphi.data import core
 from delphi.env import DELPHI_CKPT_DIR
@@ -29,6 +31,12 @@ class TrainConfig(TrainBaseConfig):
 
 
 def experiment(cfg: TrainConfig):
+
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    print(
+        f"Environment vars: RANK={os.environ.get('RANK')}, WORLD_SIZE={os.environ.get('WORLD_SIZE')}"
+    )
+    backend = distributed.make_backend_from_args(cfg)
 
     run_dir = Path(DELPHI_CKPT_DIR) / cfg.log.run_name
     os.makedirs(run_dir, exist_ok=True)
@@ -112,6 +120,7 @@ def experiment(cfg: TrainConfig):
 
     trainer = BaseTrainer(
         cfg=cfg,
+        backend=backend,
         model=model,
         train_ds=train_ds,
         val_ds=val_ds,
