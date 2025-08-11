@@ -8,7 +8,7 @@ from archive.evaluate_auc import get_calibration_auc
 from delphi.data.core import tricolumnar_to_2d
 from delphi.env import DELPHI_CKPT_DIR
 from delphi.eval.auc import corrective_indices, rates_by_age_bin
-from delphi.tokenizer import load_tokenizer_from_ckpt
+from delphi.tokenizer import load_tokenizer_from_yaml
 
 
 def load_XT(ckpt: str, task_input: str = "forward"):
@@ -28,7 +28,9 @@ def load_Y(
     task_input: str = "forward",
 ):
 
-    tokenizer = load_tokenizer_from_ckpt(os.path.join(DELPHI_CKPT_DIR, ckpt))
+    tokenizer = load_tokenizer_from_yaml(
+        os.path.join(DELPHI_CKPT_DIR, ckpt, "tokenizer.yaml")
+    )
     dis_token = tokenizer[disease]
     logits_path = os.path.join(DELPHI_CKPT_DIR, ckpt, task_input, "logits.bin")
     logits = np.fromfile(logits_path, dtype=np.float16).reshape(
