@@ -119,13 +119,11 @@ def configure_optimizers(
     use_fused = (device_type == "cuda") and (
         "fused" in inspect.signature(torch.optim.AdamW).parameters
     )
-    print(f"using fused AdamW: {use_fused}")
     extra_args = dict(fused=True) if use_fused else dict()
     optimizer = torch.optim.AdamW(
         optim_groups, lr=cfg.learning_rate, betas=(cfg.beta1, cfg.beta2), **extra_args
     )
 
-    print(f"lr schedule: {cfg.schedule}")
     if cfg.schedule == "cosine":
         lr_schedule_fn = partial(
             get_cosine_lr,

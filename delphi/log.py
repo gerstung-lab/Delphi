@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass
 from datetime import datetime
+from pprint import pprint
 from typing import Optional
 
 import torch
@@ -44,6 +45,13 @@ class TrainLogger:
         self.backend = backend
 
         if backend.is_master_process():
+
+            print("=== config ===")
+            pprint(exp_cfg, indent=2, width=60)
+
+            n_params = sum(p.numel() for p in model.parameters())
+            print("number of model parameters: %.2fM" % (n_params / 1e6,))
+
             if self.wandb:
                 wandb.init(
                     project=self.cfg.wandb_project,
@@ -54,13 +62,9 @@ class TrainLogger:
                 wandb.define_metric("lr", step_metric="step")
                 wandb.define_metric("val/*", step_metric="step")
                 wandb.define_metric("train/*", step_metric="step")
+                wandb.define_metric("grad_norm/*", step_metric="step")
 
-                wandb.summary["model_params"] = sum(
-                    p.numel() for p in model.parameters()
-                )
-                for name, param in self.model.named_parameters():
-                    if param.requires_grad:
-                        wandb.define_metric(f"grad_norm/{name}", step_metric="step")
+                wandb.summary["model_params"] = n_params
 
             os.makedirs(dump_dir, exist_ok=True)
             with open(os.path.join(dump_dir, "config.yaml"), "w") as f:

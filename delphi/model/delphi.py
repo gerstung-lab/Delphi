@@ -51,9 +51,6 @@ class Model(torch.nn.Module):
         for param in self.gpt2.transformer.wpe.parameters():
             param.requires_grad = False
 
-        n_params = count_params(self)
-        print("number of parameters: %.2fM" % (n_params / 1e6,))
-
     def forward(
         self,
         idx: torch.Tensor,
