@@ -86,6 +86,8 @@ class TrainLogger:
         if self.backend.is_master_process():
             if isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
                 model = self.model.module
+            else:
+                model = self.model
             checkpoint = {
                 "model": model.state_dict(),
                 "model_type": model.model_type,

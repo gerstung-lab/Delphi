@@ -56,7 +56,7 @@ class BaseTrainer:
         self.model = self.backend.transform_model(self.model)
 
         self.optimizer, self.scheduler = configure_optimizers(
-            model=self.model, cfg=cfg.optim, device_type=self.device_type
+            model=model, cfg=cfg.optim, device_type=self.device_type
         )
         self.scaler = torch.GradScaler(
             device=self.device_type, enabled=(cfg.dtype == "float16")
