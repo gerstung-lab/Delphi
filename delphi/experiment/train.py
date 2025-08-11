@@ -78,7 +78,7 @@ class BaseTrainer:
             exp_cfg=asdict(cfg),
             dump_dir=run_dir,
             tokenizer=train_ds.tokenizer.to_dict(),
-            model=model,  # type: ignore
+            model=self.model,  # type: ignore
             optimizer=self.optimizer,
             scheduler=self.scheduler,
             backend=self.backend,
