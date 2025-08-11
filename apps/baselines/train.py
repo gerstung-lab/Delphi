@@ -129,6 +129,8 @@ def experiment(cfg: TrainConfig):
 
     trainer.train()
 
+    backend.finalize()
+
 
 def main():
 
