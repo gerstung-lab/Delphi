@@ -30,6 +30,10 @@ class BaseTrainer:
         val_ds: Any,
         loader: Callable,
     ):
+        print(f"CUDA available: {torch.cuda.is_available()}")
+        print(
+            f"Environment vars: RANK={os.environ.get('RANK')}, WORLD_SIZE={os.environ.get('WORLD_SIZE')}"
+        )
         self.backend = distributed.make_backend_from_args(cfg)
         cfg = self.backend.get_adjusted_args_for_process(cfg)
 
