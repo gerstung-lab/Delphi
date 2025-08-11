@@ -7,6 +7,7 @@ from typing import Iterator, Optional
 import numpy as np
 import pandas as pd
 import torch
+import torch.distributed as dist
 import yaml
 from scipy.sparse import coo_array
 
@@ -143,6 +144,14 @@ class BaseDataset:
 
     def __init__(self, cfg: BaseDataConfig, memmap: bool = False):
 
+        if dist.is_initialized():
+            self.world_size = dist.get_world_size()
+            self.rank = dist.get_rank()
+            print(f"distributed dataset for worker {self.rank}/{self.world_size}")
+        else:
+            self.world_size = 1
+            self.rank = 0
+
         (
             tokenizer,
             self.start_pos,
@@ -227,15 +236,21 @@ def build_datasets(data_dict: dict):
 
 
 def load_sequences(
-    it: Iterator,
-    dataset: BaseDataset,
+    seed: int, dataset: BaseDataset, batch_size: int, step: Optional[int] = 0
 ) -> Iterator:
 
-    for idx in it:
+    if step is None:
+        step = 0
 
+    while True:
+        seed_with_offset = seed + step * dataset.world_size + dataset.rank
+        rng = np.random.default_rng(seed_with_offset)
+        idx = rng.integers(len(dataset), size=(batch_size,))
         X, T = dataset.get_batch(idx)
         X = torch.tensor(X, dtype=torch.long)
         T = torch.tensor(T, dtype=torch.float32)
+
+        step += 1
 
         yield X, T
 

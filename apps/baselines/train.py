@@ -8,7 +8,8 @@ from omegaconf import OmegaConf
 from delphi.baselines import ethos, motor
 from delphi.data import core
 from delphi.env import DELPHI_CKPT_DIR
-from delphi.experiment import BaseTrainer, TrainBaseConfig
+from delphi.experiment.config import TrainBaseConfig
+from delphi.experiment.train import BaseTrainer
 from delphi.log import TrainLogConfig
 from delphi.model import delphi
 from delphi.model.config import parse_token_list

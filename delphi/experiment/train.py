@@ -1,53 +1,23 @@
 import os
 from collections import defaultdict
 from contextlib import nullcontext
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
-import numpy as np
 import torch
 from omegaconf import OmegaConf
 
+from delphi import distributed
 from delphi.baselines import ethos, motor
 from delphi.config import dataclass_from_dict
-from delphi.data.core import train_iter
 from delphi.env import DELPHI_CKPT_DIR
-from delphi.log import TrainLogConfig, TrainLogger
+from delphi.experiment.config import TrainBaseConfig
+from delphi.log import TrainLogger
 from delphi.model import delphi
 from delphi.model.transformer import Delphi, DelphiConfig
-from delphi.optim import OptimConfig, configure_optimizers
+from delphi.optim import configure_optimizers
 from delphi.tokenizer import Tokenizer, load_tokenizer_from_yaml
-
-
-@dataclass
-class TrainBaseConfig:
-    ckpt_dir: str = "."
-    eval_interval: int = 2000
-    eval_iters: int = 200
-    eval_only: bool = False  # if True, script exits right after the first eval
-    init_from: str = "scratch"
-
-    seed: int = 42
-    gradient_accumulation_steps: int = 1  # used to simulate larger batch sizes
-    batch_size: int = 128
-    # if gradient_accumulation_steps > 1, this is the micro-batch size
-
-    # system
-    device: str = "cpu"
-    # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
-    dtype: str = "float32"
-    # 'bfloat16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
-    compile: bool = False  # use PyTorch 2.0 to compile the model to be faster
-
-    train_data: dict = field(default_factory=dict)
-    val_data: dict = field(default_factory=dict)
-
-    model: dict = field(default_factory=dict)
-
-    optim: OptimConfig = field(default_factory=OptimConfig)
-
-    log: TrainLogConfig = field(default_factory=TrainLogConfig)
 
 
 class BaseTrainer:
@@ -60,6 +30,8 @@ class BaseTrainer:
         val_ds: Any,
         loader: Callable,
     ):
+        self.backend = distributed.make_backend_from_args(cfg)
+        cfg = self.backend.get_adjusted_args_for_process(cfg)
 
         self.cfg = cfg
         self.device = cfg.device
@@ -80,6 +52,8 @@ class BaseTrainer:
 
         self.model = model
         self.model.to(self.device)
+        self.model = self.backend.transform_model(self.model)
+
         self.optimizer, self.scheduler = configure_optimizers(
             model=model, cfg=cfg.optim, device_type=self.device_type
         )
@@ -87,28 +61,12 @@ class BaseTrainer:
             device=self.device_type, enabled=(cfg.dtype == "float16")
         )
 
-        rng = np.random.default_rng(cfg.seed)
-        train_it = train_iter(
-            rng=rng, total_size=len(train_ds), batch_size=cfg.batch_size
+        self.train_loader = loader(
+            seed=cfg.seed, dataset=train_ds, batch_size=cfg.batch_size
         )
-        self.train_loader = loader(it=train_it, dataset=train_ds)
         self.estimate_loaders = {
-            "train": loader(
-                it=train_iter(
-                    rng=np.random.default_rng(cfg.seed),
-                    total_size=len(train_ds),
-                    batch_size=cfg.batch_size,
-                ),
-                dataset=train_ds,
-            ),
-            "val": loader(
-                it=train_iter(
-                    rng=np.random.default_rng(cfg.seed),
-                    total_size=len(val_ds),
-                    batch_size=cfg.batch_size,
-                ),
-                dataset=val_ds,
-            ),
+            "train": loader(seed=cfg.seed, dataset=train_ds, batch_size=cfg.batch_size),
+            "val": loader(seed=cfg.seed, dataset=val_ds, batch_size=cfg.batch_size),
         }
 
         run_dir = os.path.normpath(
@@ -122,6 +80,7 @@ class BaseTrainer:
             model=model,  # type: ignore
             optimizer=self.optimizer,
             scheduler=self.scheduler,
+            backend=self.backend,
         )
 
         self.iter_num = 0
@@ -176,8 +135,13 @@ class BaseTrainer:
 
             # forward backward update, with optional gradient accumulation to simulate larger batch size
             # and using the GradScaler if data type is float16``
-            for _ in range(self.cfg.gradient_accumulation_steps):
-                loss = self.mini_step(loader=self.train_loader)
+            for i in range(self.cfg.gradient_accumulation_steps):
+                with self.backend.get_context_for_microstep_forward(
+                    model=self.model,
+                    microstep_idx=i,
+                    gradient_accumulation_steps=self.cfg.gradient_accumulation_steps,
+                ):
+                    loss = self.mini_step(loader=self.train_loader)
 
                 # backward pass, with gradient scaling if training in fp16
                 loss_agg = sum([loss[key] for key in loss.keys()])
