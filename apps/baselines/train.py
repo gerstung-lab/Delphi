@@ -42,7 +42,6 @@ def experiment(cfg: TrainConfig):
     os.makedirs(run_dir, exist_ok=True)
 
     train_ds, val_ds = core.build_datasets(cfg.data)
-    loader = core.load_sequences
 
     if cfg.model_type == "ethos":
 
@@ -124,7 +123,6 @@ def experiment(cfg: TrainConfig):
         model=model,
         train_ds=train_ds,
         val_ds=val_ds,
-        loader=loader,
     )
 
     trainer.train()

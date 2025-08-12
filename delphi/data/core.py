@@ -7,7 +7,6 @@ from typing import Iterator, Optional
 import numpy as np
 import pandas as pd
 import torch
-import torch.distributed as dist
 import yaml
 from scipy.sparse import coo_array
 
@@ -95,11 +94,21 @@ def eval_iter(total_size: int, batch_size: int) -> Iterator[np.ndarray]:
 
 
 def train_iter(
-    rng: np.random.Generator, total_size: int, batch_size: int
+    seed: int,
+    total_size: int,
+    batch_size: int,
+    world_size: int = 1,
+    rank: int = 0,
+    step: int = 0,
 ) -> Iterator[np.ndarray]:
 
     while True:
-        yield rng.integers(total_size, size=(batch_size,))
+        seed_with_offset = seed + step * world_size + rank
+        rng = np.random.default_rng(seed_with_offset)
+        batch_idx = rng.integers(total_size, size=(batch_size,))
+        step += 1
+
+        yield batch_idx
 
 
 def collate_batch_data(batch_data: list[np.ndarray]) -> np.ndarray:
@@ -143,14 +152,6 @@ class BaseDataConfig:
 class BaseDataset:
 
     def __init__(self, cfg: BaseDataConfig, memmap: bool = False):
-
-        if dist.is_initialized():
-            self.world_size = dist.get_world_size()
-            self.rank = dist.get_rank()
-            print(f"\t- distributed dataset for worker {self.rank}/{self.world_size}")
-        else:
-            self.world_size = 1
-            self.rank = 0
 
         (
             tokenizer,
@@ -199,6 +200,24 @@ class BaseDataset:
 
         return x_pid, t_pid
 
+    def get_batch(self, batch_idx: Iterator):
+
+        X = []
+        T = []
+        for idx in batch_idx:
+            x, t = self[idx]
+            X.append(x)
+            T.append(t)
+
+        X = collate_batch_data(X)
+        T = collate_batch_time(T)
+        T, X = sort_by_time(T, X)
+
+        X = torch.tensor(X, dtype=torch.long)
+        T = torch.tensor(T, dtype=torch.float32)
+
+        return X, T
+
 
 def build_dataset(cfg: dict):
 
@@ -223,37 +242,6 @@ def build_datasets(data_dict: dict):
     val_ds = BaseDataset(val_cfg)
 
     return train_ds, val_ds
-
-
-def load_sequences(
-    seed: int, dataset: BaseDataset, batch_size: int, step: Optional[int] = 0
-) -> Iterator:
-
-    if step is None:
-        step = 0
-
-    while True:
-        seed_with_offset = seed + step * dataset.world_size + dataset.rank
-        rng = np.random.default_rng(seed_with_offset)
-        batch_idx = rng.integers(len(dataset), size=(batch_size,))
-
-        X = []
-        T = []
-        for idx in batch_idx:
-            x, t = dataset[idx]
-            X.append(x)
-            T.append(t)
-
-        X = collate_batch_data(X)
-        T = collate_batch_time(T)
-        T, X = sort_by_time(T, X)
-
-        X = torch.tensor(X, dtype=torch.long)
-        T = torch.tensor(T, dtype=torch.float32)
-
-        step += 1
-
-        yield X, T
 
 
 def load_prompt_sequences(it: Iterator, dataset: BaseDataset, start_age: float):

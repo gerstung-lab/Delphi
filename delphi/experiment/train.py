@@ -3,21 +3,23 @@ from collections import defaultdict
 from contextlib import nullcontext
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any
 
 import torch
+import torch.distributed as dist
 from omegaconf import OmegaConf
 
 from delphi import distributed
 from delphi.baselines import ethos, motor
 from delphi.config import dataclass_from_dict
+from delphi.data.core import train_iter
 from delphi.env import DELPHI_CKPT_DIR
 from delphi.experiment.config import TrainBaseConfig
 from delphi.log import TrainLogger
 from delphi.model import delphi
 from delphi.model.transformer import Delphi, DelphiConfig
 from delphi.optim import configure_optimizers
-from delphi.tokenizer import Tokenizer, load_tokenizer_from_yaml
+from delphi.tokenizer import load_tokenizer_from_yaml
 
 
 class BaseTrainer:
@@ -29,7 +31,6 @@ class BaseTrainer:
         model: torch.nn.Module,
         train_ds: Any,
         val_ds: Any,
-        loader: Callable,
     ):
         self.backend = backend
         cfg = self.backend.get_adjusted_args_for_process(cfg)
@@ -51,6 +52,8 @@ class BaseTrainer:
         else:
             self.ctx = nullcontext()
 
+        self.train_ds = train_ds
+        self.val_ds = val_ds
         self.model = model
         self.model.to(self.device)
         self.model = self.backend.transform_model(self.model)
@@ -62,12 +65,35 @@ class BaseTrainer:
             device=self.device_type, enabled=(cfg.dtype == "float16")
         )
 
-        self.train_loader = loader(
-            seed=cfg.seed, dataset=train_ds, batch_size=cfg.batch_size
+        if dist.is_initialized():
+            world_size = dist.get_world_size()
+            rank = dist.get_rank()
+            print(f"\tinitialized data loader for worker {rank}/{world_size}")
+        else:
+            world_size = 1
+            rank = 0
+        self.train_iter = train_iter(
+            seed=cfg.seed,
+            total_size=len(train_ds),
+            batch_size=cfg.batch_size,
+            world_size=world_size,
+            rank=rank,
         )
-        self.estimate_loaders = {
-            "train": loader(seed=cfg.seed, dataset=train_ds, batch_size=cfg.batch_size),
-            "val": loader(seed=cfg.seed, dataset=val_ds, batch_size=cfg.batch_size),
+        self.estimate_iters = {
+            "train": train_iter(
+                seed=cfg.seed,
+                total_size=len(train_ds),
+                batch_size=cfg.batch_size,
+                world_size=world_size,
+                rank=rank,
+            ),
+            "val": train_iter(
+                seed=cfg.seed,
+                total_size=len(val_ds),
+                batch_size=cfg.batch_size,
+                world_size=world_size,
+                rank=rank,
+            ),
         }
 
         run_dir = os.path.normpath(
@@ -86,9 +112,12 @@ class BaseTrainer:
 
         self.iter_num = 0
 
-    def mini_step(self, loader: Iterator, *args, **kwargs) -> dict[str, torch.Tensor]:
-        X, T = next(loader)
-        X, T = X.to(self.device), T.to(self.device)
+    def mini_step(
+        self, batch_data: tuple[torch.Tensor, torch.Tensor], *args, **kwargs
+    ) -> dict[str, torch.Tensor]:
+
+        batch_data = tuple([data.to(self.device) for data in batch_data])
+        X, T = batch_data
         X_t0, X_t1 = X[:, :-1], X[:, 1:]
         T_t0, T_t1 = T[:, :-1], T[:, 1:]
 
@@ -98,15 +127,17 @@ class BaseTrainer:
         return loss
 
     @torch.no_grad()
-    def estimate_loss(
-        self, loaders: dict[str, Iterator], *args, **kwargs
-    ) -> tuple[dict, dict]:
+    def estimate_loss(self, *args, **kwargs) -> tuple[dict, dict]:
         self.model.eval()
         eval_loss = {}
         for split in ["train", "val"]:
             split_loss = defaultdict(float)
             for _ in range(self.cfg.eval_iters):
-                loss = self.mini_step(loader=loaders[split])
+
+                batch_idx = next(self.estimate_iters[split])
+                batch_data = self.train_ds.get_batch(batch_idx)
+                loss = self.mini_step(batch_data=batch_data)
+
                 for key in loss.keys():
                     split_loss[key] += loss[key].item()
             split_loss = dict(split_loss)
@@ -128,7 +159,7 @@ class BaseTrainer:
 
             # evaluate the loss on train/val sets and write checkpoints
             if self.iter_num % self.cfg.eval_interval == 0 and self.iter_num > 0:
-                _, val_loss = self.estimate_loss(self.estimate_loaders)
+                _, val_loss = self.estimate_loss()
                 self.logger.eval_step(step=self.iter_num, loss=val_loss)
 
             if self.iter_num == 0 and self.cfg.eval_only:
@@ -142,7 +173,9 @@ class BaseTrainer:
                     microstep_idx=i,
                     gradient_accumulation_steps=self.cfg.gradient_accumulation_steps,
                 ):
-                    loss = self.mini_step(loader=self.train_loader)
+                    batch_idx = next(self.train_iter)
+                    batch_data = self.train_ds.get_batch(batch_idx)
+                    loss = self.mini_step(batch_data=batch_data)
 
                 # backward pass, with gradient scaling if training in fp16
                 loss_agg = sum([loss[key] for key in loss.keys()])
