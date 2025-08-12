@@ -15,13 +15,6 @@ class Tokenizer:
     def __init__(self, name2id: dict) -> None:
 
         self.name2id = name2id
-        assert (
-            MALE in self.name2id.keys()
-            and FEMALE in self.name2id.keys()
-            and NO_EVENT in self.name2id.keys()
-            and PADDING in self.name2id.keys()
-        )
-
         assert len(self.name2id.values()) == len(
             set(self.name2id.values())
         ), "tokens must be unique"
