@@ -144,14 +144,6 @@ class BaseDataset:
 
     def __init__(self, cfg: BaseDataConfig, memmap: bool = False):
 
-        if dist.is_initialized():
-            self.world_size = dist.get_world_size()
-            self.rank = dist.get_rank()
-            print(f"\t- distributed dataset for worker {self.rank}/{self.world_size}")
-        else:
-            self.world_size = 1
-            self.rank = 0
-
         (
             tokenizer,
             self.start_pos,
@@ -229,11 +221,19 @@ def load_sequences(
     seed: int, dataset: BaseDataset, batch_size: int, step: Optional[int] = 0
 ) -> Iterator:
 
+    if dist.is_initialized():
+        world_size = dist.get_world_size()
+        rank = dist.get_rank()
+        print(f"\tinitialized data loader for worker {rank}/{world_size}")
+    else:
+        world_size = 1
+        rank = 0
+
     if step is None:
         step = 0
 
     while True:
-        seed_with_offset = seed + step * dataset.world_size + dataset.rank
+        seed_with_offset = seed + step * world_size + rank
         rng = np.random.default_rng(seed_with_offset)
         batch_idx = rng.integers(len(dataset), size=(batch_size,))
 
