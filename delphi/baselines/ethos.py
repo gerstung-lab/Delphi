@@ -1,4 +1,3 @@
-from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -9,9 +8,7 @@ import transformers
 from delphi.model.components import target_mask
 from delphi.model.config import GPT2Config
 from delphi.model.loss import CrossEntropyHead
-from delphi.model.transformer import (
-    initialize_weights,
-)
+from delphi.model.transformer import initialize_weights
 from delphi.sampler import truncate_top_k
 from delphi.tokenizer import Tokenizer
 
@@ -84,17 +81,10 @@ def parse_time_bins(tokenizer: Tokenizer):
     return np.array(time_bins)
 
 
-@dataclass
-class ModelConfig(GPT2Config):
-    base_vocab_size: int = 1270
-    n_time_tokens: int = 10
-    time_bins: list = field(default_factory=list)
-
-
 class Model(torch.nn.Module):
     model_type = "ethos"
 
-    def __init__(self, config: ModelConfig):
+    def __init__(self, config: GPT2Config):
         super().__init__()
         self.config = config
         gpt2_config = transformers.GPT2Config(
@@ -103,44 +93,19 @@ class Model(torch.nn.Module):
             n_embd=config.n_embd,
             n_layer=config.n_layer,
             n_head=config.n_head,
+            resid_pdrop=config.resid_pdrop,
+            embd_pdrop=config.embd_pdrop,
+            attn_pdrop=config.attn_pdrop,
         )
         self.gpt2 = transformers.GPT2LMHeadModel(gpt2_config)
-        self.token_embed = self.gpt2.transformer.wte
-
         self.ce_head = CrossEntropyHead(config)
-
         initialize_weights(self, config=config)
-        self.gpt2.transformer.wpe.weight.data *= 0
-        for param in self.gpt2.transformer.wpe.parameters():
-            param.requires_grad = False
-        assert is_strictly_ascending(config.time_bins)
-        self.register_buffer("time_bins", torch.Tensor(config.time_bins))
 
     def forward(
         self,
         idx: torch.Tensor,
-        age: torch.Tensor,
         targets: Optional[torch.Tensor] = None,
-        targets_age: Optional[torch.Tensor] = None,
     ):
-        if targets is not None:
-            assert targets_age is not None
-            all_idx = torch.hstack((idx, targets[:, [-1]]))
-            all_age = torch.hstack((age, targets_age[:, [-1]]))
-            ethos_idx, _ = create_ethos_sequence(
-                X=all_idx,
-                T=all_age,
-                offset=self.config.base_vocab_size - 1,
-                time_bins=self.time_bins,
-            )
-            idx, targets = ethos_idx[:, :-1], ethos_idx[:, 1:]
-        else:
-            idx, _ = create_ethos_sequence(
-                X=idx,
-                T=age,
-                offset=self.config.base_vocab_size - 1,
-                time_bins=self.time_bins,
-            )
 
         batch_size, seq_len = idx.shape
         assert seq_len <= self.config.block_size
