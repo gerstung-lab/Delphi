@@ -114,9 +114,7 @@ class MIMICDataset:
 
     def __getitem__(self, idx: int) -> tuple[th.Tensor | tuple, th.Tensor]:
         pt_ctx = self._get_patient_context(idx)
-        end = min(
-            idx + self.timeline_size + 1, self.patient_data_end_at_idx[idx].item()
-        )
+        end = min(idx + self.timeline_size + 1, self.patient_data_end_at_idx[idx])
         timeline = self.tokens[idx:end]
 
         if self.is_encoder_decoder:
