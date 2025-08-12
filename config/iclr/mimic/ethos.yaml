@@ -34,4 +34,4 @@ optim:
   lr_decay_iters: ${optim.max_iters}
   min_lr: 6e-5
   beta2: 0.99
-  warmup_iters: 1000
+  warmup_iters: 5000
