@@ -3,18 +3,16 @@ from typing import Optional
 
 import numpy as np
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
+import transformers
 
 from delphi.model.components import target_mask
 from delphi.model.config import GPT2Config
 from delphi.model.loss import CrossEntropyHead
 from delphi.model.transformer import (
-    Block,
-    LayerNorm,
-    causal_attention_mask,
-    count_params,
     initialize_weights,
 )
+from delphi.sampler import truncate_top_k
 from delphi.tokenizer import Tokenizer
 
 
@@ -99,28 +97,22 @@ class Model(torch.nn.Module):
     def __init__(self, config: ModelConfig):
         super().__init__()
         self.config = config
-        self.build_model(config)
-        initialize_weights(self, config=config)
-        n_params = count_params(self)
-        print("number of parameters: %.2fM" % (n_params / 1e6,))
+        gpt2_config = transformers.GPT2Config(
+            vocab_size=config.vocab_size,
+            n_positions=config.block_size,
+            n_embd=config.n_embd,
+            n_layer=config.n_layer,
+            n_head=config.n_head,
+        )
+        self.gpt2 = transformers.GPT2LMHeadModel(gpt2_config)
+        self.token_embed = self.gpt2.transformer.wte
 
-    def build_model(self, config: ModelConfig):
-
-        self.token_embed = nn.Embedding(
-            num_embeddings=config.vocab_size, embedding_dim=config.n_embd
-        )
-        self.pos_embed = nn.Embedding(
-            num_embeddings=config.block_size, embedding_dim=config.n_embd
-        )
-        self.dropout = nn.Dropout(p=config.dropout)
-        self.transformer_blocks = nn.ModuleList(
-            [Block(config) for _ in range(config.n_layer)]
-        )
-        self.ln_f = LayerNorm(config.n_embd, bias=config.bias)
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.token_embed.weight = self.lm_head.weight
         self.ce_head = CrossEntropyHead(config)
 
+        initialize_weights(self, config=config)
+        self.gpt2.transformer.wpe.weight.data *= 0
+        for param in self.gpt2.transformer.wpe.parameters():
+            param.requires_grad = False
         assert is_strictly_ascending(config.time_bins)
         self.register_buffer("time_bins", torch.Tensor(config.time_bins))
 
@@ -131,7 +123,6 @@ class Model(torch.nn.Module):
         targets: Optional[torch.Tensor] = None,
         targets_age: Optional[torch.Tensor] = None,
     ):
-
         if targets is not None:
             assert targets_age is not None
             all_idx = torch.hstack((idx, targets[:, [-1]]))
@@ -153,42 +144,32 @@ class Model(torch.nn.Module):
 
         batch_size, seq_len = idx.shape
         assert seq_len <= self.config.block_size
-        x = self.token_embed(idx)
 
         pos = torch.arange(seq_len, device=idx.device).view(1, -1).repeat(batch_size, 1)
-
         is_pad = idx == 0
         offset = is_pad.sum(dim=1, keepdim=True)
         pos = torch.clamp(pos - offset, min=0)
-        x += self.pos_embed(pos)
 
-        attn_mask = causal_attention_mask(pad=(idx > 0))
-
-        att = []
-        for block in self.transformer_blocks:
-            x, a = block(x, attn_mask)
-            att.append(a)
-        x = self.ln_f(x)
-        att = torch.stack(att)
+        attn_mask = idx > 0
+        output_dict = self.gpt2(
+            input_ids=idx, attention_mask=attn_mask, position_ids=pos
+        )
+        logits = output_dict["logits"]
 
         if targets is not None:
-            logits = self.lm_head(x)
             loss_ce = self.ce_head(logits=logits, targets=targets)
             is_valid_target = target_mask(x1=targets, ignore_tokens=[])
             loss_ce = torch.mean(loss_ce[is_valid_target])
             loss = {"loss_ce": loss_ce}
         else:
-            logits = self.lm_head(
-                x[:, [-1], :]
-            )  # note: using list [-1] to preserve the time dim
             loss = None
 
-        return logits, loss, att
+        return logits, loss
 
     def eval_step(self, idx: torch.Tensor, age: torch.Tensor):
 
         raw_idx = idx.clone()
-        raw_seq_len = idx.shape[1]
+        batch_size, raw_seq_len = idx.shape
 
         ethos_idx, is_event = create_ethos_sequence(
             X=idx,
@@ -198,29 +179,51 @@ class Model(torch.nn.Module):
         )
         idx = torch.tensor(ethos_idx).to(idx.device)
 
-        batch_size, seq_len = idx.shape
-        assert seq_len <= self.config.block_size
-        x = self.token_embed(idx)
-
-        pos = torch.arange(seq_len, device=idx.device).view(1, -1).repeat(batch_size, 1)
-
-        is_pad = idx == 0
-        offset = is_pad.sum(dim=1, keepdim=True)
-        pos = torch.clamp(pos - offset, min=0)
-        x += self.pos_embed(pos)
-
-        attn_mask = causal_attention_mask(pad=(idx > 0))
-
-        att = []
-        for block in self.transformer_blocks:
-            x, a = block(x, attn_mask)
-            att.append(a)
-        x = self.ln_f(x)
-        att = torch.stack(att)
-
-        logits = self.lm_head(x)
+        logits = self.forward_backbone(idx=idx)
 
         logits = logits[is_event, :]
         logits = logits.reshape(batch_size, raw_seq_len, -1)
 
         return logits, raw_idx, age
+
+    @torch.no_grad
+    def next_token(
+        self,
+        idx: torch.Tensor,
+        age: torch.Tensor,
+        temperature: float = 1.0,
+        top_k: Optional[int] = None,
+        no_repeat: bool = False,
+    ):
+
+        max_event_token = self.config.base_vocab_size - 1
+
+        logits, _ = self.forward(idx, age)
+        logits = logits[:, -1, :] / temperature
+
+        if top_k is not None:
+            logits = truncate_top_k(logits, top_k)
+
+        if no_repeat:
+            fill = idx + 0
+            fill[fill == 1] = 0
+            logits = logits.scatter_(1, fill, -torch.inf)
+        probs = F.softmax(logits, dim=-1)
+        tokens = torch.multinomial(probs, num_samples=1)
+        next_is_time = tokens > max_event_token
+        next_is_event = ~next_is_time
+        next_event = tokens.clone()
+        next_event[next_is_time] = 0
+        idx = torch.concat((idx, next_event), dim=-1)
+
+        last_age = age[:, [-1]]
+        next_time = tokens.clone()
+        next_time -= max_event_token
+        next_time = torch.clamp(next_time, min=0)
+        # select left edge of each time bin
+        next_time = self.time_bins[next_time - 1]
+        next_time[next_is_event] = 0
+        next_age = next_time + last_age
+        age = torch.concat((age, next_age), dim=-1)
+
+        return idx, age
