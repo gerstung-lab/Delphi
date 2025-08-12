@@ -14,7 +14,7 @@ class CrossEntropyHead(nn.Module):
     def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
 
         logits = logits.permute(0, 2, 1)  # (b, l, n_vocab) -> (b, n_vocab, l)
-        loss_ce = F.cross_entropy(logits, targets, ignore_index=-1, reduction="none")
+        loss_ce = F.cross_entropy(logits, targets, reduction="none")
 
         return loss_ce
 
