@@ -12,6 +12,20 @@ from .constants import STATIC_DATA_FN, SpecialToken
 from .vocabulary import Vocabulary
 
 
+def collate_batch_data(batch_data: list[th.Tensor]) -> th.Tensor:
+
+    max_len = max([bd.numel() for bd in batch_data])
+    collated_batch = th.full(
+        size=(len(batch_data), max_len),
+        fill_value=0,
+        dtype=batch_data[0].dtype,
+    )
+    for i, bd in enumerate(batch_data):
+        collated_batch[i, -bd.numel() :] = bd
+
+    return collated_batch
+
+
 class MIMICDataset:
     def __init__(
         self,
@@ -100,7 +114,10 @@ class MIMICDataset:
 
     def __getitem__(self, idx: int) -> tuple[th.Tensor | tuple, th.Tensor]:
         pt_ctx = self._get_patient_context(idx)
-        timeline = self.tokens[idx : idx + self.timeline_size + 1]
+        end = min(
+            idx + self.timeline_size + 1, self.patient_data_end_at_idx[idx].item()
+        )
+        timeline = self.tokens[idx:end]
 
         if self.is_encoder_decoder:
             return (pt_ctx, timeline[:-1]), timeline[1:]
@@ -119,8 +136,8 @@ class MIMICDataset:
             X.append(x)
             Y.append(y)
 
-        X = th.stack(X, dim=0)
-        Y = th.stack(Y, dim=0)
+        X = collate_batch_data(X)
+        Y = collate_batch_data(Y)
 
         return X, Y
 
