@@ -187,29 +187,17 @@ class BaseDataset:
     def vocab_size(self):
         return self.tokenizer.vocab_size
 
-    def get_batch(self, batch_idx: np.ndarray):
+    def __getitem__(self, idx: int):
 
-        P = self.participants[batch_idx]
-        X = []
-        T = []
-        for i, pid in enumerate(P):
-            i = self.start_pos[pid]
-            l = self.seq_len[pid]
-            x_pid = self.tokens[i : i + l]
-            t_pid = self.time_steps[i : i + l]
+        pid = self.participants[idx]
+        i = self.start_pos[pid]
+        l = self.seq_len[pid]
+        x_pid = self.tokens[i : i + l]
+        t_pid = self.time_steps[i : i + l]
+        x_pid, t_pid = self.add_no_event(x_pid, t_pid)
+        x_pid, t_pid = self.crop_block_size(x_pid, t_pid)
 
-            x_pid, t_pid = self.add_no_event(x_pid, t_pid)
-            x_pid, t_pid = self.crop_block_size(x_pid, t_pid)
-
-            X.append(x_pid)
-            T.append(t_pid)
-
-        X = collate_batch_data(X)
-        T = collate_batch_time(T)
-
-        T, X = sort_by_time(T, X)
-
-        return X, T
+        return x_pid, t_pid
 
 
 def build_dataset(cfg: dict):
@@ -247,8 +235,19 @@ def load_sequences(
     while True:
         seed_with_offset = seed + step * dataset.world_size + dataset.rank
         rng = np.random.default_rng(seed_with_offset)
-        idx = rng.integers(len(dataset), size=(batch_size,))
-        X, T = dataset.get_batch(idx)
+        batch_idx = rng.integers(len(dataset), size=(batch_size,))
+
+        X = []
+        T = []
+        for idx in batch_idx:
+            x, t = dataset[idx]
+            X.append(x)
+            T.append(t)
+
+        X = collate_batch_data(X)
+        T = collate_batch_time(T)
+        T, X = sort_by_time(T, X)
+
         X = torch.tensor(X, dtype=torch.long)
         T = torch.tensor(T, dtype=torch.float32)
 
