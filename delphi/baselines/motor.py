@@ -4,13 +4,12 @@ from typing import Optional
 import numpy as np
 import torch
 import torch.nn as nn
+import transformers
 
 from delphi.model.components import AgeEncoding, target_mask
 from delphi.model.config import GPT2Config
 from delphi.model.loss import CrossEntropyHead
 from delphi.model.transformer import (
-    Block,
-    LayerNorm,
     causal_attention_mask,
     count_params,
     initialize_weights,
@@ -231,27 +230,30 @@ class Model(torch.nn.Module):
     def __init__(self, config: ModelConfig):
         super().__init__()
         self.config = config
-        self.build_model(config)
-        initialize_weights(self, config=config)
-        n_params = count_params(self)
-        print("number of parameters: %.2fM" % (n_params / 1e6,))
-
-    def build_model(self, config: ModelConfig):
-
-        assert config.vocab_size is not None
-        self.token_embed = nn.Embedding(
-            num_embeddings=config.vocab_size, embedding_dim=config.n_embd
-        )
         self.age_embed = AgeEncoding(config=config)
-        self.dropout = nn.Dropout(p=config.dropout)
-        self.transformer_blocks = nn.ModuleList(
-            [Block(config) for _ in range(config.n_layer)]
+
+        gpt2_config = transformers.GPT2Config(
+            vocab_size=config.vocab_size,
+            n_positions=config.block_size,
+            n_embd=config.n_embd,
+            n_layer=config.n_layer,
+            n_head=config.n_head,
+            resid_pdrop=config.resid_pdrop,
+            embd_pdrop=config.embd_pdrop,
+            attn_pdrop=config.attn_pdrop,
         )
-        self.ln_f = LayerNorm(config.n_embd, bias=config.bias)
+        self.gpt2 = transformers.GPT2Model(gpt2_config)
+        self.token_embed = self.gpt2.wte
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.token_embed.weight = self.lm_head.weight
+
         self.ce_head = CrossEntropyHead(config)
         self.motor_head = MotorHead(config)
+
+        initialize_weights(self, config=config)
+        self.gpt2.wpe.weight.data *= 0
+        for param in self.gpt2.wpe.parameters():
+            param.requires_grad = False
 
     def forward(
         self,
@@ -260,20 +262,15 @@ class Model(torch.nn.Module):
         targets: Optional[torch.Tensor] = None,
         targets_age: Optional[torch.Tensor] = None,
     ):
-
-        batch_size, seq_len = idx.shape
+        _, seq_len = idx.shape
         assert seq_len <= self.config.block_size
         token_emb = self.token_embed(idx)
         age_emb = self.age_embed(age.unsqueeze(-1))
         x = token_emb + age_emb
 
-        attn_mask = causal_attention_mask(pad=(idx > 0))
-        att = []
-        for block in self.transformer_blocks:
-            x, a = block(x, attn_mask)
-            att.append(a)
-        x = self.ln_f(x)
-        att = torch.stack(att)
+        attn_mask = idx > 0
+        output_dict = self.gpt2(inputs_embeds=x, attention_mask=attn_mask)
+        x = output_dict["last_hidden_state"]
 
         if targets is not None:
             logits = self.lm_head(x)
@@ -291,25 +288,14 @@ class Model(torch.nn.Module):
                 "loss_motor": loss_motor * self.config.motor_beta,
             }
         else:
-            loss, log_lambda = self.motor_head(h=x[:, [-1], :])
+            loss = None
 
-        return log_lambda, loss, att
+        return log_lambda, loss
 
     def eval_step(self, idx: torch.Tensor, age: torch.Tensor, horizon: float):
 
         batch_size, seq_len = idx.shape
-        assert seq_len <= self.config.block_size
-        token_emb = self.token_embed(idx)
-        age_emb = self.age_embed(age.unsqueeze(-1))
-        x = token_emb + age_emb
-
-        attn_mask = causal_attention_mask(pad=(idx > 0))
-        att = []
-        for block in self.transformer_blocks:
-            x, a = block(x, attn_mask)
-            att.append(a)
-        x = self.ln_f(x)
-        att = torch.stack(att)
+        x, _ = self.forward_backbone(idx=idx, age=age)
 
         # log_lambda: [B, L, P, V]
         _, log_lambda = self.motor_head(h=x, age=age)
@@ -340,7 +326,7 @@ class Model(torch.nn.Module):
 
     @torch.no_grad()
     def next_token(self, idx: torch.Tensor, age: torch.Tensor, **kwargs):
-        log_lambda, _, _ = self.forward(idx, age)
+        log_lambda, _ = self.forward(idx, age)
         idx_next, time_til_next = sample_piecewise_exponentials(
             log_lambda.squeeze(1),
             self.motor_head.time_bins,
