@@ -1,22 +1,18 @@
-import functools
-import json
-import operator
 import pickle
 from collections.abc import Sequence
 from datetime import timedelta
 from pathlib import Path
-from typing import Optional, TypeVar
 
-import polars as pl
 import torch as th
-from loguru import logger
+
+from delphi.tokenizer import Tokenizer
 
 from ._sharded_data import ShardedData
 from .constants import STATIC_DATA_FN, SpecialToken
 from .vocabulary import Vocabulary
 
 
-class TimelineDataset:
+class MIMICDataset:
     def __init__(
         self,
         input_dir: str | Path,
@@ -40,6 +36,10 @@ class TimelineDataset:
         self.is_encoder_decoder = is_encoder_decoder
         if is_encoder_decoder:
             self.timeline_size = n_positions
+
+    @property
+    def tokenizer(self):
+        return Tokenizer(name2id=self.vocab.stoi)
 
     @property
     def tokens(self):
@@ -107,8 +107,22 @@ class TimelineDataset:
 
         x = th.cat((pt_ctx, timeline[:-1]))
         y = th.cat((pt_ctx, timeline[1:]))
-        y[: self.context_size] = -100
+        y[: self.context_size] = 0
         return x, y
+
+    def get_batch(self, batch_idx: list[int]):
+
+        X = []
+        Y = []
+        for idx in batch_idx:
+            x, y = self[idx]
+            X.append(x)
+            Y.append(y)
+
+        X = th.stack(X, dim=0)
+        Y = th.stack(Y, dim=0)
+
+        return X, Y
 
     def _get_patient_context(self, idx: int) -> th.Tensor:
         patient_id = self.patient_id_at_idx[idx].item()
