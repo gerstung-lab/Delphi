@@ -22,7 +22,7 @@ class Vocabulary:
     ):
         if vocab is None:
             vocab = []
-        self.stoi = {word: i for i, word in enumerate(vocab)}
+        self.stoi = {word: i + 1 for i, word in enumerate(vocab)}
         self._itos = None
         self._interval_estimates = interval_estimates
 
@@ -55,13 +55,13 @@ class Vocabulary:
 
         return cls(vocab, interval_estimates)
 
-    def dump(self, output_dir: str | Path) -> None:
-        output_dir = Path(output_dir)
-        if not output_dir.is_dir():
-            raise ValueError(f"Expected a directory, got {output_dir}")
+    # def dump(self, output_dir: str | Path) -> None:
+    #     output_dir = Path(output_dir)
+    #     if not output_dir.is_dir():
+    #         raise ValueError(f"Expected a directory, got {output_dir}")
 
-        vocab = pl.DataFrame(list(self.stoi.keys()))
-        vocab.write_csv(output_dir / f"vocab_t{len(self)}.csv", include_header=False)
+    #     vocab = pl.DataFrame(list(self.stoi.keys()))
+    #     vocab.write_csv(output_dir / f"vocab_t{len(self)}.csv", include_header=False)
 
     def __len__(self):
         return len(self.stoi)
@@ -69,14 +69,14 @@ class Vocabulary:
     def __iter__(self):
         return iter(self.stoi.keys())
 
-    def add_words(self, words: str | Sequence[str]) -> None:
-        if isinstance(words, str):
-            words = [words]
-        for word in words:
-            if not isinstance(word, str):
-                raise ValueError(f"Expected str, {word} is '{type(word)}'")
-            if word not in self.stoi:
-                self.stoi[word] = len(self.stoi)
+    # def add_words(self, words: str | Sequence[str]) -> None:
+    #     if isinstance(words, str):
+    #         words = [words]
+    #     for word in words:
+    #         if not isinstance(word, str):
+    #             raise ValueError(f"Expected str, {word} is '{type(word)}'")
+    #         if word not in self.stoi:
+    #             self.stoi[word] = len(self.stoi)
 
     def encode(self, codes: str | Sequence[str]) -> list[int] | int:
         if isinstance(codes, th.Tensor):
@@ -114,22 +114,22 @@ class Vocabulary:
     def time_interval_stokens(self) -> list[str]:
         return list(self.interval_estimates["mean"].keys())
 
-    def get_timeline_total_time(
-        self,
-        timeline: Sequence[int | str],
-        stat: str = "mean",
-        input_str: bool = False,
-    ) -> timedelta:
-        if not input_str:
-            timeline = (self.decode(t) for t in timeline)  # type: ignore
+    # def get_timeline_total_time(
+    #     self,
+    #     timeline: Sequence[int | str],
+    #     stat: str = "mean",
+    #     input_str: bool = False,
+    # ) -> timedelta:
+    #     if not input_str:
+    #         timeline = (self.decode(t) for t in timeline)  # type: ignore
 
-        interval_estimates = self.interval_estimates[stat]
-        return functools.reduce(
-            operator.add,
-            (
-                timedelta(microseconds=interval_estimates[t])
-                for t in timeline
-                if t in interval_estimates
-            ),
-            timedelta(0),
-        )
+    #     interval_estimates = self.interval_estimates[stat]
+    #     return functools.reduce(
+    #         operator.add,
+    #         (
+    #             timedelta(microseconds=interval_estimates[t])
+    #             for t in timeline
+    #             if t in interval_estimates
+    #         ),
+    #         timedelta(0),
+    #     )
