@@ -1,5 +1,4 @@
 import functools
-from copy import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator, Optional
@@ -10,7 +9,6 @@ import torch
 import yaml
 from scipy.sparse import coo_array
 
-from delphi.data.mimic.base import MIMICDataset
 from delphi.data.transform import (
     add_no_event,
     crop_contiguous,
@@ -228,40 +226,6 @@ class BaseDataset:
 def build_dataset(cfg: dict):
 
     return BaseDataset(BaseDataConfig(**cfg))
-
-
-def build_datasets(data_dict: dict):
-
-    if data_dict["data_dir"] == "ukb_real_data":
-        train_cfg = BaseDataConfig(
-            data_dir=data_dict["data_dir"],
-            subject_list=data_dict["train_subject_list"],
-            seed=data_dict["seed"],
-            no_event_interval=data_dict["no_event_interval"],
-            block_size=data_dict["block_size"],
-        )
-        val_cfg = copy(train_cfg)
-        val_cfg.subject_list = data_dict["val_subject_list"]
-
-        print(f"building train dataset...")
-        train_ds = BaseDataset(train_cfg)
-        print(f"building validation dataset...")
-        val_ds = BaseDataset(val_cfg)
-    elif data_dict["data_dir"] == "mimic":
-        print(f"building train dataset...")
-        train_ds = MIMICDataset(
-            input_dir=Path(DELPHI_DATA_DIR) / "mimic" / "train",
-            n_positions=data_dict["block_size"],
-        )
-        print(f"building validation dataset...")
-        val_ds = MIMICDataset(
-            input_dir=Path(DELPHI_DATA_DIR) / "mimic" / "test",
-            n_positions=data_dict["block_size"],
-        )
-    else:
-        raise ValueError
-
-    return train_ds, val_ds
 
 
 def load_prompt_sequences(it: Iterator, dataset: BaseDataset, start_age: float):
