@@ -1,6 +1,6 @@
 model_type: ethos
 ckpt_dir: ethos-mimic
-eval_interval: 500
+eval_interval: 1000
 eval_iters: 25
 eval_only: false
 init_from: scratch
@@ -24,7 +24,7 @@ log:
   wandb_log: true
   wandb_project: ${ckpt_dir}
   run_name: ethos
-  log_interval: 25
+  log_interval: 250
   always_ckpt_after_eval: true
   ckpt_interval: null
 optim:
