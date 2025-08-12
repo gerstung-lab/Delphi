@@ -3,7 +3,7 @@ from collections import defaultdict
 from contextlib import nullcontext
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import torch
 import torch.distributed as dist
@@ -12,11 +12,12 @@ from omegaconf import OmegaConf
 from delphi import distributed
 from delphi.baselines import ethos, motor
 from delphi.config import dataclass_from_dict
-from delphi.data.core import train_iter
+from delphi.data.core import move_batch_to_device, train_iter
 from delphi.env import DELPHI_CKPT_DIR
 from delphi.experiment.config import TrainBaseConfig
 from delphi.log import TrainLogger
 from delphi.model import delphi
+from delphi.model.config import GPT2Config
 from delphi.model.transformer import Delphi, DelphiConfig
 from delphi.optim import configure_optimizers
 from delphi.tokenizer import load_tokenizer_from_yaml
@@ -113,16 +114,12 @@ class BaseTrainer:
         self.iter_num = 0
 
     def mini_step(
-        self, batch_data: tuple[torch.Tensor, torch.Tensor], *args, **kwargs
+        self, batch_data: Iterable, *args, **kwargs
     ) -> dict[str, torch.Tensor]:
 
-        batch_data = tuple([data.to(self.device) for data in batch_data])
-        X, T = batch_data
-        X_t0, X_t1 = X[:, :-1], X[:, 1:]
-        T_t0, T_t1 = T[:, :-1], T[:, 1:]
-
+        batch_data = move_batch_to_device(args=batch_data, device=self.device)
         with self.ctx:
-            _, loss = self.model(idx=X_t0, targets=X_t1, age=T_t0, targets_age=T_t1)
+            _, loss = self.model(*batch_data)
 
         return loss
 
@@ -221,7 +218,7 @@ def load_ckpt(ckpt_path):
         model_cfg_cls = DelphiConfig
         model_cls = Delphi
     elif model_type == "ethos":
-        model_cfg_cls = ethos.ModelConfig
+        model_cfg_cls = GPT2Config
         model_cls = ethos.Model
     elif model_type == "motor":
         model_cfg_cls = motor.ModelConfig
