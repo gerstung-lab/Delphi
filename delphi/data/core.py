@@ -218,16 +218,13 @@ def build_datasets(data_dict: dict):
 
 
 def load_sequences(
-    seed: int, dataset: BaseDataset, batch_size: int, step: Optional[int] = 0
+    seed: int,
+    dataset: BaseDataset,
+    batch_size: int,
+    world_size: int = 1,
+    rank: int = 0,
+    step: Optional[int] = 0,
 ) -> Iterator:
-
-    if dist.is_initialized():
-        world_size = dist.get_world_size()
-        rank = dist.get_rank()
-        print(f"\tinitialized data loader for worker {rank}/{world_size}")
-    else:
-        world_size = 1
-        rank = 0
 
     if step is None:
         step = 0

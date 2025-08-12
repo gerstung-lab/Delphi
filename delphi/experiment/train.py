@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
 import torch
+import torch.distributed as dist
 from omegaconf import OmegaConf
 
 from delphi import distributed
@@ -62,12 +63,35 @@ class BaseTrainer:
             device=self.device_type, enabled=(cfg.dtype == "float16")
         )
 
+        if dist.is_initialized():
+            world_size = dist.get_world_size()
+            rank = dist.get_rank()
+            print(f"\tinitialized data loader for worker {rank}/{world_size}")
+        else:
+            world_size = 1
+            rank = 0
         self.train_loader = loader(
-            seed=cfg.seed, dataset=train_ds, batch_size=cfg.batch_size
+            seed=cfg.seed,
+            dataset=train_ds,
+            batch_size=cfg.batch_size,
+            world_size=world_size,
+            rank=rank,
         )
         self.estimate_loaders = {
-            "train": loader(seed=cfg.seed, dataset=train_ds, batch_size=cfg.batch_size),
-            "val": loader(seed=cfg.seed, dataset=val_ds, batch_size=cfg.batch_size),
+            "train": loader(
+                seed=cfg.seed,
+                dataset=train_ds,
+                batch_size=cfg.batch_size,
+                world_size=world_size,
+                rank=rank,
+            ),
+            "val": loader(
+                seed=cfg.seed,
+                dataset=val_ds,
+                batch_size=cfg.batch_size,
+                world_size=world_size,
+                rank=rank,
+            ),
         }
 
         run_dir = os.path.normpath(
