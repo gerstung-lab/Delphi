@@ -12,7 +12,7 @@ from delphi import DAYS_PER_YEAR
 from delphi.data import core
 from delphi.eval import eval_task
 from delphi.eval.auc import mann_whitney_auc, move_batch_to_device
-from delphi.experiment import load_ckpt
+from delphi.experiment.train import load_ckpt
 from delphi.model.config import parse_token_list
 from delphi.sampler import generate
 
