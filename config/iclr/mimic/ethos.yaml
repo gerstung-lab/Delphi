@@ -23,7 +23,7 @@ model:
 log:
   wandb_log: true
   wandb_project: ${ckpt_dir}
-  run_name: debug
+  run_name: ethos
   log_interval: 25
   always_ckpt_after_eval: true
   ckpt_interval: null
