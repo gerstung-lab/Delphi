@@ -7,10 +7,7 @@ import transformers
 from delphi.model.components import AgeEncoding, target_mask
 from delphi.model.config import GPT2Config
 from delphi.model.loss import CompetingExpHead, CrossEntropyHead
-from delphi.model.transformer import (
-    count_params,
-    initialize_weights,
-)
+from delphi.model.transformer import initialize_weights
 from delphi.sampler import sample_competing_exponentials, truncate_top_k
 
 

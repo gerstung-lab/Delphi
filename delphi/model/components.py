@@ -10,7 +10,7 @@ from delphi.multimodal import Modality, module_name
 
 class AgeEncoding(nn.Module):
 
-    def __init__(self, config, max_dim: int = 1024):
+    def __init__(self, config):
         super().__init__()
         div_term = torch.exp(
             torch.arange(0, config.n_embd, 2) * (-math.log(10000.0) / config.n_embd)
@@ -19,18 +19,18 @@ class AgeEncoding(nn.Module):
         self.n_embd = config.n_embd
         self.linear = torch.nn.Linear(config.n_embd, config.n_embd, bias=False)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         """
         Arguments:
             x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``
         """
+        time_years = x / 365.25
         y = torch.zeros(x.shape[0], x.shape[1], self.n_embd, device=x.device)
-        y[..., 0::2] = torch.sin(x / 365.25 * self.div_term)  # * (1-self.div_term)
-        y[..., 1::2] = torch.cos(x / 365.25 * self.div_term)  # * (1-self.div_term)
+        y[..., 0::2] = torch.sin(time_years * self.div_term)  # * (1-self.div_term)
+        y[..., 1::2] = torch.cos(time_years * self.div_term)  # * (1-self.div_term)
         y = self.linear(y)
 
-        # x = self.wae[:x.size(0)]
-        return y  # self.dropout(x)
+        return y
 
 
 class BiomarkerEmbedding(nn.Module):
