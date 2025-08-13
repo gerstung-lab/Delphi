@@ -1,5 +1,5 @@
-from delphi.data.core import build_datasets
+from delphi.data.mimic.base import MIMICDataset
 
-train_ds, val_ds = build_datasets(data_dict={"cohort": "mimic", "block_size": 1024})
+train_ds = MIMICDataset(input_dir="mimic", n_positions=1024)
 
-print()
+print(train_ds[0])
