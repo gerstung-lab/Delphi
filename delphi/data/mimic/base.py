@@ -22,7 +22,7 @@ def collate_batch_data(batch_data: list[th.Tensor]) -> th.Tensor:
         dtype=batch_data[0].dtype,
     )
     for i, bd in enumerate(batch_data):
-        collated_batch[i, : bd.numel()] = bd
+        collated_batch[i, -bd.numel() :] = bd
 
     return collated_batch
 
@@ -36,7 +36,7 @@ def collate_batch_time(batch_time: list[th.Tensor]) -> th.Tensor:
         dtype=batch_time[0].dtype,
     )
     for i, bd in enumerate(batch_time):
-        collated_batch[i, : bd.numel()] = bd
+        collated_batch[i, -bd.numel() :] = bd
 
     return collated_batch
 
