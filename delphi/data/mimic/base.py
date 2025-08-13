@@ -1,3 +1,4 @@
+import json
 import pickle
 from collections.abc import Sequence
 from datetime import timedelta
@@ -26,12 +27,27 @@ def collate_batch_data(batch_data: list[th.Tensor]) -> th.Tensor:
     return collated_batch
 
 
+def collate_batch_time(batch_time: list[th.Tensor]) -> th.Tensor:
+
+    max_len = max([bd.numel() for bd in batch_time])
+    collated_batch = th.full(
+        size=(len(batch_time), max_len),
+        fill_value=-1e4,
+        dtype=batch_time[0].dtype,
+    )
+    for i, bd in enumerate(batch_time):
+        collated_batch[i, -bd.numel() :] = bd
+
+    return collated_batch
+
+
 class MIMICDataset:
     def __init__(
         self,
         input_dir: str | Path,
         n_positions: int = 2048,
         is_encoder_decoder: bool = False,
+        sep_time_tokens: bool = True,
     ):
         input_dir = Path(input_dir)
         if not input_dir.is_dir():
@@ -50,6 +66,12 @@ class MIMICDataset:
         self.is_encoder_decoder = is_encoder_decoder
         if is_encoder_decoder:
             self.timeline_size = n_positions
+
+        with open(input_dir / "interval_estimates.json", "r") as f:
+            interval_stats = json.load(f)
+        time_intervals = list(interval_stats["min"].keys())
+        self.time_tokens = th.tensor(self.vocab.encode(time_intervals))
+        self.sep_time_tokens = sep_time_tokens
 
     @property
     def tokenizer(self):
@@ -112,32 +134,53 @@ class MIMICDataset:
     def __len__(self) -> int:
         return len(self.tokens) - self.timeline_size
 
-    def __getitem__(self, idx: int) -> tuple[th.Tensor | tuple, th.Tensor]:
+    @staticmethod
+    def convert_time(timesteps: th.Tensor):
+        return timesteps / 1e6 / 60
+
+    def __getitem__(self, idx: int) -> tuple:
         pt_ctx = self._get_patient_context(idx)
-        end = min(idx + self.timeline_size + 1, self.patient_data_end_at_idx[idx])
-        timeline = self.tokens[idx:end]
+        end = min(idx + self.timeline_size + 1, self.patient_data_end_at_idx[idx])  # type: ignore
+        tokens = self.tokens[idx:end]
+        timesteps = self.times[idx:end]
+        timesteps = self.convert_time(timesteps)
+        pt_ctx_timesteps = th.full(size=pt_ctx.shape, fill_value=timesteps[0].item())
+
+        if self.sep_time_tokens:
+            is_time_token = th.isin(tokens, self.time_tokens)
+            tokens = tokens[~is_time_token]
+            timesteps = timesteps[~is_time_token]
 
         if self.is_encoder_decoder:
-            return (pt_ctx, timeline[:-1]), timeline[1:]
+            return (pt_ctx, tokens[:-1]), tokens[1:]
 
-        x = th.cat((pt_ctx, timeline[:-1]))
-        y = th.cat((pt_ctx, timeline[1:]))
+        x = th.cat((pt_ctx, tokens[:-1]))
+        x_t = th.cat((pt_ctx_timesteps, timesteps[:-1]))
+        y = th.cat((pt_ctx, tokens[1:]))
+        y_t = th.cat((pt_ctx_timesteps, timesteps[1:]))
         y[: self.context_size] = 0
-        return x, y
+
+        return x, x_t, y, y_t
 
     def get_batch(self, batch_idx: list[int]):
 
-        X = []
-        Y = []
+        X, X_t, Y, Y_t = [], [], [], []
         for idx in batch_idx:
-            x, y = self[idx]
+            x, x_t, y, y_t = self[idx]
             X.append(x)
+            X_t.append(x_t)
             Y.append(y)
+            Y_t.append(y_t)
 
         X = collate_batch_data(X)
+        X_t = collate_batch_time(X_t)
         Y = collate_batch_data(Y)
+        Y_t = collate_batch_time(Y_t)
 
-        return X, Y
+        if self.sep_time_tokens:
+            return X, X_t, Y, Y_t
+        else:
+            return X, Y
 
     def _get_patient_context(self, idx: int) -> th.Tensor:
         patient_id = self.patient_id_at_idx[idx].item()

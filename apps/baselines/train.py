@@ -57,13 +57,16 @@ def experiment(cfg: TrainConfig):
         train_ds = BaseDataset(train_cfg)
         val_ds = BaseDataset(val_cfg)
     elif cfg.data["data_dir"] == "mimic":
+        sep_time_tokens = cfg.model_type == "delphi"
         train_ds = MIMICDataset(
             input_dir=Path(DELPHI_DATA_DIR) / "mimic" / "train",
             n_positions=cfg.data["block_size"],
+            sep_time_tokens=sep_time_tokens,
         )
         val_ds = MIMICDataset(
             input_dir=Path(DELPHI_DATA_DIR) / "mimic" / "test",
             n_positions=cfg.data["block_size"],
+            sep_time_tokens=sep_time_tokens,
         )
     else:
         raise ValueError
