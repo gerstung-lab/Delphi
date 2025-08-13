@@ -16,7 +16,7 @@ data:
   block_size: ${model.block_size}
   no_event_interval: null
 model:
-  vocab_size: 4525
+  vocab_size: 4543
   n_layer: 10
   n_head: 8
   n_embd: 256
