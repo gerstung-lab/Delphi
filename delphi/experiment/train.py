@@ -132,7 +132,10 @@ class BaseTrainer:
             for _ in range(self.cfg.eval_iters):
 
                 batch_idx = next(self.estimate_iters[split])
-                batch_data = self.train_ds.get_batch(batch_idx)
+                if split == "train":
+                    batch_data = self.train_ds.get_batch(batch_idx)
+                else:
+                    batch_data = self.val_ds.get_batch(batch_idx)
                 loss = self.mini_step(batch_data=batch_data)
 
                 for key in loss.keys():
