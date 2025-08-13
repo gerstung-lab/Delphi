@@ -23,7 +23,7 @@ model:
 log:
   wandb_log: true
   wandb_project: ${ckpt_dir}
-  run_name: ethos
+  run_name: ethos-mimic-50k
   log_interval: 250
   always_ckpt_after_eval: true
   ckpt_interval: null

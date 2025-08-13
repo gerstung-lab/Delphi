@@ -1,6 +1,6 @@
 model_type: delphi
 ckpt_dir: delphi-mimic
-eval_interval: 500
+eval_interval: 1000
 eval_iters: 25
 eval_only: false
 init_from: scratch
@@ -10,11 +10,8 @@ batch_size: 256
 device: cuda
 data:
   data_dir: mimic
-  train_subject_list: participants/train_fold.bin
-  val_subject_list: participants/val_fold.bin
   seed: 42
   block_size: ${model.block_size}
-  no_event_interval: null
 model:
   vocab_size: 4543
   n_layer: 10
@@ -31,8 +28,8 @@ model:
 log:
   wandb_log: true
   wandb_project: ${ckpt_dir}
-  run_name: delphi_mimic
-  log_interval: 25
+  run_name: delphi-mimic-50k
+  log_interval: 250
   always_ckpt_after_eval: true
   ckpt_interval: null
 optim:
