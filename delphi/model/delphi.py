@@ -2,17 +2,18 @@ from dataclasses import dataclass
 from typing import Optional
 
 import torch
-import transformers
+from transformers import GPT2Config, GPT2LMHeadModel
 
+from delphi.model import config
 from delphi.model.components import AgeEncoding, target_mask
-from delphi.model.config import GPT2Config
 from delphi.model.loss import CompetingExpHead, CrossEntropyHead
 from delphi.model.transformer import initialize_weights
 from delphi.sampler import sample_competing_exponentials, truncate_top_k
 
 
 @dataclass
-class ModelConfig(GPT2Config):
+class ModelConfig(config.GPT2Config):
+    age_as_position: bool = True
     ce_beta: float = 1.0
     dt_beta: float = 1.0
     zero_inflate: bool = False
@@ -23,11 +24,11 @@ class Model(torch.nn.Module):
     model_type = "delphi"
 
     def __init__(self, config: ModelConfig):
+
         super().__init__()
         self.config = config
-        self.age_embed = AgeEncoding(config=config)
 
-        gpt2_config = transformers.GPT2Config(
+        gpt2_config = GPT2Config(
             vocab_size=config.vocab_size,
             n_positions=config.block_size,
             n_embd=config.n_embd,
@@ -37,16 +38,18 @@ class Model(torch.nn.Module):
             embd_pdrop=config.embd_pdrop,
             attn_pdrop=config.attn_pdrop,
         )
-        self.gpt2 = transformers.GPT2LMHeadModel(gpt2_config)
+        self.gpt2 = GPT2LMHeadModel(gpt2_config)
         self.token_embed = self.gpt2.transformer.wte
 
         self.ce_head = CrossEntropyHead(config)
         self.dt_head = CompetingExpHead(config)  # type: ignore
 
         initialize_weights(self, config=config)
-        self.gpt2.transformer.wpe.weight.data *= 0
-        for param in self.gpt2.transformer.wpe.parameters():
-            param.requires_grad = False
+        if self.config.age_as_position:
+            self.pos_emb = AgeEncoding(config=config)
+            self.gpt2.transformer.wpe.weight.data *= 0
+            for param in self.gpt2.transformer.wpe.parameters():
+                param.requires_grad = False
 
     def forward(
         self,
@@ -56,14 +59,25 @@ class Model(torch.nn.Module):
         targets_age: Optional[torch.Tensor] = None,
     ):
 
-        _, seq_len = idx.shape
+        batch_size, seq_len = idx.shape
         assert seq_len <= self.config.block_size
         token_emb = self.token_embed(idx)
-        age_emb = self.age_embed(age.unsqueeze(-1))
-        x = token_emb + age_emb
 
-        attn_mask = idx > 0
-        output_dict = self.gpt2(inputs_embeds=x, attention_mask=attn_mask.long())
+        pos = torch.arange(seq_len, device=idx.device).view(1, -1).repeat(batch_size, 1)
+        is_pad = idx == 0
+        offset = is_pad.sum(dim=1, keepdim=True)
+        pos = torch.clamp(pos - offset, min=0)
+
+        if self.config.age_as_position:
+            age_emb = self.pos_emb(age.unsqueeze(-1))
+            x = token_emb + age_emb
+        else:
+            x = token_emb
+
+        output_dict = self.gpt2(
+            inputs_embeds=x, position_ids=pos, attention_mask=(idx > 0).long()
+        )
+
         logits = output_dict.logits
 
         if targets is not None:
