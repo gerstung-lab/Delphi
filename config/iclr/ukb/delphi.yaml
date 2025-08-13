@@ -1,5 +1,5 @@
 model_type: delphi
-ckpt_dir: delphi-mini
+ckpt_dir: delphi-ukb
 eval_interval: 500
 eval_iters: 25
 eval_only: false
@@ -22,6 +22,7 @@ model:
   n_embd: 120
   bias: true
   block_size: 256
+  age_as_position: true
   ce_beta: 1.0
   dt_beta: 1.0
   zero_inflate: false
@@ -29,8 +30,8 @@ model:
 log:
   wandb_log: true
   wandb_project: ${ckpt_dir}
-  run_name: delphi_no_event_${data.no_event_interval}
-  log_interval: 25
+  run_name: delphi-ukb
+  log_interval: 100
   always_ckpt_after_eval: true
   ckpt_interval: null
 optim:
