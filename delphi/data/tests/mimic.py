@@ -1,4 +1,4 @@
-from delphi.data.mimic.base import MIMICDataset
+from delphi.data.mimic import MIMICDataset
 
 train_ds = MIMICDataset(input_dir="data/mimic/train", n_positions=1024)
 

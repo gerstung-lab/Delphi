@@ -10,7 +10,7 @@ from omegaconf import OmegaConf
 from delphi import distributed
 from delphi.baselines import ethos, motor
 from delphi.data.core import BaseDataConfig, BaseDataset
-from delphi.data.mimic.base import MIMICDataset
+from delphi.data.mimic import MIMICDataset
 from delphi.env import DELPHI_CKPT_DIR, DELPHI_DATA_DIR
 from delphi.experiment.config import TrainBaseConfig
 from delphi.experiment.train import BaseTrainer
