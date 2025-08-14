@@ -1,8 +1,6 @@
-from dataclasses import dataclass, field
 from typing import Optional
 
 import torch
-import torch.nn.functional as F
 
 from delphi import DAYS_PER_YEAR
 
@@ -103,7 +101,8 @@ def sample_piecewise_exponentials(
 @torch.no_grad()
 def generate(
     model: torch.nn.Module,
-    model_input: list | tuple,
+    idx: torch.Tensor,
+    age: torch.Tensor,
     seed: int,
     max_age: float,  # in days
     termination_tokens: torch.Tensor,
@@ -113,28 +112,38 @@ def generate(
 ):
 
     torch.manual_seed(seed)
+    next_token_generator = model.next_token(
+        idx=idx, age=age, no_repeat=no_repeat, top_k=top_k, temperature=temperature
+    )
 
+    n, l = idx.shape
+    has_termin_token = torch.zeros((n, 1), device=idx.device).bool()
+    out_of_time = torch.zeros_like(has_termin_token).bool()
+
+    gen_idx_lst = []
+    gen_age_lst = []
     while True:
+        next_idx, next_age, next_logits = next(next_token_generator)
 
-        model_input = model.next_token(
-            *model_input, no_repeat=no_repeat, top_k=top_k, temperature=temperature
+        has_termin_token = torch.logical_or(
+            has_termin_token, torch.isin(next_idx, termination_tokens)
         )
+        out_of_time = torch.logical_or(out_of_time, next_age >= max_age)
+        terminated = torch.logical_or(has_termin_token, out_of_time)
 
-        idx, age = model_input[0], model_input[1]
-        is_termination_token = torch.isin(idx, termination_tokens)
-        exceed_block_size = idx.shape[1] > model.config.block_size
-        if (
-            torch.logical_or(
-                is_termination_token.any(-1), (age[:, -1] > max_age).any(-1)
-            )
-            .all()
-            .item()
-            or exceed_block_size
-        ):
+        gen_idx_lst.append(next_idx)
+        gen_age_lst.append(next_age)
+
+        l += 1
+        if terminated.all() or l > model.config.block_size:
             break
 
-    exceed_max_age = age > max_age
+    idx = torch.cat(gen_idx_lst, dim=1)
+    age = torch.cat(gen_age_lst, dim=1)
+
     # mask all tokens after the *second* occurrence of a termination token
+    exceed_max_age = age > max_age
+    is_termination_token = torch.isin(idx, termination_tokens)
     beyond_termination = (
         torch.cumsum(torch.cumsum(is_termination_token.int(), 1), 1) > 1
     )
@@ -143,6 +152,4 @@ def generate(
     idx[pad] = 0
     age[pad] = -10000
 
-    logits, _, _ = model.eval_step(*model_input)
-
-    return idx, age, logits
+    return idx, age

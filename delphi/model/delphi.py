@@ -51,6 +51,28 @@ class Model(torch.nn.Module):
             for param in self.gpt2.transformer.wpe.parameters():
                 param.requires_grad = False
 
+    def inputs_embeds(self, idx: torch.Tensor, age: torch.Tensor):
+
+        token_emb = self.token_embed(idx)
+        if self.config.age_as_position:
+            age_emb = self.pos_emb(age.unsqueeze(-1))
+            x = token_emb + age_emb
+        else:
+            x = token_emb
+
+        return x
+
+    @staticmethod
+    def position_ids(idx: torch.Tensor):
+
+        batch_size, seq_len = idx.shape
+        pos = torch.arange(seq_len, device=idx.device).view(1, -1).repeat(batch_size, 1)
+        is_pad = idx == 0
+        offset = is_pad.sum(dim=1, keepdim=True)
+        pos = torch.clamp(pos - offset, min=0)
+
+        return pos
+
     def forward(
         self,
         idx: torch.Tensor,
@@ -59,20 +81,11 @@ class Model(torch.nn.Module):
         targets_age: Optional[torch.Tensor] = None,
     ):
 
-        batch_size, seq_len = idx.shape
+        _, seq_len = idx.shape
         assert seq_len <= self.config.block_size
-        token_emb = self.token_embed(idx)
 
-        pos = torch.arange(seq_len, device=idx.device).view(1, -1).repeat(batch_size, 1)
-        is_pad = idx == 0
-        offset = is_pad.sum(dim=1, keepdim=True)
-        pos = torch.clamp(pos - offset, min=0)
-
-        if self.config.age_as_position:
-            age_emb = self.pos_emb(age.unsqueeze(-1))
-            x = token_emb + age_emb
-        else:
-            x = token_emb
+        pos = self.position_ids(idx=idx)
+        x = self.inputs_embeds(idx=idx, age=age)
 
         output_dict = self.gpt2(
             inputs_embeds=x, position_ids=pos, attention_mask=(idx > 0).long()
@@ -109,23 +122,46 @@ class Model(torch.nn.Module):
         no_repeat: bool = True,
     ):
 
-        logits, _ = self.forward(idx, age)
-        logits = logits[:, -1, :] / temperature
+        position_ids = self.position_ids(idx=idx)
+        inputs_embeds = self.inputs_embeds(idx=idx, age=age)
+        age_next = age
+        past_key_values = None
+        cache_position = None
+        attention_mask = (idx > 0).long()
 
-        if top_k is not None:
-            logits = truncate_top_k(logits, top_k)
+        while True:
+            output_dict = self.gpt2(
+                inputs_embeds=inputs_embeds,
+                position_ids=position_ids,
+                cache_position=cache_position,
+                attention_mask=attention_mask,
+                use_cache=True,
+                past_key_values=past_key_values,
+            )
 
-        if no_repeat:
-            fill = idx + 0
-            fill[fill == 1] = 0
-            logits = logits.scatter_(1, fill, -torch.inf)
+            logits = output_dict.logits
+            raw_logits = logits[:, [-1], :].clone()
+            logits = logits[:, -1, :] / temperature
+            if top_k is not None:
+                logits = truncate_top_k(logits, top_k)
+            if no_repeat:
+                fill = idx + 0
+                fill[fill == 1] = 0
+                logits = logits.scatter_(1, fill, -torch.inf)
+            idx_next, time_til_next = sample_competing_exponentials(logits)
+            age_next = age_next[..., [-1]] + time_til_next
 
-        idx_next, time_til_next = sample_competing_exponentials(logits)
-        age_next = age[..., [-1]] + time_til_next
+            yield idx_next, age_next, raw_logits
 
-        idx = torch.cat((idx, idx_next), dim=1)
-        age = torch.cat((age, age_next), dim=1)
-
-        logits = self.forward(idx=idx, age=age)
-
-        return idx, age
+            past_key_values = output_dict.past_key_values
+            position_ids = position_ids[:, [-1]] + 1
+            inputs_embeds = self.inputs_embeds(idx=idx_next, age=age_next)
+            attention_mask = torch.cat(
+                (
+                    attention_mask,
+                    torch.ones(
+                        (attention_mask.shape[0], 1), device=attention_mask.device
+                    ),
+                ),
+                dim=1,
+            )
