@@ -9,8 +9,8 @@ from omegaconf import OmegaConf
 
 from delphi import distributed
 from delphi.baselines import ethos, motor
-from delphi.data.core import BaseDataConfig, BaseDataset
 from delphi.data.mimic import MIMICDataset
+from delphi.data.ukb import UKBDataConfig, UKBDataset
 from delphi.env import DELPHI_CKPT_DIR, DELPHI_DATA_DIR
 from delphi.experiment.config import TrainBaseConfig
 from delphi.experiment.train import BaseTrainer
@@ -44,7 +44,7 @@ def experiment(cfg: TrainConfig):
     os.makedirs(run_dir, exist_ok=True)
 
     if cfg.data["data_dir"] == "ukb_real_data":
-        train_cfg = BaseDataConfig(
+        train_cfg = UKBDataConfig(
             data_dir=cfg.data["data_dir"],
             subject_list=cfg.data["train_subject_list"],
             seed=cfg.data["seed"],
@@ -54,8 +54,8 @@ def experiment(cfg: TrainConfig):
         val_cfg = copy(train_cfg)
         val_cfg.subject_list = cfg.data["val_subject_list"]
 
-        train_ds = BaseDataset(train_cfg)
-        val_ds = BaseDataset(val_cfg)
+        train_ds = UKBDataset(train_cfg)
+        val_ds = UKBDataset(val_cfg)
     elif cfg.data["data_dir"] == "mimic":
         sep_time_tokens = cfg.model_type == "delphi"
         train_ds = MIMICDataset(

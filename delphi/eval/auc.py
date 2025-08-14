@@ -11,7 +11,7 @@ from scipy.stats import rankdata
 from tqdm import tqdm
 
 from delphi import DAYS_PER_YEAR
-from delphi.data import core
+from delphi.data import ukb
 from delphi.data.transform import sort_by_time
 from delphi.data.utils import eval_iter, move_batch_to_device
 from delphi.eval import eval_task
@@ -146,7 +146,7 @@ def calibrate_auc(
     model.to(device)
     model.eval()
 
-    ds = core.build_dataset(task_args.data)
+    ds = ukb.build_dataset(task_args.data)
     n_participants = len(ds) if task_args.subsample is None else task_args.subsample
     it = eval_iter(total_size=n_participants, batch_size=128)
     it = tqdm(it, total=math.ceil(n_participants / task_args.batch_size), leave=True)
@@ -172,8 +172,8 @@ def calibrate_auc(
                 batch_logits[batch_sub_idx, batch_pos_idx].detach().cpu().numpy()
             )
 
-    X = core.collate_batch_data(idx_lst)
-    T = core.collate_batch_time(age_lst)
+    X = ukb.collate_batch_data(idx_lst)
+    T = ukb.collate_batch_time(age_lst)
     T, X = sort_by_time(T, X)
     logits = np.concatenate(logits_lst)
 

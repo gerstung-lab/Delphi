@@ -88,7 +88,7 @@ def collate_batch_time(batch_time: list[np.ndarray]) -> np.ndarray:
 
 
 @dataclass
-class BaseDataConfig:
+class UKBDataConfig:
     data_dir: str = "ukb_real_data"
     subject_list: str = "participants.bin"
     seed: int = 42
@@ -96,9 +96,9 @@ class BaseDataConfig:
     block_size: Optional[int] = 64
 
 
-class BaseDataset:
+class UKBDataset:
 
-    def __init__(self, cfg: BaseDataConfig, memmap: bool = False):
+    def __init__(self, cfg: UKBDataConfig, memmap: bool = False):
 
         (
             tokenizer,
@@ -168,10 +168,10 @@ class BaseDataset:
 
 def build_dataset(cfg: dict):
 
-    return BaseDataset(BaseDataConfig(**cfg))
+    return UKBDataset(UKBDataConfig(**cfg))
 
 
-def load_prompt_sequences(it: Iterator, dataset: BaseDataset, start_age: float):
+def load_prompt_sequences(it: Iterator, dataset: UKBDataset, start_age: float):
 
     for batch_idx in it:
         x_prompt_lst, t_prompt_lst = list(), list()
@@ -211,7 +211,7 @@ def duplicate_participants(X: torch.Tensor, T: torch.Tensor, n_repeat: int):
     return X.repeat(n_repeat, 1), T.repeat(n_repeat, 1)
 
 
-def load_core_data_package(cfg: BaseDataConfig, memmap: bool = False):
+def load_core_data_package(cfg: UKBDataConfig, memmap: bool = False):
 
     dataset_dir = Path(DELPHI_DATA_DIR) / cfg.data_dir
     tokenizer_path = dataset_dir / "tokenizer.yaml"

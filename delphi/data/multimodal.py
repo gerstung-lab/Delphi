@@ -8,20 +8,20 @@ import pandas as pd
 import torch
 import yaml
 
-from delphi.data.core import (
-    BaseDataConfig,
+from delphi.data.transform import add_no_event, crop_priority, sort_by_time, trim_margin
+from delphi.data.ukb import (
+    UKBDataConfig,
     collate_batch_data,
     collate_batch_time,
     load_core_data_package,
 )
-from delphi.data.transform import add_no_event, crop_priority, sort_by_time, trim_margin
 from delphi.env import DELPHI_DATA_DIR
 from delphi.multimodal import Modality
 from delphi.tokenizer import Tokenizer, update_tokenizer
 
 
 @dataclass
-class UKBDataConfig(BaseDataConfig):
+class UKBDataConfig(UKBDataConfig):
     no_event_interval: Optional[int] = None
     block_size: Optional[int] = None
     expansion_pack_dir: str = "ukb_real_data/expansion_packs"
