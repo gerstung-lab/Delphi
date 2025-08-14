@@ -13,7 +13,7 @@ data:
   seed: 42
   block_size: ${model.block_size}
 model:
-  vocab_size: 4543
+  vocab_size: 4544
   n_layer: 10
   n_head: 8
   n_embd: 256

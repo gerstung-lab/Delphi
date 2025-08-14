@@ -141,8 +141,9 @@ class MIMICDataset:
     def __getitem__(self, idx: int) -> tuple:
         pt_ctx = self._get_patient_context(idx)
         end = min(idx + self.timeline_size + 1, self.patient_data_end_at_idx[idx])  # type: ignore
-        #! increment by 1 because 0 is reserved for padding
-        tokens = self.tokens[idx:end] + 1
+        #! +1 because 0 is reserved for padding
+        #! +1 because no-event token is 1
+        tokens = self.tokens[idx:end] + 2
         timesteps = self.times[idx:end]
         timesteps = self.convert_time(timesteps)
         pt_ctx_timesteps = th.full(size=pt_ctx.shape, fill_value=timesteps[0].item())
