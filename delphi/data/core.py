@@ -9,12 +9,7 @@ import torch
 import yaml
 from scipy.sparse import coo_array
 
-from delphi.data.transform import (
-    add_no_event,
-    crop_contiguous,
-    sort_by_time,
-    trim_margin,
-)
+from delphi.data.transform import add_no_event, crop_contiguous, sort_by_time
 from delphi.env import DELPHI_DATA_DIR
 from delphi.tokenizer import Tokenizer
 
@@ -230,26 +225,37 @@ def build_dataset(cfg: dict):
 
 def load_prompt_sequences(it: Iterator, dataset: BaseDataset, start_age: float):
 
-    for idx in it:
+    for batch_idx in it:
+        x_prompt_lst, t_prompt_lst = list(), list()
+        x_lst, t_lst = list(), list()
 
-        X, T = dataset.get_batch(idx)
+        for idx in batch_idx:
+            x, t = dataset[idx]
+            x_lst.append(x.copy())
+            t_lst.append(t.copy())
 
-        too_old = T > start_age
-        X[too_old] = 0
-        T[too_old] = -1e4
+            too_old = t > start_age
+            x[too_old] = 0
+            t[too_old] = -1e4
+            no_event_token = dataset.tokenizer["no_event"]
+            x = np.pad(x, (0, 1), "constant", constant_values=no_event_token)
+            t = np.pad(t, (0, 1), "constant", constant_values=start_age)
+            x_prompt_lst.append(x)
+            t_prompt_lst.append(t)
 
-        pad = ((0, 0), (0, 1))
-        no_event_token = dataset.tokenizer["no_event"]
-        X = np.pad(X, pad, "constant", constant_values=no_event_token)
-        T = np.pad(T, pad, "constant", constant_values=start_age)
-
+        X = collate_batch_data(x_lst)
+        T = collate_batch_time(t_lst)
         T, X = sort_by_time(T, X)
-        X, T = trim_margin(X, T, trim_val=0)
-
         X = torch.tensor(X, dtype=torch.long)
         T = torch.tensor(T, dtype=torch.float32)
 
-        yield X, T
+        X_prompt = collate_batch_data(x_prompt_lst)
+        T_prompt = collate_batch_time(t_prompt_lst)
+        T_prompt, X_prompt = sort_by_time(T_prompt, X_prompt)
+        X_prompt = torch.tensor(X_prompt, dtype=torch.long)
+        T_prompt = torch.tensor(T_prompt, dtype=torch.float32)
+
+        yield X_prompt, T_prompt, X, T
 
 
 def duplicate_participants(X: torch.Tensor, T: torch.Tensor, n_repeat: int):

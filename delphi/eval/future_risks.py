@@ -11,7 +11,7 @@ from tqdm import tqdm
 from delphi import DAYS_PER_YEAR
 from delphi.data import core
 from delphi.eval import eval_task
-from delphi.eval.auc import mann_whitney_auc, move_batch_to_device
+from delphi.eval.auc import mann_whitney_auc
 from delphi.experiment.train import load_ckpt
 from delphi.model.config import parse_token_list
 from delphi.sampler import generate
@@ -38,6 +38,8 @@ def integrate_risk(x: torch.Tensor, t: torch.Tensor, start: float, end: float):
     Returns:
         Aggregated risk values, normalized by time exposure
     """
+    if x.shape[1] == t.shape[1]:
+        t = torch.cat((t, t[:, [-1]]), dim=1)
 
     # Clamp time values to the end of the window
     t_clamped = t.clamp(None, end)
@@ -49,7 +51,7 @@ def integrate_risk(x: torch.Tensor, t: torch.Tensor, start: float, end: float):
     dt = t_clamped.diff(1)
 
     # Apply masks to get effective time exposure within the window
-    dt_masked = dt * use[:, :-1]
+    dt_masked = dt.nan_to_num(0) * use[:, :-1]
 
     # Normalize time weights to sum to the length of the window
     if end == float("inf"):
@@ -103,18 +105,15 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
     else:
         ds = core.build_dataset(task_args.data)
         duplicate_participants = core.duplicate_participants
-        loader = core.load_sequences
         prompt_loader = core.load_prompt_sequences
 
-    prompt_age = task_args.age_at_prompt * DAYS_PER_YEAR
+    start_age = task_args.age_at_prompt * DAYS_PER_YEAR
     n_participants = len(ds) if task_args.subsample is None else task_args.subsample
     it = core.eval_iter(total_size=n_participants, batch_size=n_persons_per_batch)
-    data_loader = prompt_loader(it=it, dataset=ds, start_age=prompt_age)
+    data_loader = prompt_loader(it=it, dataset=ds, start_age=start_age)
     data_loader = tqdm(
         data_loader, total=math.ceil(n_participants / n_persons_per_batch), leave=True
     )
-    gt_it = core.eval_iter(total_size=n_participants, batch_size=n_persons_per_batch)
-    gt_loader = loader(it=gt_it, dataset=ds)
 
     termination_tokens = parse_token_list(task_args.termination_tokens)
     termination_tokens = torch.Tensor(tokenizer.encode(termination_tokens)).to(device)
@@ -125,13 +124,16 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
     with torch.no_grad():
         for batch_input in data_loader:
 
-            batch_input = move_batch_to_device(batch_input, device=device)
-            batch_input = duplicate_participants(
-                *batch_input, n_repeat=task_args.n_samples_per_person
+            batch_input = core.move_batch_to_device(batch_input, device=device)
+            prompt_idx, prompt_age, target_idx, target_age = batch_input
+
+            prompt_idx, prompt_age = duplicate_participants(
+                prompt_idx, prompt_age, n_repeat=task_args.n_samples_per_person
             )
-            tokens, age, logits = generate(
+            idx, age = generate(
                 model=model,
-                model_input=batch_input,
+                idx=prompt_idx,
+                age=prompt_age,
                 seed=task_args.seed,
                 no_repeat=task_args.no_repeat,
                 top_k=task_args.top_k,
@@ -139,6 +141,9 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
                 max_age=task_args.max_age_in_years * DAYS_PER_YEAR,
                 termination_tokens=termination_tokens,
             )
+            idx = torch.cat((prompt_idx, idx), dim=1)
+            age = torch.cat((prompt_age, age), dim=1)
+            logits, _ = model(idx=idx, age=age)
             B, L, V = logits.shape
             n_sample = task_args.n_samples_per_person
             n_person = int(B / n_sample)
@@ -154,7 +159,7 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
                 batch_risks = torch.nanmean(batch_risks, dim=-2, keepdim=False)
                 future_risks.append(batch_risks.detach().cpu().numpy())
             elif model.model_type == "ethos":
-                tokens_aft_prompt = tokens.clone()
+                tokens_aft_prompt = idx.clone()
                 tokens_aft_prompt[age > prompt_age] = 0
                 tokens_aft_prompt = tokens_aft_prompt.reshape((n_person, n_sample, L))
                 occur = torch.zeros(
@@ -172,25 +177,22 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
             else:
                 raise ValueError
 
-            batch_truth = next(gt_loader)
-            batch_truth = move_batch_to_device(batch_truth, device=device)
-            targets, age = batch_truth[0], batch_truth[1]
-            tokens_before_prompt = targets.clone()
-            tokens_before_prompt[age > prompt_age] = 0
-            occur_before = torch.zeros_like(batch_risks).long()
-            occur_before = occur_before.scatter_(
-                index=tokens_before_prompt, src=torch.ones_like(targets), dim=1
-            )
+            # tokens_before_prompt = targets.clone()
+            # tokens_before_prompt[age > prompt_age] = 0
+            # occur_before = torch.zeros_like(batch_risks).long()
+            # occur_before = occur_before.scatter_(
+            #     index=tokens_before_prompt, src=torch.ones_like(targets), dim=1
+            # )
 
-            tokens_after_prompt = targets.clone()
-            tokens_after_prompt[age <= prompt_age] = 0
+            tokens_after_prompt = target_idx.clone()
+            tokens_after_prompt[target_age <= start_age] = 0
             occur_after = torch.zeros_like(batch_risks).long()
             occur_after = occur_after.scatter_(
-                index=tokens_after_prompt, src=torch.ones_like(targets), dim=1
+                index=tokens_after_prompt, src=torch.ones_like(target_idx), dim=1
             )
 
             occur_after = occur_after.float()
-            occur_after[occur_before.bool()] = torch.nan
+            # occur_after[occur_before.bool()] = torch.nan
             labels.append(occur_after.detach().cpu().numpy())
 
     labels = np.vstack(labels)
