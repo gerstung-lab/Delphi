@@ -7,9 +7,9 @@ task_args:
     no_event_interval: 1826.25
     block_size: 256
     seed: 42
-  disease_lst:
-    - config/disease_list/doi.yaml
-  n_samples_per_person: 32
-  age_at_prompt: 40
+  batch_size: 150
+  n_samples: 30
+  start_age_years: 50
+  end_age_years: 85
   termination_tokens:
     - death

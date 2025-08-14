@@ -165,3 +165,41 @@ class Model(torch.nn.Module):
                 ),
                 dim=1,
             )
+
+
+def integrate_risk(
+    log_lambda: torch.Tensor, age: torch.Tensor, start: float, end: float
+):
+    r"""
+    Aggregate values x over time intervals t within a specified time window [start, end].
+    As per the theory of non-homogeneous exponential distribution, the probability
+    an event occurs in the time window [start, end] is given by:
+    P(event in [start, end]) = 1 - exp(- \int_{start}^{end} \lambda(t) dt)
+    where \lambda(t) is the disease rate at time t.
+    This this function calculates the integral of the disease rate over the time window
+    under that piecewise constant disease rate assumption, using the tokens that
+    fall in the time window.
+
+    Args:
+        x: Disease rate to integrate, lambda_0, ...., lambda_n, [batch, block_size, disease]
+        t: Time points, days since birth, t_0, ...., t_n, t_(n+1) [batch, block_size]
+            (the last time point is needed to calculate the duration of the last event)
+        start: Start of time window
+        end: End of time window
+
+    Returns:
+        Aggregated risk values, normalized by time exposure
+    """
+    pad = age[:, [-1]]
+    age = torch.cat(
+        [age, torch.maximum(pad, torch.full_like(pad, fill_value=end))], dim=1
+    )
+
+    t_clamped = age.clamp(start, end)
+    dt = t_clamped.diff(1)
+    dt_norm = dt / ((dt.sum(1) + 1e-6) * (end - start)).unsqueeze(-1)
+
+    risk = log_lambda.exp() * dt_norm.unsqueeze(-1)
+    risk = risk.sum(-2)
+
+    return risk

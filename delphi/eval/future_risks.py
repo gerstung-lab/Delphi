@@ -14,86 +14,32 @@ from delphi.eval import eval_task
 from delphi.eval.auc import mann_whitney_auc
 from delphi.experiment.train import load_ckpt
 from delphi.model.config import parse_token_list
+from delphi.model.delphi import integrate_risk
 from delphi.sampler import generate
-
-
-def integrate_risk(x: torch.Tensor, t: torch.Tensor, start: float, end: float):
-    r"""
-    Aggregate values x over time intervals t within a specified time window [start, end].
-    As per the theory of non-homogeneous exponential distribution, the probability
-    an event occurs in the time window [start, end] is given by:
-    P(event in [start, end]) = 1 - exp(- \int_{start}^{end} \lambda(t) dt)
-    where \lambda(t) is the disease rate at time t.
-    This this function calculates the integral of the disease rate over the time window
-    under that piecewise constant disease rate assumption, using the tokens that
-    fall in the time window.
-
-    Args:
-        x: Disease rate to integrate, lambda_0, ...., lambda_n, [batch, block_size, disease]
-        t: Time points, days since birth, t_0, ...., t_n, t_(n+1) [batch, block_size]
-            (the last time point is needed to calculate the duration of the last event)
-        start: Start of time window
-        end: End of time window
-
-    Returns:
-        Aggregated risk values, normalized by time exposure
-    """
-    if x.shape[1] == t.shape[1]:
-        t = torch.cat((t, t[:, [-1]]), dim=1)
-
-    # Clamp time values to the end of the window
-    t_clamped = t.clamp(None, end)
-
-    # Create usage mask for each time interval
-    # If there are no time points in the window, the use mask will be all zeros
-    # and the risk will be NaN
-    use = ((t_clamped >= start) * (t_clamped < end)) + 0.0
-    dt = t_clamped.diff(1)
-
-    # Apply masks to get effective time exposure within the window
-    dt_masked = dt.nan_to_num(0) * use[:, :-1]
-
-    # Normalize time weights to sum to the length of the window
-    if end == float("inf"):
-        end_t, _ = torch.max(t, dim=1)
-    else:
-        end_t = end
-    dt_norm = dt_masked / ((dt_masked.sum(1) + 1e-6) * (end_t - start)).unsqueeze(-1)
-
-    # Calculate risk by weighting x values with normalized time exposure
-    # print(x.shape, dt_norm.shape)
-    risk = x * dt_norm.unsqueeze(-1)
-    risk = risk.sum(-2)  # Sum over the time dimension
-
-    # Set zero risks to NaN (indicates no exposure in the time window)
-    risk[risk == 0] = torch.nan
-
-    return risk
 
 
 @dataclass
 class FutureArgs:
     data: dict = field(default_factory=dict)
+    n_samples: int = 30
+    start_age_years: int = 50
+    end_age_years: float = 80
     subsample: Optional[int] = None
-    disease_lst: list = field(default_factory=list)
     batch_size: int = 128
-    n_samples_per_person: int = 32
-    age_at_prompt: int = 40
     device: str = "cuda"
     seed: int = 42
     no_repeat: bool = True
     top_k: Optional[int] = None
     temperature: float = 1.0
-    max_age_in_years: float = 80
     termination_tokens: list[str] = field(default_factory=list)
 
 
 @eval_task.register
 def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
 
-    assert task_args.batch_size >= task_args.n_samples_per_person
-    assert task_args.batch_size % task_args.n_samples_per_person == 0
-    n_persons_per_batch = int(task_args.batch_size / task_args.n_samples_per_person)
+    assert task_args.batch_size >= task_args.n_samples
+    assert task_args.batch_size % task_args.n_samples == 0
+    n_persons_per_batch = int(task_args.batch_size / task_args.n_samples)
 
     device = task_args.device
     model, _, tokenizer = load_ckpt(ckpt)
@@ -107,7 +53,7 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
         duplicate_participants = core.duplicate_participants
         prompt_loader = core.load_prompt_sequences
 
-    start_age = task_args.age_at_prompt * DAYS_PER_YEAR
+    start_age = task_args.start_age_years * DAYS_PER_YEAR
     n_participants = len(ds) if task_args.subsample is None else task_args.subsample
     it = core.eval_iter(total_size=n_participants, batch_size=n_persons_per_batch)
     data_loader = prompt_loader(it=it, dataset=ds, start_age=start_age)
@@ -128,7 +74,7 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
             prompt_idx, prompt_age, target_idx, target_age = batch_input
 
             prompt_idx, prompt_age = duplicate_participants(
-                prompt_idx, prompt_age, n_repeat=task_args.n_samples_per_person
+                prompt_idx, prompt_age, n_repeat=task_args.n_samples
             )
             idx, age = generate(
                 model=model,
@@ -138,22 +84,26 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
                 no_repeat=task_args.no_repeat,
                 top_k=task_args.top_k,
                 temperature=task_args.temperature,
-                max_age=task_args.max_age_in_years * DAYS_PER_YEAR,
+                max_age=task_args.end_age_years * DAYS_PER_YEAR,
                 termination_tokens=termination_tokens,
             )
             idx = torch.cat((prompt_idx, idx), dim=1)
             age = torch.cat((prompt_age, age), dim=1)
+            sort_by_age = torch.argsort(age, dim=1)
+            idx = torch.take_along_dim(input=idx, indices=sort_by_age, dim=1)
+            age = torch.take_along_dim(input=age, indices=sort_by_age, dim=1)
+
             logits, _ = model(idx=idx, age=age)
             B, L, V = logits.shape
-            n_sample = task_args.n_samples_per_person
+            n_sample = task_args.n_samples
             n_person = int(B / n_sample)
 
             if model.model_type == "delphi":
                 batch_risks = integrate_risk(
-                    x=logits,
-                    t=age,
-                    start=task_args.age_at_prompt * DAYS_PER_YEAR,
-                    end=float("inf"),
+                    log_lambda=logits,
+                    age=age,
+                    start=task_args.start_age_years * DAYS_PER_YEAR,
+                    end=task_args.end_age_years * DAYS_PER_YEAR,
                 )
                 batch_risks = batch_risks.reshape(-1, n_sample, V)
                 batch_risks = torch.nanmean(batch_risks, dim=-2, keepdim=False)
@@ -177,13 +127,6 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
             else:
                 raise ValueError
 
-            # tokens_before_prompt = targets.clone()
-            # tokens_before_prompt[age > prompt_age] = 0
-            # occur_before = torch.zeros_like(batch_risks).long()
-            # occur_before = occur_before.scatter_(
-            #     index=tokens_before_prompt, src=torch.ones_like(targets), dim=1
-            # )
-
             tokens_after_prompt = target_idx.clone()
             tokens_after_prompt[target_age <= start_age] = 0
             occur_after = torch.zeros_like(batch_risks).long()
@@ -192,7 +135,6 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
             )
 
             occur_after = occur_after.float()
-            # occur_after[occur_before.bool()] = torch.nan
             labels.append(occur_after.detach().cpu().numpy())
 
     labels = np.vstack(labels)
