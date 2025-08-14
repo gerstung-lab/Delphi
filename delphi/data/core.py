@@ -1,7 +1,7 @@
 import functools
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator, Optional
+from typing import Iterator, Optional
 
 import numpy as np
 import pandas as pd
@@ -34,25 +34,6 @@ def get_p2i(data):
     return np.array(p2i)
 
 
-def subsample_tricolumnar(
-    XT: np.ndarray,
-    logits: np.ndarray,
-    subsample: Optional[int] = None,
-):
-    """
-    subsample the number of trajectories to avoid excessive RAM usage during subsequent tricolumnar_to_2d conversion
-    """
-
-    p2i = get_p2i(XT)
-    N = p2i.shape[0]
-    if subsample is not None and subsample <= N:
-        n_to_keep = p2i[:subsample, 1].sum()
-        XT = XT[:n_to_keep]
-        logits = logits[:n_to_keep]
-
-    return XT, logits
-
-
 def tricolumnar_to_2d(data):
     """
     Convert a tricolumnar array to a 2D array.
@@ -75,39 +56,6 @@ def tricolumnar_to_2d(data):
     T = np.take_along_axis(T, sort_by_time, axis=1)
 
     return X, T
-
-
-def eval_iter(total_size: int, batch_size: int) -> Iterator[np.ndarray]:
-
-    batch_start_pos = np.arange(0, total_size, batch_size)
-    batch_end_pos = batch_start_pos + batch_size
-    batch_end_pos[-1] = total_size
-
-    for start, end in zip(batch_start_pos, batch_end_pos):
-        yield np.arange(start, end)
-
-
-def train_iter(
-    seed: int,
-    total_size: int,
-    batch_size: int,
-    world_size: int = 1,
-    rank: int = 0,
-    step: int = 0,
-) -> Iterator[np.ndarray]:
-
-    while True:
-        seed_with_offset = seed + step * world_size + rank
-        rng = np.random.default_rng(seed_with_offset)
-        batch_idx = rng.integers(total_size, size=(batch_size,))
-        step += 1
-
-        yield batch_idx
-
-
-def move_batch_to_device(args: Iterable, device: str):
-
-    return tuple([arg.to(device) for arg in args])
 
 
 def collate_batch_data(batch_data: list[np.ndarray]) -> np.ndarray:

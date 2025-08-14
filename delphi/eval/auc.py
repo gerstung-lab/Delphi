@@ -13,6 +13,7 @@ from tqdm import tqdm
 from delphi import DAYS_PER_YEAR
 from delphi.data import core
 from delphi.data.transform import sort_by_time
+from delphi.data.utils import eval_iter, move_batch_to_device
 from delphi.eval import eval_task
 from delphi.experiment.train import load_ckpt
 from delphi.tokenizer import FEMALE, MALE
@@ -147,7 +148,7 @@ def calibrate_auc(
 
     ds = core.build_dataset(task_args.data)
     n_participants = len(ds) if task_args.subsample is None else task_args.subsample
-    it = core.eval_iter(total_size=n_participants, batch_size=128)
+    it = eval_iter(total_size=n_participants, batch_size=128)
     it = tqdm(it, total=math.ceil(n_participants / task_args.batch_size), leave=True)
 
     idx_lst = list()
@@ -156,7 +157,7 @@ def calibrate_auc(
     with torch.no_grad():
         for batch_idx in it:
             batch_input = ds.get_batch(batch_idx)
-            batch_input = core.move_batch_to_device(batch_input, device=device)
+            batch_input = move_batch_to_device(batch_input, device=device)
 
             batch_logits, batch_X, batch_T = model.eval_step(
                 *batch_input, horizon=task_args.age_groups.bin_width * DAYS_PER_YEAR  # type: ignore

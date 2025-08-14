@@ -12,7 +12,7 @@ from omegaconf import OmegaConf
 from delphi import distributed
 from delphi.baselines import ethos, motor
 from delphi.config import dataclass_from_dict
-from delphi.data.core import move_batch_to_device, train_iter
+from delphi.data.utils import move_batch_to_device, train_iter
 from delphi.env import DELPHI_CKPT_DIR
 from delphi.experiment.config import TrainBaseConfig
 from delphi.log import TrainLogger

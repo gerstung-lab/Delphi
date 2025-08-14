@@ -10,6 +10,7 @@ from tqdm import tqdm
 
 from delphi import DAYS_PER_YEAR
 from delphi.data import core
+from delphi.data.utils import eval_iter, move_batch_to_device
 from delphi.eval import eval_task
 from delphi.eval.auc import mann_whitney_auc
 from delphi.experiment.train import load_ckpt
@@ -55,7 +56,7 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
 
     start_age = task_args.start_age_years * DAYS_PER_YEAR
     n_participants = len(ds) if task_args.subsample is None else task_args.subsample
-    it = core.eval_iter(total_size=n_participants, batch_size=n_persons_per_batch)
+    it = eval_iter(total_size=n_participants, batch_size=n_persons_per_batch)
     data_loader = prompt_loader(it=it, dataset=ds, start_age=start_age)
     data_loader = tqdm(
         data_loader, total=math.ceil(n_participants / n_persons_per_batch), leave=True
@@ -70,7 +71,7 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
     with torch.no_grad():
         for batch_input in data_loader:
 
-            batch_input = core.move_batch_to_device(batch_input, device=device)
+            batch_input = move_batch_to_device(batch_input, device=device)
             prompt_idx, prompt_age, target_idx, target_age = batch_input
 
             prompt_idx, prompt_age = duplicate_participants(
