@@ -22,6 +22,7 @@ class Vocabulary:
     ):
         if vocab is None:
             vocab = []
+        #! increment by 1 because 0 is reserved for padding
         self.stoi = {word: i + 1 for i, word in enumerate(vocab)}
         self._itos = None
         self._interval_estimates = interval_estimates
