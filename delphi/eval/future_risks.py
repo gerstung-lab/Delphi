@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from delphi import DAYS_PER_YEAR
 from delphi.data import ukb
-from delphi.data.utils import eval_iter, move_batch_to_device
+from delphi.data.utils import duplicate_participants, eval_iter, move_batch_to_device
 from delphi.eval import eval_task
 from delphi.eval.auc import mann_whitney_auc
 from delphi.experiment.train import load_ckpt
@@ -51,7 +51,6 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
         raise NotImplementedError
     else:
         ds = ukb.build_dataset(task_args.data)
-        duplicate_participants = ukb.duplicate_participants
         prompt_loader = ukb.load_prompt_sequences
 
     start_age = task_args.start_age_years * DAYS_PER_YEAR

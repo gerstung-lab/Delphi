@@ -206,11 +206,6 @@ def load_prompt_sequences(it: Iterator, dataset: UKBDataset, start_age: float):
         yield X_prompt, T_prompt, X, T
 
 
-def duplicate_participants(X: torch.Tensor, T: torch.Tensor, n_repeat: int):
-
-    return X.repeat(n_repeat, 1), T.repeat(n_repeat, 1)
-
-
 def load_core_data_package(cfg: UKBDataConfig, memmap: bool = False):
 
     dataset_dir = Path(DELPHI_DATA_DIR) / cfg.data_dir

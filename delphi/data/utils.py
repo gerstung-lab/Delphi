@@ -1,6 +1,7 @@
 from typing import Iterable, Iterator
 
 import numpy as np
+import torch
 
 
 def move_batch_to_device(args: Iterable, device: str):
@@ -34,3 +35,10 @@ def train_iter(
         step += 1
 
         yield batch_idx
+
+
+def duplicate_participants(X: torch.Tensor, T: torch.Tensor, n_repeat: int):
+
+    return torch.repeat_interleave(X, repeats=n_repeat, dim=0), torch.repeat_interleave(
+        T, repeats=n_repeat, dim=0
+    )
