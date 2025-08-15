@@ -133,11 +133,11 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
             else:
                 raise ValueError
 
-            tokens_before_prompt = target_idx.clone()
-            tokens_before_prompt[target_age > start_age] = 0
-            occur_before = torch.zeros_like(batch_risks).long()
-            occur_before = occur_before.scatter_(
-                index=tokens_before_prompt, src=torch.ones_like(target_idx), dim=1
+            tokens_bef_and_aft = target_idx.clone()
+            tokens_bef_and_aft[(target_age > start_age) & (target_age <= end_age)] = 0
+            occur_bef_or_aft = torch.zeros_like(batch_risks).long()
+            occur_bef_or_aft = occur_bef_or_aft.scatter_(
+                index=tokens_bef_and_aft, src=torch.ones_like(target_idx), dim=1
             )
 
             tokens_in_range = target_idx.clone()
@@ -149,7 +149,7 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
             )
 
             occur_during = occur_during.float()
-            occur_during[occur_before.bool()] = torch.nan
+            occur_during[occur_bef_or_aft.bool()] = torch.nan
             labels.append(occur_during.detach().cpu().numpy())
 
     labels = np.vstack(labels)
