@@ -150,7 +150,11 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
         dis = future_risks[is_dis, i]
 
         disease = tokenizer.decode(i)
-        logbook[disease] = mann_whitney_auc(x1=ctl, x2=dis)
+        logbook[disease] = {
+            "n_ctl": int(is_ctl.sum()),
+            "n_dis": int(is_dis.sum()),
+            "auc": mann_whitney_auc(x1=ctl, x2=dis),
+        }
 
     with open(Path(ckpt) / f"{task_name}.json", "w") as f:
         json.dump(logbook, f, indent=4)
