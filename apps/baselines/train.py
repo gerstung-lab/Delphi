@@ -40,9 +40,6 @@ def experiment(cfg: TrainConfig):
     )
     backend = distributed.make_backend_from_args(cfg)
 
-    run_dir = Path(DELPHI_CKPT_DIR) / cfg.log.run_name
-    os.makedirs(run_dir, exist_ok=True)
-
     if cfg.data["data_dir"] == "ukb_real_data":
         train_cfg = UKBDataConfig(
             data_dir=cfg.data["data_dir"],
