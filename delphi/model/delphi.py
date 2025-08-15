@@ -126,7 +126,6 @@ class Model(torch.nn.Module):
         inputs_embeds = self.inputs_embeds(idx=idx, age=age)
         age_next = age
         past_key_values = None
-        cache_position = None
         attention_mask = (idx > 0).long()
 
         batch_size = idx.shape[0]
@@ -141,7 +140,6 @@ class Model(torch.nn.Module):
             output_dict = self.gpt2(
                 inputs_embeds=inputs_embeds,
                 position_ids=position_ids,
-                cache_position=cache_position,
                 attention_mask=attention_mask,
                 use_cache=True,
                 past_key_values=past_key_values,
@@ -149,12 +147,13 @@ class Model(torch.nn.Module):
 
             logits = output_dict.logits
             raw_logits = logits[:, [-1], :].clone()
+            logits[..., 0] = -torch.inf
             logits = logits[:, -1, :] / temperature
             if top_k is not None:
                 logits = truncate_top_k(logits, top_k)
             if no_repeat:
                 has_occurred[:, 1] = 0
-                logits[has_occurred] = -torch.inf
+                logits[has_occurred.bool()] = -torch.inf
             idx_next, time_til_next = sample_competing_exponentials(logits)
             age_next = age_next[..., [-1]] + time_til_next
 

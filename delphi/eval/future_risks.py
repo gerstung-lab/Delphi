@@ -55,6 +55,7 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
         prompt_loader = ukb.load_prompt_sequences
 
     start_age = task_args.start_age_years * DAYS_PER_YEAR
+    end_age = task_args.end_age_years * DAYS_PER_YEAR
     n_participants = len(ds) if task_args.subsample is None else task_args.subsample
     it = eval_iter(total_size=n_participants, batch_size=n_persons_per_batch)
     data_loader = prompt_loader(it=it, dataset=ds, start_age=start_age)
@@ -77,7 +78,9 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
             prompt_idx, prompt_age = duplicate_participants(
                 prompt_idx, prompt_age, n_repeat=task_args.n_samples
             )
-            idx, age = generate(
+            prompt_logits, _ = model(prompt_idx, prompt_age)
+
+            idx, age, logits = generate(
                 model=model,
                 idx=prompt_idx,
                 age=prompt_age,
@@ -85,16 +88,19 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
                 no_repeat=task_args.no_repeat,
                 top_k=task_args.top_k,
                 temperature=task_args.temperature,
-                max_age=task_args.end_age_years * DAYS_PER_YEAR,
+                max_age=end_age,
                 termination_tokens=termination_tokens,
             )
             idx = torch.cat((prompt_idx, idx), dim=1)
             age = torch.cat((prompt_age, age), dim=1)
+            logits = torch.cat((prompt_logits, logits), dim=1)
             sort_by_age = torch.argsort(age, dim=1)
             idx = torch.take_along_dim(input=idx, indices=sort_by_age, dim=1)
             age = torch.take_along_dim(input=age, indices=sort_by_age, dim=1)
+            logits = torch.take_along_dim(
+                input=logits, indices=sort_by_age.unsqueeze(-1), dim=1
+            )
 
-            logits, _ = model(idx=idx, age=age)
             B, L, V = logits.shape
             n_sample = task_args.n_samples
             n_person = int(B / n_sample)
@@ -103,8 +109,8 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
                 batch_risks = integrate_risk(
                     log_lambda=logits,
                     age=age,
-                    start=task_args.start_age_years * DAYS_PER_YEAR,
-                    end=task_args.end_age_years * DAYS_PER_YEAR,
+                    start=start_age,
+                    end=end_age,
                 )
                 batch_risks = batch_risks.reshape(-1, n_sample, V)
                 batch_risks = torch.nanmean(batch_risks, dim=-2, keepdim=False)
@@ -128,15 +134,24 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
             else:
                 raise ValueError
 
-            tokens_after_prompt = target_idx.clone()
-            tokens_after_prompt[target_age <= start_age] = 0
-            occur_after = torch.zeros_like(batch_risks).long()
-            occur_after = occur_after.scatter_(
-                index=tokens_after_prompt, src=torch.ones_like(target_idx), dim=1
+            tokens_before_prompt = target_idx.clone()
+            tokens_before_prompt[target_age > start_age] = 0
+            occur_before = torch.zeros_like(batch_risks).long()
+            occur_before = occur_before.scatter_(
+                index=tokens_before_prompt, src=torch.ones_like(target_idx), dim=1
             )
 
-            occur_after = occur_after.float()
-            labels.append(occur_after.detach().cpu().numpy())
+            tokens_in_range = target_idx.clone()
+            tokens_in_range[target_age <= start_age] = 0
+            tokens_in_range[target_age > end_age] = 0
+            occur_during = torch.zeros_like(batch_risks).long()
+            occur_during = occur_during.scatter_(
+                index=tokens_in_range, src=torch.ones_like(target_idx), dim=1
+            )
+
+            occur_during = occur_during.float()
+            occur_during[occur_before.bool()] = torch.nan
+            labels.append(occur_during.detach().cpu().numpy())
 
     labels = np.vstack(labels)
     future_risks = np.vstack(future_risks)

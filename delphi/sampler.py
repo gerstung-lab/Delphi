@@ -122,6 +122,7 @@ def generate(
 
     gen_idx_lst = []
     gen_age_lst = []
+    gen_logits_lst = []
     while True:
         terminated = torch.logical_or(has_termin_token, out_of_time)
         if terminated.all() or l >= model.config.block_size:
@@ -130,6 +131,7 @@ def generate(
         next_idx, next_age, next_logits = next(next_token_generator)
         gen_idx_lst.append(next_idx)
         gen_age_lst.append(next_age)
+        gen_logits_lst.append(next_logits)
 
         has_termin_token = torch.logical_or(
             has_termin_token, torch.isin(next_idx, termination_tokens)
@@ -139,6 +141,7 @@ def generate(
 
     idx = torch.cat(gen_idx_lst, dim=1)
     age = torch.cat(gen_age_lst, dim=1)
+    logits = torch.cat(gen_logits_lst, dim=1)
 
     # mask all tokens after the *second* occurrence of a termination token
     exceed_max_age = age > max_age
@@ -151,4 +154,4 @@ def generate(
     idx[pad] = 0
     age[pad] = -10000
 
-    return idx, age
+    return idx, age, logits
