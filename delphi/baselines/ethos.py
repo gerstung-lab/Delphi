@@ -5,12 +5,13 @@ import torch
 import torch.nn.functional as F
 import transformers
 
+from delphi.data.ukb import UKBDataset
 from delphi.model.components import target_mask
 from delphi.model.config import GPT2Config
 from delphi.model.loss import CrossEntropyHead
 from delphi.model.transformer import initialize_weights
 from delphi.sampler import truncate_top_k
-from delphi.tokenizer import Tokenizer
+from delphi.tokenizer import Tokenizer, update_tokenizer
 
 
 def is_strictly_ascending(arr: list):
@@ -18,67 +19,71 @@ def is_strictly_ascending(arr: list):
 
 
 def create_ethos_sequence(
-    X: torch.Tensor, T: torch.Tensor, offset: int, time_bins: torch.Tensor
+    x: np.ndarray, t: np.ndarray, offset: int, time_bins: np.ndarray
 ):
 
-    is_pad = T[:, :-1] == -1e4
-    deltas = torch.diff(T, dim=1)
+    deltas = np.diff(t)
     same_time = deltas == 0
-    deltas = torch.bucketize(deltas, boundaries=time_bins, right=True)
+    deltas = np.digitize(deltas, bins=time_bins)
     deltas += offset
-    deltas[is_pad | same_time] = 0
+    deltas[same_time] = 0
 
-    B = X.shape[0]
-    L = X.shape[1] + deltas.shape[1]
-    device = time_bins.device
+    total_len = len(x) + len(deltas)
+    event_pos = np.arange(0, total_len, step=2)
+    time_pos = np.arange(1, total_len, step=2)
+    pos = np.concatenate((event_pos, time_pos))
+    idx = np.concatenate((x, deltas))
+    age = np.concatenate((t, t[1:]))
 
-    event_pos = torch.arange(0, L, step=2, device=device)
-    event_pos = torch.broadcast_to(event_pos, (B, event_pos.shape[0]))
-    is_event = torch.ones_like(event_pos, device=device)
+    sort_by_pos = np.argsort(pos)
+    idx = idx[sort_by_pos]
+    age = age[sort_by_pos]
 
-    time_pos = torch.arange(1, L, step=2, device=device)
-    time_pos = torch.tile(time_pos, (B, 1))
-    time_pos[is_pad | same_time] = -1
-    is_time = torch.zeros_like(time_pos)
+    reject = idx == 0
+    idx = idx[~reject]
+    age = age[~reject]
 
-    pos = torch.hstack((event_pos, time_pos))
-    tokens = torch.hstack((X, deltas))
-    is_event = torch.hstack([is_event, is_time]).bool()
-
-    _, sorted_idx = torch.sort(pos, dim=1)
-    tokens = torch.take_along_dim(tokens, indices=sorted_idx, dim=1)
-    is_event = torch.take_along_dim(is_event, indices=sorted_idx, dim=1)
-
-    return tokens, is_event
+    return idx, age
 
 
-def estimate_time_bins(sample_t: np.ndarray, n_tokens: int):
+class EthosUKBDataset(UKBDataset):
 
-    delta = np.diff(sample_t)
-    delta = delta[delta > 0]
+    def __init__(self, cfg, memmap, time_bins):
 
-    percentiles = np.linspace(0, 100, num=n_tokens + 1)
-    percentiles = percentiles[:-1]
+        super().__init__(cfg, memmap)
+        self.time_bins = time_bins
 
-    time_bins = np.round(np.percentile(delta, q=percentiles), decimals=1)
-    n_uniq = len(np.unique(time_bins))
-    assert n_uniq == len(time_bins), "too many time tokens!"
+        self.base_vocab_size = self.tokenizer.vocab_size
+        n_bins = len(self.time_bins)
+        time_tokenizer = dict()
+        for i in range(n_bins):
+            start = self.time_bins[i]
+            token = i + 1
+            if i < n_bins - 1:
+                end = self.time_bins[i + 1]
+                time_tokenizer[f"time-{start}-{end}"] = token
+            else:
+                time_tokenizer[f"time-{start}-inf"] = token
 
-    return time_bins
+        tokenizer, self.time_token_offset = update_tokenizer(
+            base_tokenizer=self.tokenizer.to_dict(), add_tokenizer=time_tokenizer
+        )
+        self.tokenizer = Tokenizer(tokenizer)
 
+    def __getitem__(self, idx: int):
 
-def parse_time_bins(tokenizer: Tokenizer):
+        pid = self.participants[idx]
+        i = self.start_pos[pid]
+        l = self.seq_len[pid]
+        x_pid = self.tokens[i : i + l]
+        t_pid = self.time_steps[i : i + l]
+        x_pid, t_pid = self.add_no_event(x_pid, t_pid)
+        x_pid, t_pid = create_ethos_sequence(
+            x_pid, t_pid, time_bins=self.time_bins, offset=self.base_vocab_size
+        )
+        x_pid, t_pid = self.crop_block_size(x_pid, t_pid)
 
-    time_bins = list()
-    token_map = tokenizer.to_dict()
-    for token_key, token_val in token_map.items():
-        token_key = str(token_key)
-        if "time" in token_key:
-            start = float(token_key.split("-")[1])
-            end = float(token_key.split("-")[2])
-            time_bins.append(start)
-
-    return np.array(time_bins)
+        return x_pid, t_pid
 
 
 class Model(torch.nn.Module):
