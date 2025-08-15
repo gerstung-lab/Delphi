@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import torch
-from transformers import GPT2Config, GPT2LMHeadModel
+from transformers import DynamicCache, GPT2Config, GPT2LMHeadModel
 
 from delphi.model import config
 from delphi.model.components import AgeEncoding, target_mask
@@ -154,6 +154,8 @@ class Model(torch.nn.Module):
             yield idx_next, age_next, raw_logits
 
             past_key_values = output_dict.past_key_values
+            if isinstance(past_key_values, tuple):
+                past_key_values = DynamicCache.from_legacy_cache(past_key_values)
             position_ids = position_ids[:, [-1]] + 1
             inputs_embeds = self.inputs_embeds(idx=idx_next, age=age_next)
             attention_mask = torch.cat(
