@@ -129,6 +129,12 @@ class Model(torch.nn.Module):
         cache_position = None
         attention_mask = (idx > 0).long()
 
+        batch_size = idx.shape[0]
+        has_occurred = torch.zeros((batch_size, self.config.vocab_size)).int()
+        has_occurred = has_occurred.scatter_(
+            dim=1, index=idx, src=torch.ones_like(idx).int()
+        )
+
         while True:
             output_dict = self.gpt2(
                 inputs_embeds=inputs_embeds,
@@ -145,9 +151,8 @@ class Model(torch.nn.Module):
             if top_k is not None:
                 logits = truncate_top_k(logits, top_k)
             if no_repeat:
-                fill = idx + 0
-                fill[fill == 1] = 0
-                logits = logits.scatter_(1, fill, -torch.inf)
+                has_occurred[:, 1] = 0
+                logits[has_occurred] = -torch.inf
             idx_next, time_til_next = sample_competing_exponentials(logits)
             age_next = age_next[..., [-1]] + time_til_next
 
@@ -166,6 +171,9 @@ class Model(torch.nn.Module):
                     ),
                 ),
                 dim=1,
+            )
+            has_occurred = has_occurred.scatter_(
+                dim=1, index=idx_next, src=torch.ones_like(idx_next).int()
             )
 
 
