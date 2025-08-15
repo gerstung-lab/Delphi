@@ -34,7 +34,6 @@ class CalibrateAUCArgs:
     disease_lst: str = ""
     age_groups: TimeBins = field(default_factory=TimeBins)
     min_time_gap: float = 0.1
-    event_input_only: bool = True
     subsample: Optional[int] = None
     device: str = "cpu"
     batch_size: int = 128
@@ -158,10 +157,9 @@ def calibrate_auc(
         for batch_idx in it:
             batch_input = ds.get_batch(batch_idx)
             batch_input = move_batch_to_device(batch_input, device=device)
+            batch_X, batch_T = batch_input[0], batch_input[1]
 
-            batch_logits, batch_X, batch_T = model.eval_step(
-                *batch_input, horizon=task_args.age_groups.bin_width * DAYS_PER_YEAR  # type: ignore
-            )
+            batch_logits, _ = model(batch_X, batch_T)
 
             batch_X = batch_X.detach().cpu().numpy()
             batch_T = batch_T.detach().cpu().numpy()
