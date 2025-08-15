@@ -123,20 +123,19 @@ def generate(
     gen_idx_lst = []
     gen_age_lst = []
     while True:
+        terminated = torch.logical_or(has_termin_token, out_of_time)
+        if terminated.all() or l > model.config.block_size:
+            break
+
         next_idx, next_age, next_logits = next(next_token_generator)
+        gen_idx_lst.append(next_idx)
+        gen_age_lst.append(next_age)
 
         has_termin_token = torch.logical_or(
             has_termin_token, torch.isin(next_idx, termination_tokens)
         )
         out_of_time = torch.logical_or(out_of_time, next_age >= max_age)
-        terminated = torch.logical_or(has_termin_token, out_of_time)
-
-        gen_idx_lst.append(next_idx)
-        gen_age_lst.append(next_age)
-
         l += 1
-        if terminated.all() or l > model.config.block_size:
-            break
 
     idx = torch.cat(gen_idx_lst, dim=1)
     age = torch.cat(gen_age_lst, dim=1)
