@@ -124,7 +124,7 @@ def generate(
     gen_age_lst = []
     while True:
         terminated = torch.logical_or(has_termin_token, out_of_time)
-        if terminated.all() or l > model.config.block_size:
+        if terminated.all() or l >= model.config.block_size:
             break
 
         next_idx, next_age, next_logits = next(next_token_generator)
