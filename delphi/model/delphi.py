@@ -130,7 +130,9 @@ class Model(torch.nn.Module):
         attention_mask = (idx > 0).long()
 
         batch_size = idx.shape[0]
-        has_occurred = torch.zeros((batch_size, self.config.vocab_size)).int()
+        has_occurred = torch.zeros(
+            (batch_size, self.config.vocab_size), device=idx.device
+        ).int()
         has_occurred = has_occurred.scatter_(
             dim=1, index=idx, src=torch.ones_like(idx).int()
         )
