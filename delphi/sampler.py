@@ -105,11 +105,15 @@ def generate(
     age: torch.Tensor,
     seed: int,
     max_age: float,  # in days
-    termination_tokens: torch.Tensor,
+    termination_tokens: Optional[torch.Tensor] = None,
     no_repeat: bool = True,
     top_k: Optional[int] = None,
     temperature: float = 1.0,
 ):
+    if termination_tokens is None:
+        termination_tokens = torch.Tensor(
+            [model.config.vocab_size], device=model.device
+        )
 
     torch.manual_seed(seed)
     next_token_generator = model.next_token(
