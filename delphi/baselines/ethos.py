@@ -156,6 +156,7 @@ class Model(torch.nn.Module):
     ):
 
         input_ids = idx
+        all_input_ids = input_ids.clone()
         position_ids = self.position_ids(idx=idx)
         past_key_values = None
         attention_mask = (idx > 0).long()
@@ -191,20 +192,29 @@ class Model(torch.nn.Module):
 
             yield idx_next, age[:, [-1]], raw_logits
 
-            past_key_values = output_dict.past_key_values
-            if isinstance(past_key_values, tuple):
-                past_key_values = DynamicCache.from_legacy_cache(past_key_values)
-            position_ids = position_ids[:, [-1]] + 1
-            input_ids = idx_next
-            attention_mask = torch.cat(
-                (
-                    attention_mask,
-                    torch.ones(
-                        (attention_mask.shape[0], 1), device=attention_mask.device
-                    ),
-                ),
-                dim=1,
-            )
+            all_input_ids = torch.cat((all_input_ids, idx_next), dim=1)
             has_occurred = has_occurred.scatter_(
                 dim=1, index=idx_next, src=torch.ones_like(idx_next).int()
             )
+
+            past_key_values = output_dict.past_key_values
+            if isinstance(past_key_values, tuple):
+                past_key_values = DynamicCache.from_legacy_cache(past_key_values)
+
+            if past_key_values.get_seq_length() >= self.config.block_size:
+                position_ids = self.position_ids(idx=idx)
+                past_key_values = None
+                input_ids = all_input_ids[:, -self.config.block_size :]
+                attention_mask = (input_ids > 0).long()
+            else:
+                position_ids = position_ids[:, [-1]] + 1
+                input_ids = idx_next
+                attention_mask = torch.cat(
+                    (
+                        attention_mask,
+                        torch.ones(
+                            (attention_mask.shape[0], 1), device=attention_mask.device
+                        ),
+                    ),
+                    dim=1,
+                )
