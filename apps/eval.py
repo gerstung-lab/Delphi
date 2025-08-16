@@ -9,15 +9,21 @@ from delphi.env import DELPHI_CKPT_DIR
 from delphi.eval import clock, eval_task
 from delphi.eval.auc import CalibrateAUCArgs
 from delphi.eval.future_risks import FutureArgs
+from delphi.eval.mimic import AresArgs
 
 
 class TaskType(Enum):
     AUC = "auc"
     FUTURE = "future"
+    MIMIC_ARES = "mimic-ares"
     # CALIBRATION = "calibration"
 
 
-task_type_to_args_type = {TaskType.AUC: CalibrateAUCArgs, TaskType.FUTURE: FutureArgs}
+task_type_to_args_type = {
+    TaskType.AUC: CalibrateAUCArgs,
+    TaskType.FUTURE: FutureArgs,
+    TaskType.MIMIC_ARES: AresArgs,
+}
 
 
 @dataclass

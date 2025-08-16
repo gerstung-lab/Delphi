@@ -1,0 +1,7 @@
+task_name: ${task_args.task}
+task_type: mimic-ares
+task_args:
+  task: hospital_mortality
+  seed: 42
+  batch_size: 150
+  n_samples: 30
