@@ -109,6 +109,7 @@ def generate(
     no_repeat: bool = True,
     top_k: Optional[int] = None,
     temperature: float = 1.0,
+    stop_at_block_size: bool = True,
 ):
     if termination_tokens is None:
         termination_tokens = torch.Tensor(
@@ -129,7 +130,9 @@ def generate(
     gen_logits_lst = []
     while True:
         terminated = torch.logical_or(has_termin_token, out_of_time)
-        if terminated.all() or l >= model.config.block_size:
+        if terminated.all():
+            break
+        if l >= model.config.block_size and stop_at_block_size:
             break
 
         next_idx, next_age, next_logits = next(next_token_generator)
@@ -147,7 +150,6 @@ def generate(
     age = torch.cat(gen_age_lst, dim=1)
     logits = torch.cat(gen_logits_lst, dim=1)
 
-    # mask all tokens after the *second* occurrence of a termination token
     exceed_max_age = age > max_age
     is_termination_token = torch.isin(idx, termination_tokens)
     beyond_termination = (

@@ -101,6 +101,7 @@ def sample_future(task_args: AresArgs, task_name: str, ckpt: str) -> None:
                 temperature=task_args.temperature,
                 max_age=torch.inf,
                 termination_tokens=termination_tokens,
+                stop_at_block_size=False,
             )
 
             B, L, V = gen_logits.shape
