@@ -39,7 +39,7 @@ class AresArgs:
 def sample_future(task_args: AresArgs, task_name: str, ckpt: str) -> None:
 
     device = task_args.device
-    model, _, tokenizer = load_ckpt(ckpt)
+    model, _, _ = load_ckpt(ckpt)
     model.to(device)
     model.eval()
 
@@ -63,7 +63,7 @@ def sample_future(task_args: AresArgs, task_name: str, ckpt: str) -> None:
         outcome = "MEDS_DEATH"
     else:
         raise NotImplementedError
-    termination_tokens = torch.Tensor(
+    termination_tokens = torch.tensor(
         eval_ds.vocab.encode(termination_events), device=device
     )
     target_token = eval_ds.vocab.encode(outcome)
@@ -74,7 +74,11 @@ def sample_future(task_args: AresArgs, task_name: str, ckpt: str) -> None:
     n_participants = (
         len(eval_ds) if task_args.subsample is None else task_args.subsample
     )
-    it = tqdm(eval_iter(total_size=n_participants, batch_size=n_persons_per_batch))
+    it = tqdm(
+        eval_iter(total_size=n_participants, batch_size=n_persons_per_batch),
+        total=math.ceil(n_participants / n_persons_per_batch),
+        leave=True,
+    )
 
     y_prob = list()
     y_true = list()
@@ -121,4 +125,7 @@ def sample_future(task_args: AresArgs, task_name: str, ckpt: str) -> None:
 
     y_prob = torch.cat(y_prob, dim=0)
     y_true = torch.cat(y_true, dim=0)
-    print(sklearn.metrics.roc_auc_score(y_true, y_prob))
+
+    logbook = {"auc": sklearn.metrics.roc_auc_score(y_true, y_prob)}
+    with open(Path(ckpt) / f"{task_name}.json", "w") as f:
+        json.dump(logbook, f, indent=4)
