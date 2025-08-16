@@ -71,8 +71,8 @@ class MIMICDataset:
             self.timeline_size = n_positions
 
         with open(input_dir / "interval_estimates.json", "r") as f:
-            interval_stats = json.load(f)
-        time_intervals = list(interval_stats["min"].keys())
+            self.interval_estimates = json.load(f)
+        time_intervals = list(self.interval_estimates["min"].keys())
         self.time_tokens = th.tensor(self.vocab.encode(time_intervals))
         self.sep_time_tokens = sep_time_tokens
 

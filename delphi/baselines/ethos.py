@@ -107,6 +107,11 @@ class Model(torch.nn.Module):
         self.ce_head = CrossEntropyHead(config)
         initialize_weights(self, config=config)
 
+    def set_time(self, token_to_time: torch.Tensor):
+
+        assert token_to_time.numel() == self.config.vocab_size
+        self.register_buffer("token_to_time", token_to_time)
+
     @staticmethod
     def position_ids(idx: torch.Tensor):
 
@@ -155,7 +160,9 @@ class Model(torch.nn.Module):
         no_repeat: bool = False,
     ):
 
+        assert hasattr(self, "token_to_time")
         input_ids = idx
+        age_next = age
         all_input_ids = input_ids.clone()
         position_ids = self.position_ids(idx=idx)
         past_key_values = None
@@ -189,8 +196,9 @@ class Model(torch.nn.Module):
 
             probs = F.softmax(logits, dim=-1)
             idx_next = torch.multinomial(probs, num_samples=1)
+            age_next = age_next[:, [-1]] + self.token_to_time[idx_next]
 
-            yield idx_next, age[:, [-1]], raw_logits
+            yield idx_next, age_next, raw_logits
 
             all_input_ids = torch.cat((all_input_ids, idx_next), dim=1)
             has_occurred = has_occurred.scatter_(

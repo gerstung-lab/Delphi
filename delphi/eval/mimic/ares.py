@@ -53,6 +53,7 @@ def sample_future(task_args: AresArgs, task_name: str, ckpt: str) -> None:
         )
         termination_events = ["MEDS_DEATH", "HOSPITAL_DISCHARGE"]
         outcome = "MEDS_DEATH"
+        max_time = 30 * 24 * 60
     elif task_args.task == "icu_mortality":
         eval_ds = ICUMortalityDataset(
             input_dir=data_dir,
@@ -61,12 +62,21 @@ def sample_future(task_args: AresArgs, task_name: str, ckpt: str) -> None:
         )
         termination_events = ["MEDS_DEATH", "ICU_DISCHARGE"]
         outcome = "MEDS_DEATH"
+        max_time = 30 * 24 * 60
     else:
         raise NotImplementedError
     termination_tokens = torch.tensor(
         eval_ds.vocab.encode(termination_events), device=device
     )
     target_token = eval_ds.vocab.encode(outcome)
+
+    if model.model_type == "ethos":
+        token_to_time = torch.zeros((model.config.vocab_size,))
+        time_token_to_mean = eval_ds.interval_estimates["mean"]
+        for time_token, mean_time in time_token_to_mean.items():
+            time_token = eval_ds.vocab.encode(time_token)
+            token_to_time[time_token] = mean_time / 1e6 / 60
+        model.set_time(token_to_time)
 
     assert task_args.batch_size >= task_args.n_samples
     assert task_args.batch_size % task_args.n_samples == 0
@@ -99,7 +109,7 @@ def sample_future(task_args: AresArgs, task_name: str, ckpt: str) -> None:
                 no_repeat=False,
                 top_k=task_args.top_k,
                 temperature=task_args.temperature,
-                max_age=torch.inf,
+                max_time=max_time,
                 termination_tokens=termination_tokens,
                 stop_at_block_size=False,
             )

@@ -104,7 +104,8 @@ def generate(
     idx: torch.Tensor,
     age: torch.Tensor,
     seed: int,
-    max_age: float,  # in days
+    max_age: Optional[float] = None,  # in days
+    max_time: Optional[float] = None,
     termination_tokens: Optional[torch.Tensor] = None,
     no_repeat: bool = True,
     top_k: Optional[int] = None,
@@ -124,6 +125,12 @@ def generate(
     n, l = idx.shape
     has_termin_token = torch.zeros((n, 1), device=idx.device).bool()
     out_of_time = torch.zeros_like(has_termin_token).bool()
+    start_age = age[:, [-1]]
+    if max_age is None:
+        assert max_time is not None
+        max_age = start_age + max_time  # type: ignore
+    else:
+        assert max_time is None
 
     gen_idx_lst = []
     gen_age_lst = []
