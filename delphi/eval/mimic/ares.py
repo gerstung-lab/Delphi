@@ -44,7 +44,7 @@ def sample_future(task_args: AresArgs, task_name: str, ckpt: str) -> None:
     model.eval()
 
     data_dir = Path(DELPHI_DATA_DIR) / "mimic" / "test"
-    n_positions = 512
+    n_positions = model.config.block_size
     if task_args.task == "hospital_mortality":
         eval_ds = HospitalMortalityDataset(
             input_dir=data_dir,
