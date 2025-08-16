@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import transformers
+from transformers import DynamicCache
 
 from delphi.data.ukb import UKBDataset
 from delphi.model.components import target_mask
@@ -106,19 +107,27 @@ class Model(torch.nn.Module):
         self.ce_head = CrossEntropyHead(config)
         initialize_weights(self, config=config)
 
+    @staticmethod
+    def position_ids(idx: torch.Tensor):
+
+        batch_size, seq_len = idx.shape
+        pos = torch.arange(seq_len, device=idx.device).view(1, -1).repeat(batch_size, 1)
+        is_pad = idx == 0
+        offset = is_pad.sum(dim=1, keepdim=True)
+        pos = torch.clamp(pos - offset, min=0)
+
+        return pos
+
     def forward(
         self,
         idx: torch.Tensor,
         targets: Optional[torch.Tensor] = None,
     ):
 
-        batch_size, seq_len = idx.shape
+        _, seq_len = idx.shape
         assert seq_len <= self.config.block_size
 
-        pos = torch.arange(seq_len, device=idx.device).view(1, -1).repeat(batch_size, 1)
-        is_pad = idx == 0
-        offset = is_pad.sum(dim=1, keepdim=True)
-        pos = torch.clamp(pos - offset, min=0)
+        pos = self.position_ids(idx)
 
         attn_mask = idx > 0
         output_dict = self.gpt2(
@@ -136,26 +145,6 @@ class Model(torch.nn.Module):
 
         return logits, loss
 
-    def eval_step(self, idx: torch.Tensor, age: torch.Tensor):
-
-        raw_idx = idx.clone()
-        batch_size, raw_seq_len = idx.shape
-
-        ethos_idx, is_event = create_ethos_sequence(
-            X=idx,
-            T=age,
-            time_bins=self.time_bins,
-            offset=self.config.base_vocab_size - 1,
-        )
-        idx = torch.tensor(ethos_idx).to(idx.device)
-
-        logits = self.forward_backbone(idx=idx)
-
-        logits = logits[is_event, :]
-        logits = logits.reshape(batch_size, raw_seq_len, -1)
-
-        return logits, raw_idx, age
-
     @torch.no_grad
     def next_token(
         self,
@@ -166,34 +155,56 @@ class Model(torch.nn.Module):
         no_repeat: bool = False,
     ):
 
-        max_event_token = self.config.base_vocab_size - 1
+        input_ids = idx
+        position_ids = self.position_ids(idx=idx)
+        past_key_values = None
+        attention_mask = (idx > 0).long()
 
-        logits, _ = self.forward(idx, age)
-        logits = logits[:, -1, :] / temperature
+        batch_size = idx.shape[0]
+        has_occurred = torch.zeros(
+            (batch_size, self.config.vocab_size), device=idx.device
+        ).int()
+        has_occurred = has_occurred.scatter_(
+            dim=1, index=idx, src=torch.ones_like(idx).int()
+        )
 
-        if top_k is not None:
-            logits = truncate_top_k(logits, top_k)
+        while True:
+            output_dict = self.gpt2(
+                input_ids=input_ids,
+                position_ids=position_ids,
+                attention_mask=attention_mask,
+                use_cache=True,
+                past_key_values=past_key_values,
+            )
+            logits = output_dict.logits
+            raw_logits = logits[:, [-1], :].clone()
+            logits[..., 0] = -torch.inf
+            logits = logits[:, -1, :] / temperature
+            if top_k is not None:
+                logits = truncate_top_k(logits, top_k)
+            if no_repeat:
+                has_occurred[:, 1] = 0
+                logits[has_occurred.bool()] = -torch.inf
 
-        if no_repeat:
-            fill = idx + 0
-            fill[fill == 1] = 0
-            logits = logits.scatter_(1, fill, -torch.inf)
-        probs = F.softmax(logits, dim=-1)
-        tokens = torch.multinomial(probs, num_samples=1)
-        next_is_time = tokens > max_event_token
-        next_is_event = ~next_is_time
-        next_event = tokens.clone()
-        next_event[next_is_time] = 0
-        idx = torch.concat((idx, next_event), dim=-1)
+            probs = F.softmax(logits, dim=-1)
+            idx_next = torch.multinomial(probs, num_samples=1)
 
-        last_age = age[:, [-1]]
-        next_time = tokens.clone()
-        next_time -= max_event_token
-        next_time = torch.clamp(next_time, min=0)
-        # select left edge of each time bin
-        next_time = self.time_bins[next_time - 1]
-        next_time[next_is_event] = 0
-        next_age = next_time + last_age
-        age = torch.concat((age, next_age), dim=-1)
+            yield idx_next, age[:, [-1]], raw_logits
 
-        return idx, age
+            past_key_values = output_dict.past_key_values
+            if isinstance(past_key_values, tuple):
+                past_key_values = DynamicCache.from_legacy_cache(past_key_values)
+            position_ids = position_ids[:, [-1]] + 1
+            input_ids = idx_next
+            attention_mask = torch.cat(
+                (
+                    attention_mask,
+                    torch.ones(
+                        (attention_mask.shape[0], 1), device=attention_mask.device
+                    ),
+                ),
+                dim=1,
+            )
+            has_occurred = has_occurred.scatter_(
+                dim=1, index=idx_next, src=torch.ones_like(idx_next).int()
+            )
