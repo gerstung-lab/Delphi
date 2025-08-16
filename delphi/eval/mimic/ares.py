@@ -123,8 +123,8 @@ def sample_future(task_args: AresArgs, task_name: str, ckpt: str) -> None:
             )
             y_true.append(batch_label)
 
-    y_prob = torch.cat(y_prob, dim=0)
-    y_true = torch.cat(y_true, dim=0)
+    y_prob = torch.cat(y_prob, dim=0).detach().cpu().numpy()
+    y_true = torch.cat(y_true, dim=0).detach().cpu().numpy()
 
     logbook = {"auc": sklearn.metrics.roc_auc_score(y_true, y_prob)}
     with open(Path(ckpt) / f"{task_name}.json", "w") as f:
