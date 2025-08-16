@@ -202,9 +202,9 @@ class Model(torch.nn.Module):
                 past_key_values = DynamicCache.from_legacy_cache(past_key_values)
 
             if past_key_values.get_seq_length() >= self.config.block_size:
-                position_ids = self.position_ids(idx=idx)
                 past_key_values = None
                 input_ids = all_input_ids[:, -self.config.block_size :]
+                position_ids = self.position_ids(idx=input_ids)
                 attention_mask = (input_ids > 0).long()
             else:
                 position_ids = position_ids[:, [-1]] + 1
