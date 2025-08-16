@@ -13,6 +13,7 @@ from delphi.data.mimic import (
     HospitalMortalityDataset,
     ICUMortalityDataset,
     ICUReadmissionDataset,
+    SpecialToken,
 )
 from delphi.data.utils import duplicate_participants, eval_iter, move_batch_to_device
 from delphi.env import DELPHI_DATA_DIR
@@ -51,8 +52,8 @@ def sample_future(task_args: AresArgs, task_name: str, ckpt: str) -> None:
             n_positions=n_positions,
             sep_time_tokens=(model.model_type != "ethos"),
         )
-        termination_events = ["MEDS_DEATH", "HOSPITAL_DISCHARGE"]
-        outcome = "MEDS_DEATH"
+        termination_events = [SpecialToken.TIMELINE_END, SpecialToken.DISCHARGE]
+        outcome = SpecialToken.DEATH
         max_time = 30 * 24 * 60
     elif task_args.task == "icu_mortality":
         eval_ds = ICUMortalityDataset(
@@ -77,6 +78,7 @@ def sample_future(task_args: AresArgs, task_name: str, ckpt: str) -> None:
             time_token = eval_ds.vocab.encode(time_token)
             token_to_time[time_token] = mean_time / 1e6 / 60
         model.set_time(token_to_time)
+        model.to(device)
 
     assert task_args.batch_size >= task_args.n_samples
     assert task_args.batch_size % task_args.n_samples == 0
