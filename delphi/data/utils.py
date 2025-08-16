@@ -37,8 +37,8 @@ def train_iter(
         yield batch_idx
 
 
-def duplicate_participants(X: torch.Tensor, T: torch.Tensor, n_repeat: int):
+def duplicate_participants(args: Iterable[torch.Tensor], n_repeat: int):
 
-    return torch.repeat_interleave(X, repeats=n_repeat, dim=0), torch.repeat_interleave(
-        T, repeats=n_repeat, dim=0
+    return tuple(
+        [torch.repeat_interleave(arg, repeats=n_repeat, dim=0) for arg in args]
     )

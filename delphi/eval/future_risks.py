@@ -75,7 +75,7 @@ def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
             prompt_idx, prompt_age, target_idx, target_age = batch_input
 
             prompt_idx, prompt_age = duplicate_participants(
-                prompt_idx, prompt_age, n_repeat=task_args.n_samples
+                [prompt_idx, prompt_age], n_repeat=task_args.n_samples
             )
             prompt_logits, _ = model(prompt_idx, prompt_age)
 

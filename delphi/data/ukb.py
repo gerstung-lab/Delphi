@@ -1,7 +1,7 @@
 import functools
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Iterable, Iterator, Optional
 
 import numpy as np
 import pandas as pd
@@ -147,7 +147,7 @@ class UKBDataset:
 
         return x_pid, t_pid
 
-    def get_batch(self, batch_idx: Iterator):
+    def get_batch(self, batch_idx: Iterable):
 
         X = []
         T = []
