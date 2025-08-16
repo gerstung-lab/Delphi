@@ -1,15 +1,18 @@
+import abc
 import json
 import pickle
 from collections.abc import Sequence
 from datetime import timedelta
 from pathlib import Path
+from typing import Iterable
 
 import torch as th
 
 from delphi.tokenizer import Tokenizer
 
 from ._sharded_data import ShardedData
-from .constants import STATIC_DATA_FN, SpecialToken
+from .constants import STATIC_DATA_FN
+from .constants import SpecialToken as ST
 from .vocabulary import Vocabulary
 
 
@@ -47,7 +50,7 @@ class MIMICDataset:
         input_dir: str | Path,
         n_positions: int = 2048,
         is_encoder_decoder: bool = False,
-        sep_time_tokens: bool = True,
+        sep_time_tokens: bool = False,
     ):
         input_dir = Path(input_dir)
         if not input_dir.is_dir():
@@ -190,7 +193,7 @@ class MIMICDataset:
 
         static_tokens = []
         for token in self.static_data[patient_id].values():
-            if token["code"][0] == SpecialToken.DOB:
+            if token["code"][0] == ST.DOB:
                 age = timedelta(microseconds=time_at_start - token["time"][0])
                 static_tokens.extend(self._age_to_tokens(age.days / 365.25))
             elif len(token["code"]) == 1:
@@ -226,3 +229,111 @@ class MIMICDataset:
         if indices:
             return indices[-1]
         return -1
+
+
+class InferenceDataset(MIMICDataset, abc.ABC):
+    # INFERENCE DEFAULT CONSTRAINTS
+    stop_stokens: list[ST] = [
+        ST.DEATH,
+        ST.TIMELINE_END,
+    ]  # Default inference stop tokens
+    time_limit: timedelta = timedelta(days=365.25 * 2)  # Inference time constraint
+
+    def _get_hadm_id(self, idx: int) -> int | None:
+        return None if th.isnan(hadm_id := self.hadm_id[idx]) else int(hadm_id)
+
+    def _get_icu_stay_id(self, idx: int) -> int | None:
+        return (
+            None if th.isnan(icu_stay_id := self.icu_stay_id[idx]) else int(icu_stay_id)
+        )
+
+    @abc.abstractmethod
+    def __len__(self) -> int:
+        pass
+
+    def __getitem__(self, idx: int) -> th.Tensor | tuple[th.Tensor, th.Tensor]:
+        data_start_idx = self.patient_offset_at_idx[idx]
+        if idx - data_start_idx + 1 > self.timeline_size:
+            data_start_idx = idx + 1 - self.timeline_size
+
+        pt_ctx = self._get_patient_context(data_start_idx)
+        #! shift by 2
+        tokens = self.tokens[data_start_idx : idx + 1] + 2
+        timesteps = self.times[data_start_idx : idx + 1]
+        timesteps = self.convert_time(timesteps)
+        pt_ctx_timesteps = th.full(size=pt_ctx.shape, fill_value=timesteps[0].item())
+
+        if self.sep_time_tokens:
+            is_time_token = th.isin(tokens, self.time_tokens)
+            tokens = tokens[~is_time_token]
+            timesteps = timesteps[~is_time_token]
+
+        if self.is_encoder_decoder:
+            return (pt_ctx, tokens)
+
+        return th.cat((pt_ctx, tokens)), th.cat((pt_ctx_timesteps, timesteps))
+
+    def get_batch(self, batch_idx: Iterable):
+
+        X, X_t, labels = list(), list(), list()
+        for idx in batch_idx:
+            (x, x_t), label = self[idx]
+            X.append(x)
+            X_t.append(x_t)
+            labels.append(label)
+
+        X = collate_batch_data(X)
+        X_t = collate_batch_time(X_t)
+
+        return X, X_t, labels
+
+    def _get_indices_of_stokens(self, stokens: str | Sequence[str]) -> th.Tensor:
+        if isinstance(stokens, str):
+            stokens = [stokens]
+        tokens_of_interest = th.tensor(self.vocab.encode(stokens))
+        shard_indices = []
+        token_offset = 0
+        for token_chunk in self.tokens:
+            #! shift by 2
+            new_indices = th.nonzero(th.isin(token_chunk + 2, tokens_of_interest)).view(
+                -1
+            )
+            new_indices += token_offset
+            shard_indices.append(new_indices)
+            token_offset += len(token_chunk)
+
+        return th.cat(shard_indices)
+
+    def _match(
+        self,
+        ordered_sequence: th.Tensor,
+        input: th.Tensor,
+        *,
+        fill_unmatched: int | None = None,
+        shift: int = 0,
+    ) -> th.Tensor:
+        """TODO: Write a docstring, because this function is hell."""
+        ordered_sequence_indices = th.searchsorted(ordered_sequence, input, right=True)
+        if shift:
+            ordered_sequence_indices += shift
+        if fill_unmatched is None:
+            return ordered_sequence[ordered_sequence_indices]
+        else:
+            out = th.full_like(input, fill_value=fill_unmatched)
+            mask = ordered_sequence_indices < len(ordered_sequence)
+            out[mask] = ordered_sequence[ordered_sequence_indices[mask]]
+            return out
+
+    def _move_idx_to_last_same_time(self, token_index: th.Tensor) -> th.Tensor:
+        """Shifts index to the last token with the same time of the token at the index."""
+        data_end_idx = self.patient_data_end_at_idx[token_index]
+        times = self.times[token_index : data_end_idx - 1]
+        idx_offset = th.searchsorted(times[1:], times[0], right=True)
+        return token_index + idx_offset
+
+    def _move_indices_to_last_same_time(self, token_indices: th.Tensor) -> th.Tensor:
+        """Shifts indices to the last token with the same time of the token at the index."""
+        new_indices = th.empty_like(token_indices)
+        for i, idx in enumerate(token_indices):
+            new_indices[i] = self._move_idx_to_last_same_time(idx)
+        return new_indices
