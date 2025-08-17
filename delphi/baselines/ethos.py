@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Iterable, Optional
 
 import numpy as np
 import torch
@@ -6,7 +6,8 @@ import torch.nn.functional as F
 import transformers
 from transformers import DynamicCache
 
-from delphi.data.ukb import UKBDataset
+from delphi.data.ukb import UKBDataConfig
+from delphi.data.ukb import UKBDataset as BaseUKBDataset
 from delphi.model.components import target_mask
 from delphi.model.config import GPT2Config
 from delphi.model.loss import CrossEntropyHead
@@ -47,12 +48,12 @@ def create_ethos_sequence(
     return idx, age
 
 
-class EthosUKBDataset(UKBDataset):
+class UKBDataset(BaseUKBDataset):
 
-    def __init__(self, cfg, memmap, time_bins):
+    def __init__(self, cfg: UKBDataConfig, time_bins: list, memmap: bool = False):
 
         super().__init__(cfg, memmap)
-        self.time_bins = time_bins
+        self.time_bins = np.array(time_bins)
 
         self.base_vocab_size = self.tokenizer.vocab_size
         n_bins = len(self.time_bins)
@@ -80,11 +81,17 @@ class EthosUKBDataset(UKBDataset):
         t_pid = self.time_steps[i : i + l]
         x_pid, t_pid = self.add_no_event(x_pid, t_pid)
         x_pid, t_pid = create_ethos_sequence(
-            x_pid, t_pid, time_bins=self.time_bins, offset=self.base_vocab_size
+            x_pid, t_pid, time_bins=self.time_bins, offset=self.base_vocab_size - 1
         )
         x_pid, t_pid = self.crop_block_size(x_pid, t_pid)
 
         return x_pid, t_pid
+
+    def get_batch(self, batch_idx: Iterable):
+
+        X0, _, X1, _ = super().get_batch(batch_idx)
+
+        return X0, X1
 
 
 class Model(torch.nn.Module):

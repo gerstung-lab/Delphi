@@ -15,20 +15,28 @@ data:
   seed: 42
   block_size: ${model.block_size}
   no_event_interval: 1826.25
+  time_bins:
+    - 1.0
+    - 62.0
+    - 148.0
+    - 261.0
+    - 401.0
+    - 585.0
+    - 831.0
+    - 1168.0
+    - 1681.0
+    - 2610.0
 model:
-  base_vocab_size: 1270
-  vocab_size: 1370
+  vocab_size: 1280
   n_layer: 12
   n_head: 12
   n_embd: 120
   bias: true
   block_size: 512
-  n_time_tokens: 100
-  time_bins: []
 log:
   wandb_log: true
   wandb_project: ${ckpt_dir}
-  run_name: ${model.n_time_tokens}_time_tokens
+  run_name: 10_time_tokens
   log_interval: 25
   always_ckpt_after_eval: true
   ckpt_interval: null

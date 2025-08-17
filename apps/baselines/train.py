@@ -51,8 +51,13 @@ def experiment(cfg: TrainConfig):
         val_cfg = copy(train_cfg)
         val_cfg.subject_list = cfg.data["val_subject_list"]
 
-        train_ds = UKBDataset(train_cfg)
-        val_ds = UKBDataset(val_cfg)
+        if cfg.model_type == "ethos":
+            time_bins = cfg.data["time_bins"]
+            train_ds = ethos.UKBDataset(train_cfg, time_bins=time_bins)
+            val_ds = ethos.UKBDataset(val_cfg, time_bins=time_bins)
+        else:
+            train_ds = UKBDataset(train_cfg)
+            val_ds = UKBDataset(val_cfg)
     elif cfg.data["data_dir"] == "mimic":
         sep_time_tokens = cfg.model_type == "delphi"
         train_ds = MIMICDataset(
@@ -69,39 +74,6 @@ def experiment(cfg: TrainConfig):
         raise ValueError
 
     if cfg.model_type == "ethos":
-
-        # if len(cfg.model["time_bins"]) == 0:
-        #     assert cfg.model["n_time_tokens"] is not None
-        #     print(f"\t- time bins not defined; estimating time bins...")
-
-        #     rng = np.random.default_rng(cfg.seed)
-        #     sample_idx = rng.permutation(np.arange(len(train_ds)))[:10000]
-        #     _, T = train_ds.get_batch(sample_idx)
-
-        #     cfg.model["time_bins"] = ethos.estimate_time_bins(
-        #         sample_t=T[T != -1e4], n_tokens=cfg.model["n_time_tokens"]
-        #     ).tolist()
-
-        # print(f"time bins:")
-        # for i in range(len(cfg.model["time_bins"]) - 1):
-        #     print(f"\t\t- {cfg.model['time_bins'][i]} – {cfg.model['time_bins'][i+1]}")
-
-        # n_bins = len(cfg.model["time_bins"])
-        # time_tokenizer = dict()
-        # for i in range(n_bins):
-        #     start = cfg.model["time_bins"][i]
-        #     token = i + 1
-        #     if i < n_bins - 1:
-        #         end = cfg.model["time_bins"][i + 1]
-        #         time_tokenizer[f"time-{start}-{end}"] = token
-        #     else:
-        #         time_tokenizer[f"time-{start}-inf"] = token
-
-        # tokenizer, _ = update_tokenizer(
-        #     base_tokenizer=train_ds.tokenizer.to_dict(), add_tokenizer=time_tokenizer
-        # )
-        # train_ds.tokenizer = Tokenizer(tokenizer)
-
         model_cls = ethos.Model
         model_cfg_cls = GPT2Config
     elif cfg.model_type == "motor":
