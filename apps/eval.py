@@ -1,27 +1,17 @@
 import os
 from dataclasses import dataclass
-from enum import Enum
 from typing import Any
 
 from omegaconf import OmegaConf
 
 from delphi.env import DELPHI_CKPT_DIR
-from delphi.eval import clock, eval_task, mimic
-from delphi.eval.ukb.auc import CalibrateAUCArgs
-from delphi.eval.ukb.forecast import FutureArgs
-
-
-class TaskType(Enum):
-    AUC = "auc"
-    FUTURE = "future"
-    MIMIC_ARES = "mimic-ares"
-    # CALIBRATION = "calibration"
-
+from delphi.eval import clock, eval_task, mimic, ukb
 
 task_type_to_args_type = {
-    TaskType.AUC: CalibrateAUCArgs,
-    TaskType.FUTURE: FutureArgs,
-    TaskType.MIMIC_ARES: mimic.ForecastArgs,
+    "ukb-auc": ukb.InstantAUCArgs,
+    "ukb-forecast": ukb.ForecastArgs,
+    "mimic-forecast": mimic.ForecastArgs,
+    "mimic-drg": mimic.DRGClassificationArgs,
 }
 
 
@@ -38,8 +28,7 @@ def eval(cfg: TaskConfig, ckpt: str):
     ckpt = os.path.join(DELPHI_CKPT_DIR, ckpt)
     assert os.path.exists(ckpt), f"checkpoint {ckpt} does not exist."
 
-    task_type = TaskType(cfg.task_type)
-    args_type = task_type_to_args_type[task_type]
+    args_type = task_type_to_args_type[cfg.task_type]
     default_args = OmegaConf.structured(args_type())
     task_args = OmegaConf.merge(default_args, cfg.task_args)
     task_args = OmegaConf.to_object(task_args)

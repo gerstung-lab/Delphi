@@ -20,7 +20,7 @@ from delphi.sampler import generate
 
 
 @dataclass
-class FutureArgs:
+class ForecastArgs:
     data: dict = field(default_factory=dict)
     n_samples: int = 30
     start_age_years: int = 50
@@ -36,7 +36,7 @@ class FutureArgs:
 
 
 @eval_task.register
-def sample_future(task_args: FutureArgs, task_name: str, ckpt: str) -> None:
+def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
 
     assert task_args.batch_size >= task_args.n_samples
     assert task_args.batch_size % task_args.n_samples == 0

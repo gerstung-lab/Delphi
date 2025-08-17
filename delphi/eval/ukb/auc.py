@@ -29,7 +29,7 @@ class TimeBins:
 
 
 @dataclass
-class CalibrateAUCArgs:
+class InstantAUCArgs:
     data: dict = field(default_factory=dict)
     disease_lst: str = ""
     age_groups: TimeBins = field(default_factory=TimeBins)
@@ -135,7 +135,7 @@ def corrective_indices(T0: np.ndarray, T1: np.ndarray, offset: float):
 
 @eval_task.register
 def calibrate_auc(
-    task_args: CalibrateAUCArgs,
+    task_args: InstantAUCArgs,
     task_name: str,
     ckpt: str,
 ) -> None:
