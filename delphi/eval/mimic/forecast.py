@@ -23,7 +23,7 @@ from delphi.sampler import generate
 
 
 @dataclass
-class AresArgs:
+class ForecastArgs:
     task: str = "hospital_mortality"
     n_samples: int = 30
     subsample: Optional[int] = None
@@ -37,7 +37,7 @@ class AresArgs:
 
 
 @eval_task.register
-def sample_future(task_args: AresArgs, task_name: str, ckpt: str) -> None:
+def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
 
     device = task_args.device
     model, _, _ = load_ckpt(ckpt)

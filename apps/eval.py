@@ -6,8 +6,7 @@ from typing import Any
 from omegaconf import OmegaConf
 
 from delphi.env import DELPHI_CKPT_DIR
-from delphi.eval import clock, eval_task
-from delphi.eval.mimic import AresArgs
+from delphi.eval import clock, eval_task, mimic
 from delphi.eval.ukb.auc import CalibrateAUCArgs
 from delphi.eval.ukb.forecast import FutureArgs
 
@@ -22,7 +21,7 @@ class TaskType(Enum):
 task_type_to_args_type = {
     TaskType.AUC: CalibrateAUCArgs,
     TaskType.FUTURE: FutureArgs,
-    TaskType.MIMIC_ARES: AresArgs,
+    TaskType.MIMIC_ARES: mimic.ForecastArgs,
 }
 
 
