@@ -1,5 +1,5 @@
-task_name: ${task_args.n_samples}samples-${task_args.start_age_years}-${task_args.end_age_years}
-task_type: future
+task_name: ${task_args.n_samples}samples-${task_args.start_age_years}start-${task_args.end_age_years}end
+task_type: ukb-forecast
 task_args:
   data:
     data_dir: ukb_real_data
@@ -11,5 +11,3 @@ task_args:
   n_samples: 30
   start_age_years: 50
   end_age_years: 85
-  termination_tokens:
-    - death
