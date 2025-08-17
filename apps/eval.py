@@ -7,9 +7,9 @@ from omegaconf import OmegaConf
 
 from delphi.env import DELPHI_CKPT_DIR
 from delphi.eval import clock, eval_task
-from delphi.eval.auc import CalibrateAUCArgs
-from delphi.eval.future_risks import FutureArgs
 from delphi.eval.mimic import AresArgs
+from delphi.eval.ukb.auc import CalibrateAUCArgs
+from delphi.eval.ukb.forecast import FutureArgs
 
 
 class TaskType(Enum):

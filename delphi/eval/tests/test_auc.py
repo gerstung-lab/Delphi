@@ -1,6 +1,6 @@
 import numpy as np
 
-from delphi.eval.auc import mann_whitney_auc
+from delphi.eval.ukb.auc import mann_whitney_auc
 
 
 def ordinal_mann_whitney_auc(x1: np.ndarray, x2: np.ndarray) -> float:

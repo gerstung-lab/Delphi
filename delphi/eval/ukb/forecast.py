@@ -12,7 +12,7 @@ from delphi import DAYS_PER_YEAR
 from delphi.data import ukb
 from delphi.data.utils import duplicate_participants, eval_iter, move_batch_to_device
 from delphi.eval import eval_task
-from delphi.eval.auc import mann_whitney_auc
+from delphi.eval.ukb.auc import mann_whitney_auc
 from delphi.experiment.train import load_ckpt
 from delphi.model.config import parse_token_list
 from delphi.model.delphi import integrate_risk
