@@ -94,20 +94,18 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
                 max_age=end_age,
                 termination_tokens=torch.tensor([tokenizer["death"]], device=device),
             )
-            idx = torch.cat((prompt_idx, gen_idx), dim=1)
-            age = torch.cat((prompt_age, gen_age), dim=1)
-            logits = torch.cat((prompt_logits, gen_logits), dim=1)
-            sort_by_age = torch.argsort(age, dim=1)
-            idx = torch.take_along_dim(input=idx, indices=sort_by_age, dim=1)
-            age = torch.take_along_dim(input=age, indices=sort_by_age, dim=1)
-            logits = torch.take_along_dim(
-                input=logits, indices=sort_by_age.unsqueeze(-1), dim=1
+            pred_age = torch.cat((prompt_age[:, [-1]], gen_age[:, 1:]), dim=1)
+            sort_by_age = torch.argsort(pred_age, dim=1)
+            gen_idx = torch.take_along_dim(input=gen_idx, indices=sort_by_age, dim=1)
+            pred_age = torch.take_along_dim(input=pred_age, indices=sort_by_age, dim=1)
+            gen_logits = torch.take_along_dim(
+                input=gen_logits, indices=sort_by_age.unsqueeze(-1), dim=1
             )
 
             if model.model_type == "delphi" or model.model_type == "ethos":
                 integrated_lambda = integrate_risk(
-                    log_lambda=logits,
-                    age=age,
+                    log_lambda=gen_logits,
+                    age=pred_age,
                     start=start_age,
                     end=end_age,
                 )
@@ -118,7 +116,8 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
 
                 gen_idx = gen_idx.reshape((n_person, n_sample, -1))
                 occur = torch.zeros(
-                    (n_person, n_sample, batch_risks.shape[-1]), device=logits.device
+                    (n_person, n_sample, batch_risks.shape[-1]),
+                    device=gen_logits.device,
                 ).long()
                 occur = occur.scatter_(
                     dim=-1,
