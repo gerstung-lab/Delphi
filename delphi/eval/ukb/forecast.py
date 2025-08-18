@@ -24,6 +24,7 @@ class ForecastArgs:
     n_samples: int = 30
     start_age_years: int = 50
     end_age_years: float = 80
+    resolution_years: int = 1
     subsample: Optional[int] = None
     batch_size: int = 128
     device: str = "cuda"
@@ -104,13 +105,14 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
             )
 
             if model.model_type == "delphi" or model.model_type == "ethos":
-                batch_risks = integrate_risk(
+                integrated_lambda = integrate_risk(
                     log_lambda=logits,
                     age=age,
                     start=start_age,
                     end=end_age,
                 )
-                batch_risks = batch_risks.reshape(n_person, n_sample, -1)
+                integrated_lambda = integrated_lambda.reshape(n_person, n_sample, -1)
+                batch_risks = 1 - torch.exp(-integrated_lambda * (end_age - start_age))
                 batch_risks = torch.nanmean(batch_risks, dim=-2, keepdim=False)
                 forecast_risks.append(batch_risks.detach().cpu().numpy())
 
