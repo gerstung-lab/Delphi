@@ -98,16 +98,23 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
             sort_by_age = torch.argsort(pred_age, dim=1)
             gen_idx = torch.take_along_dim(input=gen_idx, indices=sort_by_age, dim=1)
             pred_age = torch.take_along_dim(input=pred_age, indices=sort_by_age, dim=1)
+            gen_age = torch.take_along_dim(input=gen_age, indices=sort_by_age, dim=1)
             gen_logits = torch.take_along_dim(
                 input=gen_logits, indices=sort_by_age.unsqueeze(-1), dim=1
             )
 
             if model.model_type == "delphi" or model.model_type == "ethos":
+                end_age_until_occur = torch.full(
+                    (gen_logits.shape[0], gen_logits.shape[-1]), fill_value=end_age
+                ).to(gen_logits.device)
+                end_age_until_occur = end_age_until_occur.scatter_(
+                    src=gen_age, index=gen_idx, dim=1
+                )
                 integrated_lambda = integrate_risk(
                     log_lambda=gen_logits,
                     age=pred_age,
                     start=start_age,
-                    end=end_age,
+                    end=end_age_until_occur,
                 )
                 integrated_lambda = integrated_lambda.reshape(n_person, n_sample, -1)
                 batch_risks = 1 - torch.exp(-integrated_lambda * (end_age - start_age))
