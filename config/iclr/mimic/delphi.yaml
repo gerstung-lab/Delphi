@@ -20,7 +20,8 @@ model:
   embd_pdrop: 0.3
   bias: true
   block_size: 1024
-  age_as_position: false
+  age_as_position: true
+  time_scale: min
   ce_beta: 1.0
   dt_beta: 1.0
   zero_inflate: false

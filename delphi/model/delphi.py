@@ -14,6 +14,7 @@ from delphi.sampler import sample_competing_exponentials, truncate_top_k
 @dataclass
 class ModelConfig(config.GPT2Config):
     age_as_position: bool = True
+    time_scale: str = "day"  # day or min
     ce_beta: float = 1.0
     dt_beta: float = 1.0
     zero_inflate: bool = False
@@ -46,7 +47,9 @@ class Model(torch.nn.Module):
 
         initialize_weights(self, config=config)
         if self.config.age_as_position:
-            self.pos_emb = AgeEncoding(n_embd=config.n_embd)
+            self.pos_emb = AgeEncoding(
+                n_embd=config.n_embd, time_scale=config.time_scale
+            )
             self.gpt2.transformer.wpe.weight.data *= 0
             for param in self.gpt2.transformer.wpe.parameters():
                 param.requires_grad = False

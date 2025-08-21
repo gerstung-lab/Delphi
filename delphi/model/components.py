@@ -10,19 +10,26 @@ from delphi.multimodal import Modality, module_name
 
 class AgeEncoding(nn.Module):
 
-    def __init__(self, n_embd: int):
+    def __init__(self, n_embd: int, time_scale: str):
         super().__init__()
         div_term = torch.exp(torch.arange(0, n_embd, 2) * (-math.log(10000.0) / n_embd))
         self.register_buffer("div_term", div_term)
         self.n_embd = n_embd
         self.linear = torch.nn.Linear(n_embd, n_embd, bias=False)
 
+        if time_scale == "day":
+            self.norm_factor = 365.25
+        elif time_scale == "min":
+            self.norm_factor = 365.25 * 24 * 60
+        else:
+            raise NotImplementedError
+
     def forward(self, x: torch.Tensor):
         """
         Arguments:
             x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``
         """
-        time_years = x / 365.25
+        time_years = x / self.norm_factor
         y = torch.zeros(x.shape[0], x.shape[1], self.n_embd, device=x.device)
         y[..., 0::2] = torch.sin(time_years * self.div_term)  # * (1-self.div_term)
         y[..., 1::2] = torch.cos(time_years * self.div_term)  # * (1-self.div_term)
