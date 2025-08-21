@@ -107,8 +107,10 @@ class UKBDataset:
             self.participants,
             self.tokens,
             self.time_steps,
-            self.rng,
-        ) = load_core_data_package(cfg=cfg, memmap=memmap)
+        ) = load_core_data_package(
+            data_dir=cfg.data_dir, subject_list=cfg.subject_list, memmap=memmap
+        )
+        self.rng = np.random.default_rng(cfg.seed)
         self.tokenizer = Tokenizer(tokenizer)
 
         if cfg.no_event_interval is not None:
@@ -206,9 +208,9 @@ def load_prompt_sequences(it: Iterator, dataset: UKBDataset, start_age: float):
         yield X_prompt, T_prompt, X, T
 
 
-def load_core_data_package(cfg: UKBDataConfig, memmap: bool = False):
+def load_core_data_package(data_dir: str, subject_list: str, memmap: bool = False):
 
-    dataset_dir = Path(DELPHI_DATA_DIR) / cfg.data_dir
+    dataset_dir = Path(DELPHI_DATA_DIR) / data_dir
     tokenizer_path = dataset_dir / "tokenizer.yaml"
     with open(tokenizer_path, "r") as f:
         tokenizer = yaml.safe_load(f)
@@ -217,7 +219,7 @@ def load_core_data_package(cfg: UKBDataConfig, memmap: bool = False):
     start_pos = p2i["start_pos"].to_dict()
     seq_len = p2i["seq_len"].to_dict()
 
-    participants_path = dataset_dir / cfg.subject_list
+    participants_path = dataset_dir / subject_list
     tokens_path = dataset_dir / "data.bin"
     time_steps_path = dataset_dir / "time.bin"
     if memmap:
@@ -229,6 +231,4 @@ def load_core_data_package(cfg: UKBDataConfig, memmap: bool = False):
         tokens = np.fromfile(tokens_path, dtype=np.uint32)
         timesteps = np.fromfile(time_steps_path, dtype=np.uint32)
 
-    rng = np.random.default_rng(cfg.seed)
-
-    return tokenizer, start_pos, seq_len, participants, tokens, timesteps, rng
+    return tokenizer, start_pos, seq_len, participants, tokens, timesteps

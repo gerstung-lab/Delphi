@@ -127,8 +127,10 @@ class M4Dataset:
             self.participants,
             self.tokens,
             self.time_steps,
-            self.rng,
-        ) = load_core_data_package(cfg=cfg, memmap=memmap)
+        ) = load_core_data_package(
+            data_dir=cfg.data_dir, subject_list=cfg.subject_lst, memmap=memmap
+        )
+        self.rng = np.random.default_rng(cfg.seed)
 
         cfg.expansion_packs.sort()
         self.expansion_packs = []
