@@ -10,7 +10,7 @@ from omegaconf import OmegaConf
 from delphi import distributed
 from delphi.baselines import ethos, motor
 from delphi.data.mimic import MIMICDataset
-from delphi.data.ukb import UKBDataConfig, UKBDataset
+from delphi.data.ukb import UKBDataset
 from delphi.env import DELPHI_CKPT_DIR, DELPHI_DATA_DIR
 from delphi.experiment.config import TrainBaseConfig
 from delphi.experiment.train import BaseTrainer
@@ -41,23 +41,32 @@ def experiment(cfg: TrainConfig):
     backend = distributed.make_backend_from_args(cfg)
 
     if cfg.data["data_dir"] == "ukb_real_data":
-        train_cfg = UKBDataConfig(
-            data_dir=cfg.data["data_dir"],
-            subject_list=cfg.data["train_subject_list"],
-            seed=cfg.data["seed"],
-            no_event_interval=cfg.data["no_event_interval"],
-            block_size=cfg.data["block_size"],
-        )
-        val_cfg = copy(train_cfg)
-        val_cfg.subject_list = cfg.data["val_subject_list"]
-
+        common_args = {
+            "data_dir": cfg.data["data_dir"],
+            "seed": cfg.data["seed"],
+            "no_event_interval": cfg.data["no_event_interval"],
+            "block_size": cfg.data["block_size"],
+        }
         if cfg.model_type == "ethos":
-            time_bins = cfg.data["time_bins"]
-            train_ds = ethos.UKBDataset(train_cfg, time_bins=time_bins)
-            val_ds = ethos.UKBDataset(val_cfg, time_bins=time_bins)
+            train_ds = ethos.UKBDataset(
+                **common_args,
+                subject_list=cfg.data["train_subject_list"],
+                time_bins=cfg.data["time_bins"],
+            )
+            val_ds = ethos.UKBDataset(
+                **common_args,
+                subject_list=cfg.data["train_subject_list"],
+                time_bins=cfg.data["time_bins"],
+            )
         else:
-            train_ds = UKBDataset(train_cfg)
-            val_ds = UKBDataset(val_cfg)
+            train_ds = UKBDataset(
+                **common_args,
+                subject_list=cfg.data["train_subject_list"],
+            )
+            val_ds = UKBDataset(
+                **common_args,
+                subject_list=cfg.data["val_subject_list"],
+            )
     elif cfg.data["data_dir"] == "mimic":
         sep_time_tokens = cfg.model_type == "delphi"
         train_ds = MIMICDataset(

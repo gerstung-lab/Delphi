@@ -98,7 +98,15 @@ class UKBDataConfig:
 
 class UKBDataset:
 
-    def __init__(self, cfg: UKBDataConfig, memmap: bool = False):
+    def __init__(
+        self,
+        data_dir: str,
+        subject_list: str,
+        no_event_interval: Optional[float] = None,
+        block_size: Optional[int] = None,
+        seed: int = 42,
+        memmap: bool = False,
+    ):
 
         (
             tokenizer,
@@ -108,24 +116,24 @@ class UKBDataset:
             self.tokens,
             self.time_steps,
         ) = load_core_data_package(
-            data_dir=cfg.data_dir, subject_list=cfg.subject_list, memmap=memmap
+            data_dir=data_dir, subject_list=subject_list, memmap=memmap
         )
-        self.rng = np.random.default_rng(cfg.seed)
+        self.rng = np.random.default_rng(seed)
         self.tokenizer = Tokenizer(tokenizer)
 
-        if cfg.no_event_interval is not None:
+        if no_event_interval is not None:
             self.add_no_event = functools.partial(
                 add_no_event,
                 rng=self.rng,
-                interval=cfg.no_event_interval,
+                interval=no_event_interval,
                 token=self.tokenizer["no_event"],
             )
         else:
             self.add_no_event = lambda *args: args
 
-        if cfg.block_size is not None:
+        if block_size is not None:
             self.crop_block_size = functools.partial(
-                crop_contiguous, block_size=cfg.block_size, rng=self.rng
+                crop_contiguous, block_size=block_size, rng=self.rng
             )
         else:
             self.crop_block_size = lambda *args: args
@@ -166,11 +174,6 @@ class UKBDataset:
         T = torch.tensor(T, dtype=torch.float32)
 
         return X[:, :-1], T[:, :-1], X[:, 1:], T[:, 1:]
-
-
-def build_dataset(cfg: dict):
-
-    return UKBDataset(UKBDataConfig(**cfg))
 
 
 def load_prompt_sequences(it: Iterator, dataset: UKBDataset, start_age: float):

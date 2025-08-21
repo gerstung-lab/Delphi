@@ -6,7 +6,6 @@ import torch.nn.functional as F
 import transformers
 from transformers import DynamicCache
 
-from delphi.data.ukb import UKBDataConfig
 from delphi.data.ukb import UKBDataset as BaseUKBDataset
 from delphi.model.components import target_mask
 from delphi.model.config import GPT2Config
@@ -50,9 +49,25 @@ def create_ethos_sequence(
 
 class UKBDataset(BaseUKBDataset):
 
-    def __init__(self, cfg: UKBDataConfig, time_bins: list, memmap: bool = False):
+    def __init__(
+        self,
+        data_dir: str,
+        subject_list: str,
+        time_bins: list,
+        no_event_interval: Optional[float] = None,
+        block_size: Optional[int] = None,
+        seed: int = 42,
+        memmap: bool = False,
+    ):
 
-        super().__init__(cfg, memmap)
+        super().__init__(
+            data_dir=data_dir,
+            subject_list=subject_list,
+            no_event_interval=no_event_interval,
+            block_size=block_size,
+            seed=seed,
+            memmap=memmap,
+        )
         self.time_bins = np.array(time_bins)
 
         self.base_vocab_size = self.tokenizer.vocab_size

@@ -145,7 +145,16 @@ def calibrate_auc(
     model.to(device)
     model.eval()
 
-    ds = ukb.build_dataset(task_args.data)
+    if model.model_type == "delphi-m4":
+        raise NotImplementedError
+    else:
+        ds = ukb.UKBDataset(
+            data_dir=task_args.data["data_dir"],
+            subject_list=task_args.data["subject_list"],
+            no_event_interval=task_args.data["no_event_interval"],
+            block_size=task_args.data["block_size"],
+            seed=task_args.data["seed"],
+        )
     n_participants = len(ds) if task_args.subsample is None else task_args.subsample
     it = eval_iter(total_size=n_participants, batch_size=128)
     it = tqdm(it, total=math.ceil(n_participants / task_args.batch_size), leave=True)
