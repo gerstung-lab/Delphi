@@ -142,27 +142,27 @@ class MIMICDataset:
         return timesteps / 1e6 / 60
 
     def __getitem__(self, idx: int) -> tuple:
-        pt_ctx = self._get_patient_context(idx)
+        pt_ctx, time_of_birth = self._get_patient_context(idx)
         end = min(idx + self.timeline_size + 1, self.patient_data_end_at_idx[idx])  # type: ignore
         #! +1 because 0 is reserved for padding
         #! +1 because no-event token is 1
         tokens = self.tokens[idx:end] + 2
-        timesteps = self.times[idx:end]
-        timesteps = self.convert_time(timesteps)
-        pt_ctx_timesteps = th.full(size=pt_ctx.shape, fill_value=timesteps[0].item())
+        age = self.times[idx:end] - time_of_birth
+        age = self.convert_time(age)
+        pt_ctx_age = th.full(size=pt_ctx.shape, fill_value=age[0].item())
 
         if self.sep_time_tokens:
             is_time_token = th.isin(tokens, self.time_tokens)
             tokens = tokens[~is_time_token]
-            timesteps = timesteps[~is_time_token]
+            age = age[~is_time_token]
 
         if self.is_encoder_decoder:
             return (pt_ctx, tokens[:-1]), tokens[1:]
 
         x = th.cat((pt_ctx, tokens[:-1]))
-        x_t = th.cat((pt_ctx_timesteps, timesteps[:-1]))
+        x_t = th.cat((pt_ctx_age, age[:-1]))
         y = th.cat((pt_ctx, tokens[1:]))
-        y_t = th.cat((pt_ctx_timesteps, timesteps[1:]))
+        y_t = th.cat((pt_ctx_age, age[1:]))
         y[: self.context_size] = 0
 
         return x, x_t, y, y_t
@@ -194,7 +194,8 @@ class MIMICDataset:
         static_tokens = []
         for token in self.static_data[patient_id].values():
             if token["code"][0] == ST.DOB:
-                age = timedelta(microseconds=time_at_start - token["time"][0])
+                time_of_birth = token["time"][0]
+                age = timedelta(microseconds=time_at_start - time_of_birth)
                 static_tokens.extend(self._age_to_tokens(age.days / 365.25))
             elif len(token["code"]) == 1:
                 static_tokens.append(token["code"][0])
@@ -208,7 +209,7 @@ class MIMICDataset:
                     else token["code"][time_idx]
                 )
                 static_tokens.append(code)
-        return th.tensor(self.vocab.encode(static_tokens))
+        return th.tensor(self.vocab.encode(static_tokens)), time_of_birth
 
     def _age_to_tokens(self, age_years: float) -> tuple[str, str]:
         age_scaled = age_years * self._num_quantiles**2 / 100
