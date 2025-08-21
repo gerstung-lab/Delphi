@@ -10,14 +10,12 @@ from delphi.multimodal import Modality, module_name
 
 class AgeEncoding(nn.Module):
 
-    def __init__(self, config):
+    def __init__(self, n_embd: int):
         super().__init__()
-        div_term = torch.exp(
-            torch.arange(0, config.n_embd, 2) * (-math.log(10000.0) / config.n_embd)
-        )
+        div_term = torch.exp(torch.arange(0, n_embd, 2) * (-math.log(10000.0) / n_embd))
         self.register_buffer("div_term", div_term)
-        self.n_embd = config.n_embd
-        self.linear = torch.nn.Linear(config.n_embd, config.n_embd, bias=False)
+        self.n_embd = n_embd
+        self.linear = torch.nn.Linear(n_embd, n_embd, bias=False)
 
     def forward(self, x: torch.Tensor):
         """
@@ -77,7 +75,7 @@ class DelphiEmbedding(nn.Module):
         self.token_embedding = nn.Embedding(
             config.vocab_size, config.n_embd, padding_idx=0
         )
-        self.age_encoding = AgeEncoding(config)
+        self.age_encoding = AgeEncoding(n_embd=config.n_embd)
         self.token_drop = nn.Dropout(config.token_dropout)
 
         self.biomarker_embed = nn.ModuleDict()

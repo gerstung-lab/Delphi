@@ -230,7 +230,7 @@ class Model(torch.nn.Module):
     def __init__(self, config: ModelConfig):
         super().__init__()
         self.config = config
-        self.age_embed = AgeEncoding(config=config)
+        self.age_embed = AgeEncoding(n_embd=config.n_embd)
 
         gpt2_config = transformers.GPT2Config(
             vocab_size=config.vocab_size,

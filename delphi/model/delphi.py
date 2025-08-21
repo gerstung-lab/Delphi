@@ -46,7 +46,7 @@ class Model(torch.nn.Module):
 
         initialize_weights(self, config=config)
         if self.config.age_as_position:
-            self.pos_emb = AgeEncoding(config=config)
+            self.pos_emb = AgeEncoding(n_embd=config.n_embd)
             self.gpt2.transformer.wpe.weight.data *= 0
             for param in self.gpt2.transformer.wpe.parameters():
                 param.requires_grad = False
