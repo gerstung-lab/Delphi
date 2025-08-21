@@ -3,7 +3,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from utils import build_expansion_pack, multimodal_dir
+
+from data.gather_biomarker.utils import build_expansion_pack, multimodal_dir
 
 idir = Path(multimodal_dir) / "primary_care"
 

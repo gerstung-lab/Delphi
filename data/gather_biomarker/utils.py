@@ -8,7 +8,7 @@ import yaml
 from delphi import DAYS_PER_YEAR
 from delphi.env import DELPHI_DATA_DIR
 
-multimodal_dir = Path(DELPHI_DATA_DIR) / "multimodal"
+multimodal_dir = Path(DELPHI_DATA_DIR) / "ukb"
 tab_dir = multimodal_dir / "tab"
 ukb_tab = {}
 for file in tab_dir.rglob("*"):
@@ -33,7 +33,7 @@ def all_ukb_participants():
     return participants
 
 
-def load_fid(fid: str) -> pd.DataFrame:
+def load_fid(fid: str | int) -> pd.DataFrame:
 
     return pd.read_csv(ukb_tab[str(fid)], delimiter="\t", index_col="f.eid")
 
