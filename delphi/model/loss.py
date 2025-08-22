@@ -1,9 +1,8 @@
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-from delphi.model.components import ZeroInflateProjector
-from delphi.model.config import DelphiConfig
 
 
 class CrossEntropyHead(nn.Module):
@@ -20,20 +19,24 @@ class CrossEntropyHead(nn.Module):
 
 
 class CompetingExpHead(nn.Module):
-    def __init__(self, config: DelphiConfig):
+    def __init__(self, n_embd: int, zero_inflate: bool, pi_head: Optional[str] = None):
         super().__init__()
-        self.config = config
 
-        if config.zero_inflate:
-            assert config.vocab_size is not None
-            if config.zero_inflate_projector == "linear":
-                self.pi_head = nn.Linear(config.vocab_size, 1, bias=False)
-            elif config.zero_inflate_projector == "mlp":
-                self.pi_head = ZeroInflateProjector(config)
-            else:
-                raise ValueError(
-                    f"Unknown pi_projector: {config.zero_inflate_projector}"
+        self.zero_inflate = zero_inflate
+        if zero_inflate:
+            assert pi_head is not None
+            if pi_head == "linear":
+                self.pi_head = nn.Linear(n_embd, 1, bias=False)
+            elif pi_head == "mlp":
+                self.pi_head = nn.ModuleList(
+                    [
+                        nn.Linear(n_embd, 32, bias=False),
+                        nn.ReLU(),
+                        nn.Linear(32, 1, bias=False),
+                    ]
                 )
+            else:
+                raise ValueError(f"Unknown pi_head: {pi_head}")
 
     def forward(
         self,
@@ -46,7 +49,7 @@ class CompetingExpHead(nn.Module):
         ldt = -torch.log(delta_t + 1.0)
         exp_log_likelihood = lse - torch.exp(lse - ldt)
 
-        if self.config.zero_inflate:
+        if self.zero_inflate:
             pi = self.pi_head(logits).squeeze()
             zero_case = -(F.softplus(-pi + lse) - F.softplus(-pi))
             nonzero_case = -(exp_log_likelihood - pi - F.softplus(-pi))

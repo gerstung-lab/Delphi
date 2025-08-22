@@ -43,7 +43,11 @@ class Model(torch.nn.Module):
         self.token_embed = self.gpt2.transformer.wte
 
         self.ce_head = CrossEntropyHead(config)
-        self.dt_head = CompetingExpHead(config)  # type: ignore
+        self.dt_head = CompetingExpHead(
+            n_embd=config.n_embd,
+            zero_inflate=config.zero_inflate,
+            pi_head=config.zero_inflate_projector,
+        )
 
         initialize_weights(self, config=config)
         if self.config.age_as_position:

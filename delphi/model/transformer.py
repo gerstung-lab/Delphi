@@ -167,7 +167,11 @@ class Delphi(torch.nn.Module):
         self.transformer.embed.token_embedding.weight = self.lm_head.weight
 
         self.ce_head = CrossEntropyHead(config)
-        self.dt_head = CompetingExpHead(config)
+        self.dt_head = CompetingExpHead(
+            n_embd=config.n_embd,
+            zero_inflate=config.zero_inflate,
+            pi_head=config.zero_inflate_projector,
+        )
 
     def forward(
         self,

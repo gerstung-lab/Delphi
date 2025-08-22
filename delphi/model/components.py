@@ -138,25 +138,6 @@ class DelphiEmbedding(nn.Module):
         return x
 
 
-class ZeroInflateProjector(nn.Module):
-    def __init__(self, config: DelphiConfig) -> None:
-        super().__init__()
-        assert config.vocab_size is not None
-        self.linears = nn.ModuleList(
-            [
-                nn.Linear(config.vocab_size, 32, bias=False),
-                nn.ReLU(),
-                nn.Linear(32, 1, bias=False),
-            ]
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # ModuleList can act as an iterable, or be indexed using ints
-        for i, l in enumerate(self.linears):
-            x = l(x)
-        return x
-
-
 def causal_attention_mask(
     pad: torch.Tensor,
     mask_ties: bool = False,
