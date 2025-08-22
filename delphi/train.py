@@ -14,11 +14,11 @@ from delphi.baselines import ethos, motor
 from delphi.config import dataclass_from_dict
 from delphi.data.utils import move_batch_to_device, train_iter
 from delphi.env import DELPHI_CKPT_DIR
-from delphi.log import TrainLogger
+from delphi.log import TrainLogConfig, TrainLogger
 from delphi.model import delphi
 from delphi.model.config import GPT2Config
 from delphi.model.transformer import Delphi, DelphiConfig
-from delphi.optim import configure_optimizers
+from delphi.optim import OptimConfig, configure_optimizers
 from delphi.tokenizer import load_tokenizer_from_yaml
 
 
