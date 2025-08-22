@@ -257,22 +257,22 @@ class InferenceDataset(MIMICDataset, abc.ABC):
         if idx - data_start_idx + 1 > self.timeline_size:
             data_start_idx = idx + 1 - self.timeline_size
 
-        pt_ctx = self._get_patient_context(data_start_idx)
+        pt_ctx, time_of_birth = self._get_patient_context(data_start_idx)
         #! shift by 2
         tokens = self.tokens[data_start_idx : idx + 1] + 2
-        timesteps = self.times[data_start_idx : idx + 1]
-        timesteps = self.convert_time(timesteps)
-        pt_ctx_timesteps = th.full(size=pt_ctx.shape, fill_value=timesteps[0].item())
+        age = self.times[data_start_idx : idx + 1] - time_of_birth
+        age = self.convert_time(age)
+        pt_ctx_timesteps = th.full(size=pt_ctx.shape, fill_value=age[0].item())
 
         if self.sep_time_tokens:
             is_time_token = th.isin(tokens, self.time_tokens)
             tokens = tokens[~is_time_token]
-            timesteps = timesteps[~is_time_token]
+            age = age[~is_time_token]
 
         if self.is_encoder_decoder:
             return (pt_ctx, tokens)
 
-        return th.cat((pt_ctx, tokens)), th.cat((pt_ctx_timesteps, timesteps))
+        return th.cat((pt_ctx, tokens)), th.cat((pt_ctx_timesteps, age))
 
     def get_batch(self, batch_idx: Iterable, include_time: bool = True):
 
