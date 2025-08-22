@@ -12,13 +12,12 @@ from delphi.baselines import ethos, motor
 from delphi.data.mimic import MIMICDataset
 from delphi.data.ukb import UKBDataset
 from delphi.env import DELPHI_CKPT_DIR, DELPHI_DATA_DIR
-from delphi.experiment.config import TrainBaseConfig
-from delphi.experiment.train import BaseTrainer
 from delphi.log import TrainLogConfig
 from delphi.model import delphi
 from delphi.model.config import GPT2Config, parse_token_list
 from delphi.optim import OptimConfig
 from delphi.tokenizer import Tokenizer, update_tokenizer
+from delphi.train import BaseTrainer, TrainBaseConfig
 
 
 @dataclass

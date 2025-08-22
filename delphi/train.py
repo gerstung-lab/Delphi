@@ -1,9 +1,9 @@
 import os
 from collections import defaultdict
 from contextlib import nullcontext
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 import torch
 import torch.distributed as dist
@@ -14,13 +14,44 @@ from delphi.baselines import ethos, motor
 from delphi.config import dataclass_from_dict
 from delphi.data.utils import move_batch_to_device, train_iter
 from delphi.env import DELPHI_CKPT_DIR
-from delphi.experiment.config import TrainBaseConfig
 from delphi.log import TrainLogger
 from delphi.model import delphi
 from delphi.model.config import GPT2Config
 from delphi.model.transformer import Delphi, DelphiConfig
 from delphi.optim import configure_optimizers
 from delphi.tokenizer import load_tokenizer_from_yaml
+
+
+@dataclass
+class TrainBaseConfig:
+    ckpt_dir: str = "."
+    eval_interval: int = 2000
+    eval_iters: int = 200
+    eval_only: bool = False  # if True, script exits right after the first eval
+    init_from: str = "scratch"
+
+    seed: int = 42
+    gradient_accumulation_steps: int = 1  # used to simulate larger batch sizes
+    batch_size: int = 128
+    # if gradient_accumulation_steps > 1, this is the micro-batch size
+
+    # system
+    device: str = "cpu"
+    # examples: 'cpu', 'cuda', 'cuda:0', 'cuda:1' etc., or try 'mps' on macbooks
+    dtype: str = "float32"
+    # 'bfloat16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
+    compile: bool = False  # use PyTorch 2.0 to compile the model to be faster
+
+    distributed_backend: Optional[str] = None
+
+    train_data: dict = field(default_factory=dict)
+    val_data: dict = field(default_factory=dict)
+
+    model: dict = field(default_factory=dict)
+
+    optim: OptimConfig = field(default_factory=OptimConfig)
+
+    log: TrainLogConfig = field(default_factory=TrainLogConfig)
 
 
 class BaseTrainer:

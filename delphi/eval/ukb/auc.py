@@ -15,8 +15,8 @@ from delphi.data import ukb
 from delphi.data.transform import sort_by_time
 from delphi.data.utils import eval_iter, move_batch_to_device
 from delphi.eval import eval_task
-from delphi.experiment.train import load_ckpt
 from delphi.tokenizer import FEMALE, MALE
+from delphi.train import load_ckpt
 
 
 @dataclass
