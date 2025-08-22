@@ -1,6 +1,6 @@
 import json
 import math
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -10,8 +10,8 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 from delphi import DAYS_PER_YEAR
-from delphi.data import ukb
-from delphi.data.utils import duplicate_participants, eval_iter, move_batch_to_device
+from delphi.data.ukb import UKBDataConfig, UKBDataset
+from delphi.data.utils import duplicate_participants, eval_iter
 from delphi.eval import eval_task
 from delphi.eval.ukb.auc import mann_whitney_auc
 from delphi.experiment.train import load_ckpt
@@ -21,12 +21,10 @@ from delphi.sampler import generate
 
 @dataclass
 class ForecastArgs:
-    data: dict = field(default_factory=dict)
+    data: UKBDataConfig = field(default_factory=UKBDataConfig)
     n_samples: int = 30
     start_age_years: int = 50
     end_age_years: float = 80
-    resolution_years: int = 1
-    n_calibration_bins: int = 5
     subsample: Optional[int] = None
     batch_size: int = 128
     device: str = "cuda"
@@ -36,21 +34,22 @@ class ForecastArgs:
     temperature: float = 1.0
 
 
-def calibrate(rates: np.ndarray, occur: np.ndarray, n_bins: int):
+def calibrate(rates: np.ndarray, occur: np.ndarray, bins: list):
 
     n = occur.shape[0]
-    q = np.linspace(0, 1, n_bins + 1)
-    rate_bins = np.quantile(rates, q=q).tolist()
+    n_bins = len(bins) - 1
 
     rate_per_bin, incidence_per_bin, n_per_bin = list(), list(), list()
     for i in range(n_bins):
-        in_bin = np.logical_and(rates >= rate_bins[i], rates < rate_bins[i + 1])
-        rate_per_bin.append(float(np.nanmean(rates[in_bin])))
-        incidence_per_bin.append(float(occur[in_bin].sum() / n))
-        n_per_bin.append(float(in_bin.sum()))
+        in_bin = np.logical_and(rates >= bins[i], rates < bins[i + 1])
+        mean_rate = float(np.nanmean(rates[in_bin]))
+        rate_per_bin.append(float(f"{mean_rate:.3e}"))
+        incidence = float(occur[in_bin].sum() / n)
+        incidence_per_bin.append(float(f"{incidence:.3e}"))
+        n_per_bin.append(int(in_bin.sum()))
 
     return {
-        "rate_bins": rate_bins,
+        "rate_bins": [float(f"{rate:.3e}") for rate in bins],
         "rate_per_bin": rate_per_bin,
         "incidence_per_bin": incidence_per_bin,
         "n_per_bin": n_per_bin,
@@ -72,17 +71,13 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
     if model.model_type == "delphi-m4":
         raise NotImplementedError
     else:
-        ds = ukb.build_dataset(task_args.data)
-        prompt_loader = ukb.load_prompt_sequences
+        ds = UKBDataset(**asdict(task_args.data))
 
     start_age = task_args.start_age_years * DAYS_PER_YEAR
     end_age = task_args.end_age_years * DAYS_PER_YEAR
     n_participants = len(ds) if task_args.subsample is None else task_args.subsample
     it = eval_iter(total_size=n_participants, batch_size=n_persons_per_batch)
-    data_loader = prompt_loader(it=it, dataset=ds, start_age=start_age)
-    data_loader = tqdm(
-        data_loader, total=math.ceil(n_participants / n_persons_per_batch), leave=True
-    )
+    it = tqdm(it, total=math.ceil(n_participants / n_persons_per_batch), leave=True)
 
     forecast_risks = list()
     sampling_risks = list()
@@ -90,10 +85,14 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
     labels = list()
 
     with torch.no_grad():
-        for batch_input in data_loader:
+        for batch_idx in it:
 
-            batch_input = move_batch_to_device(batch_input, device=device)
-            prompt_idx, prompt_age, target_idx, target_age = batch_input
+            prompt_idx, prompt_age = ds.get_prompt_batch(batch_idx, start_age=start_age)
+            _, _, target_idx, target_age = ds.get_batch(batch_idx)
+
+            prompt_idx, prompt_age = prompt_idx.to(device), prompt_age.to(device)
+            target_idx, target_age = target_idx.to(device), target_age.to(device)
+
             n_sample = task_args.n_samples
             n_person = prompt_idx.shape[0]
 
@@ -141,7 +140,9 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
                     end=end_age_until_occur,
                 )
                 integrated_lambda = integrated_lambda.reshape(n_person, n_sample, -1)
-                batch_risks = 1 - torch.exp(-integrated_lambda * (end_age - start_age))
+                batch_risks = 1 - torch.exp(
+                    -integrated_lambda * (end_age_until_occur - start_age)
+                )
                 batch_risks = torch.nanmean(batch_risks, dim=-2, keepdim=False)
                 forecast_risks.append(batch_risks.detach().cpu().numpy())
 
@@ -186,6 +187,8 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
     sampling_risks = np.vstack(sampling_risks)
     baseline_risks = np.vstack(baseline_risks)
 
+    bins = [1e-4, 1e-3, 1e-2, 1e-1, 0.25, 0.5, 1.0]
+
     logbook = {}
     for i in range(2, labels.shape[1]):
 
@@ -205,7 +208,7 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
                 "calibrate": calibrate(
                     forecast_risks[~exclude, i],
                     disease_labels[~exclude],
-                    n_bins=task_args.n_calibration_bins,
+                    bins=bins,
                 ),
             },
             "sampling_auc": {
@@ -215,7 +218,7 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
                 "calibrate": calibrate(
                     sampling_risks[~exclude, i],
                     disease_labels[~exclude],
-                    n_bins=task_args.n_calibration_bins,
+                    bins=bins,
                 ),
             },
             "baseline_auc": {
@@ -225,7 +228,7 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
                 "calibrate": calibrate(
                     baseline_risks[~exclude, i],
                     disease_labels[~exclude],
-                    n_bins=task_args.n_calibration_bins,
+                    bins=bins,
                 ),
             },
         }
