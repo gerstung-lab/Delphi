@@ -6,4 +6,5 @@ from .mimic_icu import (
     ICUAdmissionDataset,
     ICUMortalityDataset,
     ICUReadmissionDataset,
+    SofaPredictionDataset,
 )
