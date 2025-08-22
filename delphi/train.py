@@ -11,7 +11,6 @@ from omegaconf import OmegaConf
 
 from delphi import distributed
 from delphi.baselines import ethos, motor
-from delphi.config import dataclass_from_dict
 from delphi.data.utils import move_batch_to_device, train_iter
 from delphi.env import DELPHI_CKPT_DIR
 from delphi.log import TrainLogConfig, TrainLogger
@@ -260,9 +259,7 @@ def load_ckpt(ckpt_path):
     else:
         raise ValueError
 
-    model_cfg = dataclass_from_dict(
-        model_cfg_cls, ckpt_dict["model_args"], strict=False
-    )
+    model_cfg = model_cfg_cls(**ckpt_dict["model_args"])
     model = model_cls(model_cfg)  # type: ignore
     model.load_state_dict(ckpt_dict["model"])
     model = model.eval()
