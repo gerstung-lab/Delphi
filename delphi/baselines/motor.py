@@ -6,9 +6,8 @@ import torch
 import torch.nn as nn
 import transformers
 
-from delphi.model.components import AgeEncoding, target_mask
+from delphi.model.components import AgeEncoding, CrossEntropyHead, target_mask
 from delphi.model.config import GPT2Config
-from delphi.model.loss import CrossEntropyHead
 from delphi.model.transformer import (
     causal_attention_mask,
     count_params,

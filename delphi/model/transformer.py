@@ -6,13 +6,14 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 from delphi.model.components import (
+    CompetingExpHead,
+    CrossEntropyHead,
     DelphiEmbedding,
     causal_attention_mask,
     target_mask,
     ties_adjusted_delta_t,
 )
 from delphi.model.config import DelphiConfig, GPT2Config
-from delphi.model.loss import CompetingExpHead, CrossEntropyHead
 from delphi.sampler import sample_competing_exponentials, truncate_top_k
 from delphi.tokenizer import load_tokenizer_from_yaml
 

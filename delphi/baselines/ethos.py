@@ -7,9 +7,8 @@ import transformers
 from transformers import DynamicCache
 
 from delphi.data.ukb import UKBDataset as BaseUKBDataset
-from delphi.model.components import target_mask
+from delphi.model.components import CrossEntropyHead, target_mask
 from delphi.model.config import GPT2Config
-from delphi.model.loss import CrossEntropyHead
 from delphi.model.transformer import initialize_weights
 from delphi.sampler import truncate_top_k
 from delphi.tokenizer import Tokenizer, update_tokenizer

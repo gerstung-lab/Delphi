@@ -5,8 +5,12 @@ import torch
 from transformers import DynamicCache, GPT2Config, GPT2LMHeadModel
 
 from delphi.model import config
-from delphi.model.components import AgeEncoding, target_mask
-from delphi.model.loss import CompetingExpHead, CrossEntropyHead
+from delphi.model.components import (
+    AgeEncoding,
+    CompetingExpHead,
+    CrossEntropyHead,
+    target_mask,
+)
 from delphi.model.transformer import initialize_weights
 from delphi.sampler import sample_competing_exponentials, truncate_top_k
 
