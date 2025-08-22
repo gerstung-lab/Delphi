@@ -14,9 +14,9 @@ from delphi.data.ukb import UKBDataConfig, UKBDataset
 from delphi.data.utils import duplicate_participants, eval_iter
 from delphi.eval import eval_task
 from delphi.eval.ukb.auc import mann_whitney_auc
-from delphi.experiment.train import load_ckpt
 from delphi.model.delphi import integrate_risk
 from delphi.sampler import generate
+from delphi.train import load_ckpt
 
 
 @dataclass
@@ -140,9 +140,7 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
                     end=end_age_until_occur,
                 )
                 integrated_lambda = integrated_lambda.reshape(n_person, n_sample, -1)
-                batch_risks = 1 - torch.exp(
-                    -integrated_lambda * (end_age_until_occur - start_age)
-                )
+                batch_risks = 1 - torch.exp(-integrated_lambda * (end_age - start_age))
                 batch_risks = torch.nanmean(batch_risks, dim=-2, keepdim=False)
                 forecast_risks.append(batch_risks.detach().cpu().numpy())
 
@@ -180,6 +178,11 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
 
             occur_during = occur_during.float()
             occur_during[occur_bef_or_aft.bool()] = torch.nan
+
+            last_age = target_age.max(dim=1).values
+            not_enough_data = last_age < end_age
+            occur_during[not_enough_data] = torch.nan
+
             labels.append(occur_during.detach().cpu().numpy())
 
     labels = np.vstack(labels)
@@ -187,7 +190,7 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
     sampling_risks = np.vstack(sampling_risks)
     baseline_risks = np.vstack(baseline_risks)
 
-    bins = [1e-4, 1e-3, 1e-2, 1e-1, 0.25, 0.5, 1.0]
+    bins = [0, 1e-4, 1e-3, 1e-2, 1e-1, 0.25, 0.5, 1.0]
 
     logbook = {}
     for i in range(2, labels.shape[1]):
@@ -234,4 +237,4 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
         }
 
     with open(Path(ckpt) / f"{task_name}.json", "w") as f:
-        json.dump(logbook, f, indent=4)
+        json.dump(logbook, f, indent=2, separators=(",", ": "))
