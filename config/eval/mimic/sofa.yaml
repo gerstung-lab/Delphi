@@ -1,0 +1,4 @@
+task_name: mimic-sofa
+task_type: mimic-sofa
+task_args:
+  batch_size: 150

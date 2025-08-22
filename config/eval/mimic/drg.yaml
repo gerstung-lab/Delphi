@@ -1,0 +1,4 @@
+task_name: mimic-drg
+task_type: mimic-drg
+task_args:
+  batch_size: 150
