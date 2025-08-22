@@ -1,7 +1,7 @@
 import functools
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator, Optional
+from typing import Iterable, Optional
 
 import numpy as np
 import pandas as pd
@@ -175,40 +175,29 @@ class UKBDataset:
 
         return X[:, :-1], T[:, :-1], X[:, 1:], T[:, 1:]
 
+    def get_prompt_batch(self, batch_idx: Iterable, start_age: float):
 
-def load_prompt_sequences(it: Iterator, dataset: UKBDataset, start_age: float):
-
-    for batch_idx in it:
-        x_prompt_lst, t_prompt_lst = list(), list()
-        x_lst, t_lst = list(), list()
-
+        X = []
+        T = []
         for idx in batch_idx:
-            x, t = dataset[idx]
-            x_lst.append(x.copy())
-            t_lst.append(t.copy())
-
+            x, t = self[idx]
             too_old = t > start_age
             x[too_old] = 0
             t[too_old] = -1e4
-            no_event_token = dataset.tokenizer["no_event"]
+            no_event_token = self.tokenizer["no_event"]
             x = np.pad(x, (0, 1), "constant", constant_values=no_event_token)
             t = np.pad(t, (0, 1), "constant", constant_values=start_age)
-            x_prompt_lst.append(x)
-            t_prompt_lst.append(t)
+            X.append(x)
+            T.append(t)
 
-        X = collate_batch_data(x_lst)
-        T = collate_batch_time(t_lst)
+        X = collate_batch_data(X)
+        T = collate_batch_time(T)
         T, X = sort_by_time(T, X)
+
         X = torch.tensor(X, dtype=torch.long)
         T = torch.tensor(T, dtype=torch.float32)
 
-        X_prompt = collate_batch_data(x_prompt_lst)
-        T_prompt = collate_batch_time(t_prompt_lst)
-        T_prompt, X_prompt = sort_by_time(T_prompt, X_prompt)
-        X_prompt = torch.tensor(X_prompt, dtype=torch.long)
-        T_prompt = torch.tensor(T_prompt, dtype=torch.float32)
-
-        yield X_prompt, T_prompt, X, T
+        return X, T
 
 
 def load_core_data_package(data_dir: str, subject_list: str, memmap: bool = False):
