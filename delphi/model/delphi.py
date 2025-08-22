@@ -131,17 +131,12 @@ class Model(torch.nn.Module):
 
         position_ids = self.position_ids(idx=idx)
         inputs_embeds = self.inputs_embeds(idx=idx, age=age)
-        age_next = age
         past_key_values = None
         attention_mask = (idx > 0).long()
 
-        batch_size = idx.shape[0]
         has_occurred = torch.zeros(
-            (batch_size, self.config.vocab_size), device=idx.device
+            (idx.shape[0], self.config.vocab_size), device=idx.device
         ).int()
-        has_occurred = has_occurred.scatter_(
-            dim=1, index=idx, src=torch.ones_like(idx).int()
-        )
 
         while True:
             output_dict = self.gpt2(
@@ -159,18 +154,21 @@ class Model(torch.nn.Module):
             if top_k is not None:
                 logits = truncate_top_k(logits, top_k)
             if no_repeat:
+                has_occurred = has_occurred.scatter_(
+                    dim=1, index=idx, src=torch.ones_like(idx).int()
+                )
                 has_occurred[:, 1] = 0
                 logits[has_occurred.bool()] = -torch.inf
-            idx_next, time_til_next = sample_competing_exponentials(logits)
-            age_next = age_next[..., [-1]] + time_til_next
+            idx, time_til_next = sample_competing_exponentials(logits)
+            age = age[..., [-1]] + time_til_next
 
-            yield idx_next, age_next, raw_logits
+            yield idx, age, raw_logits
 
             past_key_values = output_dict.past_key_values
             if isinstance(past_key_values, tuple):
                 past_key_values = DynamicCache.from_legacy_cache(past_key_values)
             position_ids = position_ids[:, [-1]] + 1
-            inputs_embeds = self.inputs_embeds(idx=idx_next, age=age_next)
+            inputs_embeds = self.inputs_embeds(idx=idx, age=age)
             attention_mask = torch.cat(
                 (
                     attention_mask,
@@ -179,9 +177,6 @@ class Model(torch.nn.Module):
                     ),
                 ),
                 dim=1,
-            )
-            has_occurred = has_occurred.scatter_(
-                dim=1, index=idx_next, src=torch.ones_like(idx_next).int()
             )
 
 
