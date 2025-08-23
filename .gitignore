@@ -8,7 +8,8 @@ wandb
 common_commands.txt
 data/ukb_real_data
 data/mimic
-data/multimodal
+data/ukb
+data/horizon_call
 data/.gitattributes
 .ipynb_checkpoints
 logs
