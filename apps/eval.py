@@ -12,6 +12,7 @@ task_type_to_args_type = {
     "ukb-forecast": ukb.ForecastArgs,
     "mimic-forecast": mimic.ForecastArgs,
     "mimic-drg": mimic.DRGClassificationArgs,
+    "mimic-sofa": mimic.SofaArgs,
 }
 
 
