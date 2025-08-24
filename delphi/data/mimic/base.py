@@ -158,10 +158,9 @@ class MIMICDataset:
             idx = th.randint(
                 start, end - self.timeline_size + 1, size=(1,), generator=self.rng
             ).item()
-            end = idx + self.timeline_size
+            end = idx + self.timeline_size + 1
 
-        pt_ctx, time_of_birth = self._get_patient_context(idx)
-        end = min(idx + self.timeline_size + 1, self.patient_data_end_at_idx[idx])  # type: ignore
+        pt_ctx, time_of_birth = self._get_patient_context(start)
         #! +1 because 0 is reserved for padding
         #! +1 because no-event token is 1
         tokens = self.tokens[idx:end] + 2
