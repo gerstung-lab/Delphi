@@ -53,6 +53,7 @@ class MIMICDataset:
         is_encoder_decoder: bool = False,
         sep_time_tokens: bool = False,
         timestep: str = "since_start",  # "since_start", "age"
+        seed: int = 42,
     ):
         input_dir = Path(input_dir)
         if not input_dir.is_dir():
@@ -79,6 +80,8 @@ class MIMICDataset:
 
         self.sep_time_tokens = sep_time_tokens
         self.timestep = timestep
+
+        self.rng = th.Generator().manual_seed(seed)
 
     @property
     def tokenizer(self):
@@ -139,13 +142,24 @@ class MIMICDataset:
         )
 
     def __len__(self) -> int:
-        return len(self.tokens) - self.timeline_size
+        return len(self.patient_ids)
 
     @staticmethod
     def convert_time(timesteps: th.Tensor):
         return timesteps / 1e6 / 60
 
     def __getitem__(self, idx: int) -> tuple:
+
+        pid = self.patient_ids[idx]
+        start = self.patient_offset_at_idx[idx]
+        end = self.patient_data_end_at_idx[idx]
+
+        if end - start > self.timeline_size:
+            idx = th.randint(
+                start, end - self.timeline_size + 1, size=(1,), generator=self.rng
+            ).item()
+            end = idx + self.timeline_size
+
         pt_ctx, time_of_birth = self._get_patient_context(idx)
         end = min(idx + self.timeline_size + 1, self.patient_data_end_at_idx[idx])  # type: ignore
         #! +1 because 0 is reserved for padding
