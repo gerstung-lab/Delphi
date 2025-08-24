@@ -1,5 +1,6 @@
 import json
 import math
+from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -35,7 +36,6 @@ class ForecastArgs:
 
 
 def calibrate(rates: np.ndarray, occur: np.ndarray, bins: list):
-
     n = occur.shape[0]
     n_bins = len(bins) - 1
 
@@ -49,16 +49,28 @@ def calibrate(rates: np.ndarray, occur: np.ndarray, bins: list):
         n_per_bin.append(int(in_bin.sum()))
 
     return {
-        "rate_bins": [float(f"{rate:.3e}") for rate in bins],
         "rate_per_bin": rate_per_bin,
         "incidence_per_bin": incidence_per_bin,
         "n_per_bin": n_per_bin,
     }
 
 
+def cleanse_nan(obj):
+    """Recursively handle NaN values in nested data structures"""
+    if isinstance(obj, float) and math.isnan(obj):
+        return None
+    elif isinstance(obj, dict):
+        return {k: cleanse_nan(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [cleanse_nan(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(cleanse_nan(item) for item in obj)
+    else:
+        return obj
+
+
 @eval_task.register
 def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
-
     assert task_args.batch_size >= task_args.n_samples
     assert task_args.batch_size % task_args.n_samples == 0
     n_persons_per_batch = int(task_args.batch_size / task_args.n_samples)
@@ -83,15 +95,17 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
     sampling_risks = list()
     baseline_risks = list()
     labels = list()
+    is_gender = {"male": list(), "female": list()}
 
     with torch.no_grad():
         for batch_idx in it:
-
             prompt_idx, prompt_age = ds.get_prompt_batch(batch_idx, start_age=start_age)
             _, _, target_idx, target_age = ds.get_batch(batch_idx)
 
             prompt_idx, prompt_age = prompt_idx.to(device), prompt_age.to(device)
             target_idx, target_age = target_idx.to(device), target_age.to(device)
+            is_gender["male"].append((prompt_idx == tokenizer["male"]).any(dim=1))
+            is_gender["female"].append((prompt_idx == tokenizer["female"]).any(dim=1))
 
             n_sample = task_args.n_samples
             n_person = prompt_idx.shape[0]
@@ -190,51 +204,58 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
     sampling_risks = np.vstack(sampling_risks)
     baseline_risks = np.vstack(baseline_risks)
 
-    bins = [0, 1e-4, 1e-3, 1e-2, 1e-1, 0.25, 0.5, 1.0]
-
-    logbook = {}
+    bins = [0, 1e-4, 1e-3, 1e-2, 1e-1, 1.0]
+    for gender in ["male", "female"]:
+        is_gender[gender] = torch.cat(is_gender[gender], dim=0).detach().cpu().numpy()
+    is_gender["either"] = np.ones_like(is_gender["male"]).astype(bool)  # type: ignore
+    logbook = defaultdict(dict)
+    logbook["rate_bins"] = [float(f"{rate:.3e}") for rate in bins]  # type: ignore
     for i in range(2, labels.shape[1]):
+        for gender in ["male", "female", "either"]:
+            disease_labels = labels[:, i]
+            include = (~np.isnan(disease_labels)) & is_gender[gender]
+            is_ctl = (disease_labels == 0) & is_gender[gender]
+            is_dis = (disease_labels == 1) & is_gender[gender]
 
-        disease_labels = labels[:, i]
-        exclude = np.isnan(disease_labels)
-        is_ctl = disease_labels == 0
-        is_dis = disease_labels == 1
+            disease = tokenizer.decode(i)
+            logbook[disease][gender] = {
+                "n_ctl": int(is_ctl.sum()),
+                "n_dis": int(is_dis.sum()),
+                "forecast": {
+                    "auc": mann_whitney_auc(
+                        x1=forecast_risks[is_ctl, i], x2=forecast_risks[is_dis, i]
+                    ),
+                    **calibrate(
+                        forecast_risks[include, i],
+                        disease_labels[include],
+                        bins=bins,
+                    ),
+                    "mean": float(f"{np.nanmean(forecast_risks[include, i]):.3e}"),
+                },
+                "sampling": {
+                    "auc": mann_whitney_auc(
+                        x1=sampling_risks[is_ctl, i], x2=sampling_risks[is_dis, i]
+                    ),
+                    **calibrate(
+                        sampling_risks[include, i],
+                        disease_labels[include],
+                        bins=bins,
+                    ),
+                    "mean": float(f"{np.nanmean(sampling_risks[include, i]):.3e}"),
+                },
+                "baseline": {
+                    "auc": mann_whitney_auc(
+                        x1=baseline_risks[is_ctl, i], x2=baseline_risks[is_dis, i]
+                    ),
+                    **calibrate(
+                        baseline_risks[include, i],
+                        disease_labels[include],
+                        bins=bins,
+                    ),
+                    "mean": float(f"{np.nanmean(baseline_risks[include, i]):.3e}"),
+                },
+            }
 
-        disease = tokenizer.decode(i)
-        logbook[disease] = {
-            "n_ctl": int(is_ctl.sum()),
-            "n_dis": int(is_dis.sum()),
-            "forecast": {
-                "auc": mann_whitney_auc(
-                    x1=forecast_risks[is_ctl, i], x2=forecast_risks[is_dis, i]
-                ),
-                "calibrate": calibrate(
-                    forecast_risks[~exclude, i],
-                    disease_labels[~exclude],
-                    bins=bins,
-                ),
-            },
-            "sampling_auc": {
-                "auc": mann_whitney_auc(
-                    x1=sampling_risks[is_ctl, i], x2=sampling_risks[is_dis, i]
-                ),
-                "calibrate": calibrate(
-                    sampling_risks[~exclude, i],
-                    disease_labels[~exclude],
-                    bins=bins,
-                ),
-            },
-            "baseline_auc": {
-                "auc": mann_whitney_auc(
-                    x1=baseline_risks[is_ctl, i], x2=baseline_risks[is_dis, i]
-                ),
-                "calibrate": calibrate(
-                    baseline_risks[~exclude, i],
-                    disease_labels[~exclude],
-                    bins=bins,
-                ),
-            },
-        }
-
+    logbook = cleanse_nan(logbook)
     with open(Path(ckpt) / f"{task_name}.json", "w") as f:
         json.dump(logbook, f, indent=2, separators=(",", ": "))
