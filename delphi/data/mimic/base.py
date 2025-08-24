@@ -150,25 +150,26 @@ class MIMICDataset:
 
     def __getitem__(self, idx: int) -> tuple:
 
-        pid = self.patient_ids[idx]
-        start = self.patient_offset_at_idx[idx]
-        end = self.patient_data_end_at_idx[idx]
+        start = self.patient_offsets[idx]
+        end = self.patient_data_end_at_idx[start]
 
-        if end - start > self.timeline_size:
-            idx = th.randint(
-                start, end - self.timeline_size + 1, size=(1,), generator=self.rng
+        block_size = self.timeline_size + 1
+        if end - start > block_size:
+            start = th.randint(
+                start, end - block_size, size=(1,), generator=self.rng
             ).item()
-            end = idx + self.timeline_size + 1
+            end = start + block_size
 
         pt_ctx, time_of_birth = self._get_patient_context(start)
         #! +1 because 0 is reserved for padding
         #! +1 because no-event token is 1
-        tokens = self.tokens[idx:end] + 2
+        tokens = self.tokens[start:end] + 2
 
+        timesteps = self.times[start:end].clone()
         if self.timestep == "since_start":
-            timesteps = self.times[idx:end] - self.times[idx]
+            timesteps -= self.times[start]
         elif self.timestep == "age":
-            timesteps = self.times[idx:end] - time_of_birth
+            timesteps -= time_of_birth
         else:
             raise ValueError(f"unknown timestep: {self.timestep}")
         timesteps = self.convert_time(timesteps)
