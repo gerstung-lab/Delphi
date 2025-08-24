@@ -45,12 +45,14 @@ def collate_batch_time(batch_time: list[th.Tensor]) -> th.Tensor:
 
 
 class MIMICDataset:
+
     def __init__(
         self,
         input_dir: str | Path,
         n_positions: int = 2048,
         is_encoder_decoder: bool = False,
         sep_time_tokens: bool = False,
+        timestep: str = "since_start",  # "since_start", "age"
     ):
         input_dir = Path(input_dir)
         if not input_dir.is_dir():
@@ -74,7 +76,9 @@ class MIMICDataset:
             self.interval_estimates = json.load(f)
         time_intervals = list(self.interval_estimates["min"].keys())
         self.time_tokens = th.tensor(self.vocab.encode(time_intervals))
+
         self.sep_time_tokens = sep_time_tokens
+        self.timestep = timestep
 
     @property
     def tokenizer(self):
@@ -147,22 +151,29 @@ class MIMICDataset:
         #! +1 because 0 is reserved for padding
         #! +1 because no-event token is 1
         tokens = self.tokens[idx:end] + 2
-        age = self.times[idx:end] - time_of_birth
-        age = self.convert_time(age)
-        pt_ctx_age = th.full(size=pt_ctx.shape, fill_value=age[0].item())
+
+        if self.timestep == "since_start":
+            timesteps = self.times[idx:end] - self.times[idx]
+        elif self.timestep == "age":
+            timesteps = self.times[idx:end] - time_of_birth
+        else:
+            raise ValueError(f"unknown timestep: {self.timestep}")
+        timesteps = self.convert_time(timesteps)
+
+        pt_ctx_timesteps = th.full(size=pt_ctx.shape, fill_value=timesteps[0].item())
 
         if self.sep_time_tokens:
             is_time_token = th.isin(tokens, self.time_tokens)
             tokens = tokens[~is_time_token]
-            age = age[~is_time_token]
+            timesteps = timesteps[~is_time_token]
 
         if self.is_encoder_decoder:
             return (pt_ctx, tokens[:-1]), tokens[1:]
 
         x = th.cat((pt_ctx, tokens[:-1]))
-        x_t = th.cat((pt_ctx_age, age[:-1]))
+        x_t = th.cat((pt_ctx_timesteps, timesteps[:-1]))
         y = th.cat((pt_ctx, tokens[1:]))
-        y_t = th.cat((pt_ctx_age, age[1:]))
+        y_t = th.cat((pt_ctx_timesteps, timesteps[1:]))
         y[: self.context_size] = 0
 
         return x, x_t, y, y_t
@@ -261,7 +272,6 @@ class InferenceDataset(MIMICDataset, abc.ABC):
         #! shift by 2
         tokens = self.tokens[data_start_idx : idx + 1] + 2
         age = self.times[data_start_idx : idx + 1] - time_of_birth
-        age = self.convert_time(age)
         pt_ctx_timesteps = th.full(size=pt_ctx.shape, fill_value=age[0].item())
 
         if self.sep_time_tokens:

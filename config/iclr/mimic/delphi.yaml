@@ -12,6 +12,7 @@ data:
   data_dir: mimic
   seed: 42
   block_size: ${model.block_size}
+  timestep: since_start
 model:
   vocab_size: 4544
   n_layer: 10
@@ -21,11 +22,12 @@ model:
   bias: true
   block_size: 1024
   age_as_position: true
-  time_scale: min
   ce_beta: 1.0
   dt_beta: 1.0
   zero_inflate: false
   zero_inflate_projector: linear
+  time_scale: day
+  interval: min
 log:
   wandb_log: true
   wandb_project: ${ckpt_dir}

@@ -12,6 +12,7 @@ data:
   data_dir: mimic
   seed: 42
   block_size: ${model.block_size}
+  timestep: since_start
 model:
   vocab_size: 4544
   n_layer: 10
