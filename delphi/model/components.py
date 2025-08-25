@@ -157,12 +157,10 @@ class CompetingExpHead(nn.Module):
             if pi_head == "linear":
                 self.pi_head = nn.Linear(n_input, 1, bias=False)
             elif pi_head == "mlp":
-                self.pi_head = nn.ModuleList(
-                    [
-                        nn.Linear(n_input, 32, bias=False),
-                        nn.ReLU(),
-                        nn.Linear(32, 1, bias=False),
-                    ]
+                self.pi_head = nn.Sequential(
+                    nn.Linear(n_input, 32, bias=False),
+                    nn.ReLU(),
+                    nn.Linear(32, 1, bias=False),
                 )
             else:
                 raise ValueError(f"Unknown pi_head: {pi_head}")
