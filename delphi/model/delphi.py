@@ -51,7 +51,7 @@ class Model(torch.nn.Module):
 
         self.ce_head = CrossEntropyHead(config)
         self.dt_head = CompetingExpHead(
-            n_embd=config.n_embd,
+            n_input=config.vocab_size,
             zero_inflate=config.zero_inflate,
             pi_head=config.zero_inflate_projector,
         )
