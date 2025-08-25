@@ -230,9 +230,7 @@ def integrate_risk(
     start = torch.full_like(end, fill_value=start)
     t_clamped = age.clamp(start, end)
     dt = t_clamped.diff(1, dim=1)
-    dt_norm = dt / ((dt.sum(1) + 1e-6) * (end.squeeze(1) - start.squeeze(1))).unsqueeze(
-        1
-    )
+    dt_norm = dt / (dt.sum(1, keepdim=True) + 1e-6) * (end - start)
 
     risk = log_lambda.exp() * dt_norm
     risk = risk.sum(-2)

@@ -141,20 +141,30 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
             )
 
             if model.model_type == "delphi" or model.model_type == "ethos":
-                end_age_until_occur = torch.full(
-                    (gen_logits.shape[0], gen_logits.shape[-1]), fill_value=end_age
+                pos = torch.arange(gen_idx.shape[1], device=gen_logits.device)
+                occur_pos = torch.full(
+                    (gen_logits.shape[0], gen_logits.shape[-1]),
+                    fill_value=gen_idx.shape[1] - 1,
                 ).to(gen_logits.device)
-                end_age_until_occur = end_age_until_occur.scatter_(
-                    src=gen_age, index=gen_idx, dim=1
+                occur_pos = occur_pos.scatter_(
+                    src=pos.broadcast_to(gen_idx.shape),
+                    index=gen_idx,
+                    dim=1,
+                ).unsqueeze(1)
+                occur_logits = torch.gather(input=gen_logits, index=occur_pos, dim=1)
+                gen_logits = torch.where(
+                    condition=pos.view(1, -1, 1) >= occur_pos,
+                    input=occur_logits,
+                    other=gen_logits,
                 )
-                integrated_lambda = integrate_risk(
+                integrated_risks = integrate_risk(
                     log_lambda=gen_logits,
                     age=pred_age,
                     start=start_age,
-                    end=end_age_until_occur,
+                    end=end_age,
                 )
-                integrated_lambda = integrated_lambda.reshape(n_person, n_sample, -1)
-                batch_risks = 1 - torch.exp(-integrated_lambda * (end_age - start_age))
+                integrated_risks = integrated_risks.reshape(n_person, n_sample, -1)
+                batch_risks = 1 - torch.exp(-integrated_risks)
                 batch_risks = torch.nanmean(batch_risks, dim=-2, keepdim=False)
                 forecast_risks.append(batch_risks.detach().cpu().numpy())
 
