@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -74,4 +75,13 @@ def drg_classification(
     y_prob = torch.cat(y_prob, dim=0).detach().cpu().numpy()
     y_prob = y_prob[:, drg_tokens]
     y_true = np.array(y_true)
-    print(top_k_accuracy_score(y_true=y_true, y_score=y_prob, k=5, labels=drg_tokens))
+
+    logbook = {}
+    for k in [1, 2, 3, 5]:
+        acc = top_k_accuracy_score(
+            y_true=y_true, y_score=y_prob, k=k, labels=drg_tokens
+        )
+        logbook[f"top_{k}_accuracy"] = acc
+    logbook_path = Path(ckpt) / "drg.json"
+    with open(logbook_path, "w") as f:
+        json.dump(logbook, f, indent=4)
