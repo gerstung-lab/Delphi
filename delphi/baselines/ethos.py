@@ -14,10 +14,6 @@ from delphi.sampler import truncate_top_k
 from delphi.tokenizer import Tokenizer, update_tokenizer
 
 
-def is_strictly_ascending(arr: list):
-    return np.all(arr[1:] > arr[:-1])
-
-
 def create_ethos_sequence(
     x: np.ndarray, t: np.ndarray, offset: int, time_bins: np.ndarray
 ):
@@ -101,12 +97,6 @@ class UKBDataset(BaseUKBDataset):
 
         return x_pid, t_pid
 
-    def get_batch(self, batch_idx: Iterable):
-
-        X0, _, X1, _ = super().get_batch(batch_idx)
-
-        return X0, X1
-
 
 class Model(torch.nn.Module):
     model_type = "ethos"
@@ -128,9 +118,11 @@ class Model(torch.nn.Module):
         self.ce_head = CrossEntropyHead(config)
         initialize_weights(self, config=config)
 
-    def set_time(self, token_to_time: torch.Tensor):
-
-        assert token_to_time.numel() == self.config.vocab_size
+    def set_time(self, time_tokens: list, time_intervals: list):
+        time_tokens = torch.tensor(time_tokens)
+        time_intervals = torch.tensor(time_intervals)
+        token_to_time = torch.zeros((self.config.vocab_size,))
+        token_to_time[time_tokens] = time_intervals
         self.register_buffer("token_to_time", token_to_time)
 
     @staticmethod
@@ -147,7 +139,9 @@ class Model(torch.nn.Module):
     def forward(
         self,
         idx: torch.Tensor,
+        age: torch.Tensor,
         targets: Optional[torch.Tensor] = None,
+        targets_age: Optional[torch.Tensor] = None,
     ):
 
         _, seq_len = idx.shape
