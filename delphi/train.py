@@ -43,11 +43,6 @@ class TrainBaseConfig:
 
     distributed_backend: Optional[str] = None
 
-    train_data: dict = field(default_factory=dict)
-    val_data: dict = field(default_factory=dict)
-
-    model: dict = field(default_factory=dict)
-
     optim: OptimConfig = field(default_factory=OptimConfig)
 
     log: TrainLogConfig = field(default_factory=TrainLogConfig)
