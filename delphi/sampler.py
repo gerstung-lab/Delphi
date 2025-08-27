@@ -111,6 +111,7 @@ def generate(
     top_k: Optional[int] = None,
     temperature: float = 1.0,
     stop_at_block_size: bool = True,
+    token_budget: Optional[int] = None,
 ):
     if termination_tokens is None:
         termination_tokens = torch.Tensor(
@@ -122,6 +123,7 @@ def generate(
         idx=idx, age=age, no_repeat=no_repeat, top_k=top_k, temperature=temperature
     )
 
+    budget = 0
     n, l = idx.shape
     has_termin_token = torch.zeros((n, 1), device=idx.device).bool()
     out_of_time = torch.zeros_like(has_termin_token).bool()
@@ -141,6 +143,8 @@ def generate(
             break
         if l >= model.config.block_size and stop_at_block_size:
             break
+        if (token_budget is not None) and (budget >= token_budget):
+            break
 
         next_idx, next_age, next_logits = next(next_token_generator)
         gen_idx_lst.append(next_idx)
@@ -152,6 +156,7 @@ def generate(
         )
         out_of_time = torch.logical_or(out_of_time, next_age >= max_age)
         l += 1
+        budget += 1
 
     idx = torch.cat(gen_idx_lst, dim=1)
     age = torch.cat(gen_age_lst, dim=1)
