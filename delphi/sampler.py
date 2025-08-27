@@ -114,16 +114,16 @@ def generate(
     stop_at_block_size: bool = True,
     token_budget: Optional[int] = None,
 ):
+
+    device = idx.device
     if termination_tokens is None:
-        termination_tokens = torch.Tensor(
-            [model.config.vocab_size], device=model.device
-        )
+        termination_tokens = torch.Tensor([model.config.vocab_size], device=device)
 
     torch.manual_seed(seed)
 
     budget = 0
     n, l = idx.shape
-    has_termin_token = torch.zeros((n, 1), device=idx.device).bool()
+    has_termin_token = torch.zeros(n, device=device).bool()
     out_of_time = torch.zeros_like(has_termin_token).bool()
     start_age = age[:, [-1]]
     if max_age is None:
@@ -138,11 +138,13 @@ def generate(
     next_idx = idx
     next_age = age
 
-    has_occurred = torch.zeros((n, model.config.vocab_size), device=idx.device).int()
+    has_occurred = torch.zeros((n, model.config.vocab_size), device=device).int()
+    has_occurred = has_occurred.scatter_(dim=1, index=idx, value=1)
 
     gen_idx_lst = []
     gen_age_lst = []
     gen_logits_lst = []
+    active_pos = torch.arange(n).to(device)
     while True:
         terminated = torch.logical_or(has_termin_token, out_of_time)
         if terminated.all():
@@ -151,6 +153,26 @@ def generate(
             break
         if (token_budget is not None) and (budget >= token_budget):
             break
+
+        active_pos = active_pos[~terminated]
+        next_idx = next_idx[~terminated]
+        next_age = next_age[~terminated]
+        position_ids = position_ids[~terminated]
+        attention_mask = attention_mask[~terminated]
+        has_occurred = has_occurred[~terminated]
+        if isinstance(past_key_values, DynamicCache):
+            kv_cache = DynamicCache()
+            for i in range(len(past_key_values.layers)):
+                if (
+                    past_key_values.layers[i].keys is not None
+                    and past_key_values.layers[i].values is not None
+                ):
+                    kv_cache.update(
+                        past_key_values.layers[i].keys[~terminated],
+                        past_key_values.layers[i].values[~terminated],
+                        i,
+                    )
+            past_key_values = kv_cache
 
         logits, _, hf_output_dict = model(
             idx=next_idx,
@@ -167,7 +189,7 @@ def generate(
         if top_k is not None:
             next_logits = truncate_top_k(next_logits, top_k)
         if no_repeat:
-            has_occurred = has_occurred.scatter_(dim=1, index=idx, value=1)
+            has_occurred[:, next_idx[:, -1]] = 1
             has_occurred[:, 1] = 0
             if hasattr(model, "time_tokens"):
                 has_occurred[:, model.time_tokens] = 0
@@ -179,18 +201,24 @@ def generate(
             past_key_values = DynamicCache.from_legacy_cache(past_key_values)
         position_ids = position_ids[:, [-1]] + 1
         attention_mask = torch.cat(
-            (attention_mask, torch.ones((n, 1), device=attention_mask.device)),
+            (attention_mask, torch.ones((attention_mask.shape[0], 1), device=device)),
             dim=1,
         )
 
-        gen_idx_lst.append(next_idx)
-        gen_age_lst.append(next_age)
-        gen_logits_lst.append(next_raw_logits)
+        batch_next_idx = torch.zeros((n, 1), device=device).long()
+        batch_next_age = torch.zeros_like(batch_next_idx).float()
+        batch_next_logits = torch.zeros(
+            (n, 1, model.config.vocab_size), device=device
+        ).float()
+        batch_next_idx[active_pos, :] = next_idx
+        batch_next_age[active_pos, :] = next_age
+        batch_next_logits[active_pos, ...] = next_raw_logits
+        gen_idx_lst.append(batch_next_idx)
+        gen_age_lst.append(batch_next_age)
+        gen_logits_lst.append(batch_next_logits)
 
-        has_termin_token = torch.logical_or(
-            has_termin_token, torch.isin(next_idx, termination_tokens)
-        )
-        out_of_time = torch.logical_or(out_of_time, next_age >= max_age)
+        has_termin_token = torch.isin(next_idx, termination_tokens).squeeze(1)
+        out_of_time = (next_age >= max_age).squeeze(1)
         l += 1
         budget += 1
 
