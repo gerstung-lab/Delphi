@@ -207,10 +207,7 @@ class MIMICDataset:
         Y = collate_batch_data(Y)
         Y_t = collate_batch_time(Y_t)
 
-        if self.sep_time_tokens:
-            return X, X_t, Y, Y_t
-        else:
-            return X, Y
+        return X, X_t, Y, Y_t
 
     def _get_patient_context(self, idx: int) -> th.Tensor:
         patient_id = self.patient_id_at_idx[idx].item()
