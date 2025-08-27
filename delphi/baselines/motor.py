@@ -38,6 +38,23 @@ def estimate_pieces(
     return pieces
 
 
+def homogenize_piecewise_lambda(
+    log_lambda: torch.Tensor, piece_edges: torch.Tensor, horizon: float
+) -> torch.Tensor:
+
+    right_edges = piece_edges[:-1]
+    too_far = right_edges > horizon
+    piece_edges = piece_edges.clamp(None, horizon)
+    piece_interval = torch.diff(piece_edges)
+    piece_interval[too_far] = 0
+    weighted_avg_lamba = (
+        torch.exp(log_lambda) * piece_interval.view(1, 1, -1, 1) / piece_interval.sum()
+    ).sum(dim=-2, keepdim=False)
+    eps = 1e-6
+
+    return torch.log(weighted_avg_lamba + eps)
+
+
 @dataclass
 class ModelConfig(GPT2Config):
     ce_beta: float = 0.0
