@@ -206,7 +206,7 @@ def generate(
         )
 
         batch_next_idx = torch.zeros((n, 1), device=device).long()
-        batch_next_age = torch.zeros_like(batch_next_idx).float()
+        batch_next_age = torch.full_like(batch_next_idx, fill_value=-1e4).float()
         batch_next_logits = torch.zeros(
             (n, 1, model.config.vocab_size), device=device
         ).float()
@@ -225,15 +225,5 @@ def generate(
     idx = torch.cat(gen_idx_lst, dim=1)
     age = torch.cat(gen_age_lst, dim=1)
     logits = torch.cat(gen_logits_lst, dim=1)
-
-    exceed_max_age = age > max_age
-    is_termination_token = torch.isin(idx, termination_tokens)
-    beyond_termination = (
-        torch.cumsum(torch.cumsum(is_termination_token.int(), 1), 1) > 1
-    )
-
-    pad = exceed_max_age | beyond_termination
-    idx[pad] = 0
-    age[pad] = -10000
 
     return idx, age, logits
