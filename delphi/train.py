@@ -144,7 +144,7 @@ class BaseTrainer:
 
         batch_data = move_batch_to_device(args=batch_data, device=self.device)
         with self.ctx:
-            _, loss = self.model(*batch_data)
+            _, loss, _ = self.model(*batch_data)
 
         return loss
 
