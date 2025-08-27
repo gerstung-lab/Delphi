@@ -123,6 +123,7 @@ class Model(torch.nn.Module):
         time_intervals = torch.tensor(time_intervals)
         token_to_time = torch.zeros((self.config.vocab_size,))
         token_to_time[time_tokens] = time_intervals
+        self.register_buffer("time_tokens", time_tokens)
         self.register_buffer("token_to_time", token_to_time)
 
     @staticmethod
@@ -142,16 +143,25 @@ class Model(torch.nn.Module):
         age: torch.Tensor,
         targets: Optional[torch.Tensor] = None,
         targets_age: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        use_cache: bool = False,
+        past_key_values: Optional[DynamicCache | tuple] = None,
     ):
 
         _, seq_len = idx.shape
         assert seq_len <= self.config.block_size
 
-        pos = self.position_ids(idx)
-
-        attn_mask = idx > 0
+        if position_ids is None:
+            position_ids = self.position_ids(idx)
+        if attention_mask is None:
+            attention_mask = (idx > 0).long()
         output_dict = self.gpt2(
-            input_ids=idx, attention_mask=attn_mask, position_ids=pos
+            input_ids=idx,
+            position_ids=position_ids,
+            attention_mask=attention_mask,
+            use_cache=use_cache,
+            past_key_values=past_key_values,
         )
         logits = output_dict["logits"]
 
@@ -163,81 +173,11 @@ class Model(torch.nn.Module):
         else:
             loss = None
 
-        return logits, loss
+        return logits, loss, output_dict
 
-    @torch.no_grad
-    def next_token(
-        self,
-        idx: torch.Tensor,
-        age: torch.Tensor,
-        temperature: float = 1.0,
-        top_k: Optional[int] = None,
-        no_repeat: bool = False,
-    ):
-
+    def sample_next(self, logits: torch.Tensor):
         assert hasattr(self, "token_to_time")
-        input_ids = idx
-        age_next = age
-        all_input_ids = input_ids.clone()
-        position_ids = self.position_ids(idx=idx)
-        past_key_values = None
-        attention_mask = (idx > 0).long()
-
-        batch_size = idx.shape[0]
-        has_occurred = torch.zeros(
-            (batch_size, self.config.vocab_size), device=idx.device
-        ).int()
-        has_occurred = has_occurred.scatter_(
-            dim=1, index=idx, src=torch.ones_like(idx).int()
-        )
-
-        while True:
-            output_dict = self.gpt2(
-                input_ids=input_ids,
-                position_ids=position_ids,
-                attention_mask=attention_mask,
-                use_cache=True,
-                past_key_values=past_key_values,
-            )
-            logits = output_dict.logits
-            raw_logits = logits[:, [-1], :].clone()
-            logits[..., 0] = -torch.inf
-            logits = logits[:, -1, :] / temperature
-            if top_k is not None:
-                logits = truncate_top_k(logits, top_k)
-            if no_repeat:
-                has_occurred[:, 1] = 0
-                logits[has_occurred.bool()] = -torch.inf
-
-            probs = F.softmax(logits, dim=-1)
-            idx_next = torch.multinomial(probs, num_samples=1)
-            age_next = age_next[:, [-1]] + self.token_to_time[idx_next]
-
-            yield idx_next, age_next, raw_logits
-
-            all_input_ids = torch.cat((all_input_ids, idx_next), dim=1)
-            has_occurred = has_occurred.scatter_(
-                dim=1, index=idx_next, src=torch.ones_like(idx_next).int()
-            )
-
-            past_key_values = output_dict.past_key_values
-            if isinstance(past_key_values, tuple):
-                past_key_values = DynamicCache.from_legacy_cache(past_key_values)
-
-            if past_key_values.get_seq_length() >= self.config.block_size:
-                past_key_values = None
-                input_ids = all_input_ids[:, -self.config.block_size :]
-                position_ids = self.position_ids(idx=input_ids)
-                attention_mask = (input_ids > 0).long()
-            else:
-                position_ids = position_ids[:, [-1]] + 1
-                input_ids = idx_next
-                attention_mask = torch.cat(
-                    (
-                        attention_mask,
-                        torch.ones(
-                            (attention_mask.shape[0], 1), device=attention_mask.device
-                        ),
-                    ),
-                    dim=1,
-                )
+        probs = F.softmax(logits, dim=-1)
+        idx_next = torch.multinomial(probs, num_samples=1)
+        time_tile_next = self.token_to_time[idx_next]
+        return idx_next, time_tile_next

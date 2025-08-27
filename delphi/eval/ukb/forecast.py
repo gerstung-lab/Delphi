@@ -79,9 +79,6 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
 
     device = task_args.device
     model, _, tokenizer = load_ckpt(ckpt)
-    model.to(device)
-    model.eval()
-
     if model.model_type == "ethos":
         time_tokens = list()
         time_intervals = list()
@@ -91,6 +88,10 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
                 _, start, end = token_name.split("-")
                 time_intervals.append(float(start))
         model.set_time(time_tokens=time_tokens, time_intervals=time_intervals)
+    model.to(device)
+    model.eval()
+
+    if model.model_type == "ethos":
         ds = ethos.UKBDataset(**asdict(task_args.data), time_bins=time_intervals)
     elif model.model_type == "delphi-m4":
         raise NotImplementedError
@@ -123,7 +124,7 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
             prompt_idx, prompt_age = duplicate_participants(
                 [prompt_idx, prompt_age], n_repeat=task_args.n_samples
             )
-            prompt_logits, _ = model(prompt_idx, prompt_age)
+            prompt_logits, _, _ = model(prompt_idx, prompt_age)
 
             gen_idx, gen_age, gen_logits = generate(
                 model=model,

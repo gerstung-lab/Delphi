@@ -99,16 +99,27 @@ class Model(torch.nn.Module):
         age: torch.Tensor,
         targets: Optional[torch.Tensor] = None,
         targets_age: Optional[torch.Tensor] = None,
+        position_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        use_cache: bool = False,
+        past_key_values: Optional[DynamicCache | tuple] = None,
     ):
 
         _, seq_len = idx.shape
         assert seq_len <= self.config.block_size
 
-        pos = self.position_ids(idx=idx)
         x = self.inputs_embeds(idx=idx, age=age)
+        if position_ids is None:
+            position_ids = self.position_ids(idx)
+        if attention_mask is None:
+            attention_mask = (idx > 0).long()
 
         output_dict = self.gpt2(
-            inputs_embeds=x, position_ids=pos, attention_mask=(idx > 0).long()
+            inputs_embeds=x,
+            position_ids=position_ids,
+            attention_mask=attention_mask,
+            use_cache=use_cache,
+            past_key_values=past_key_values,
         )
 
         logits = output_dict.logits
@@ -130,67 +141,11 @@ class Model(torch.nn.Module):
         else:
             loss = None
 
-        return logits, loss
+        return logits, loss, output_dict
 
-    @torch.no_grad()
-    def next_token(
-        self,
-        idx: torch.Tensor,
-        age: torch.Tensor,
-        temperature: float = 1.0,
-        top_k: Optional[int] = None,
-        no_repeat: bool = True,
-    ):
-
-        position_ids = self.position_ids(idx=idx)
-        inputs_embeds = self.inputs_embeds(idx=idx, age=age)
-        past_key_values = None
-        attention_mask = (idx > 0).long()
-
-        has_occurred = torch.zeros(
-            (idx.shape[0], self.config.vocab_size), device=idx.device
-        ).int()
-
-        while True:
-            output_dict = self.gpt2(
-                inputs_embeds=inputs_embeds,
-                position_ids=position_ids,
-                attention_mask=attention_mask,
-                use_cache=True,
-                past_key_values=past_key_values,
-            )
-
-            logits = output_dict.logits
-            raw_logits = logits[:, [-1], :].clone()
-            logits[..., 0] = -torch.inf
-            logits = logits[:, -1, :] / temperature
-            if top_k is not None:
-                logits = truncate_top_k(logits, top_k)
-            if no_repeat:
-                has_occurred = has_occurred.scatter_(
-                    dim=1, index=idx, src=torch.ones_like(idx).int()
-                )
-                has_occurred[:, 1] = 0
-                logits[has_occurred.bool()] = -torch.inf
-            idx, time_til_next = sample_competing_exponentials(logits)
-            age = age[..., [-1]] + time_til_next
-
-            yield idx, age, raw_logits
-
-            past_key_values = output_dict.past_key_values
-            if isinstance(past_key_values, tuple):
-                past_key_values = DynamicCache.from_legacy_cache(past_key_values)
-            position_ids = position_ids[:, [-1]] + 1
-            inputs_embeds = self.inputs_embeds(idx=idx, age=age)
-            attention_mask = torch.cat(
-                (
-                    attention_mask,
-                    torch.ones(
-                        (attention_mask.shape[0], 1), device=attention_mask.device
-                    ),
-                ),
-                dim=1,
-            )
+    def sample_next(self, logits: torch.Tensor):
+        idx, time_til_next = sample_competing_exponentials(logits)
+        return idx, time_til_next
 
 
 def integrate_risk(

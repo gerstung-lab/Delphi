@@ -1,6 +1,7 @@
 from typing import Optional
 
 import torch
+from transformers import DynamicCache
 
 from delphi import DAYS_PER_YEAR
 
@@ -119,9 +120,6 @@ def generate(
         )
 
     torch.manual_seed(seed)
-    next_token_generator = model.next_token(
-        idx=idx, age=age, no_repeat=no_repeat, top_k=top_k, temperature=temperature
-    )
 
     budget = 0
     n, l = idx.shape
@@ -133,6 +131,14 @@ def generate(
         max_age = start_age + max_time  # type: ignore
     else:
         assert max_time is None
+
+    position_ids = model.position_ids(idx=idx)
+    attention_mask = (idx > 0).long()
+    past_key_values = None
+    next_idx = idx
+    next_age = age
+
+    has_occurred = torch.zeros((n, model.config.vocab_size), device=idx.device).int()
 
     gen_idx_lst = []
     gen_age_lst = []
@@ -146,10 +152,40 @@ def generate(
         if (token_budget is not None) and (budget >= token_budget):
             break
 
-        next_idx, next_age, next_logits = next(next_token_generator)
+        logits, _, hf_output_dict = model(
+            idx=next_idx,
+            age=next_age,
+            position_ids=position_ids,
+            attention_mask=attention_mask,
+            use_cache=True,
+            past_key_values=past_key_values,
+        )
+        next_raw_logits = logits[:, [-1], :].clone()
+        next_logits = logits[:, -1, :]
+        next_logits[..., 0] = -torch.inf
+        next_logits /= temperature
+        if top_k is not None:
+            next_logits = truncate_top_k(next_logits, top_k)
+        if no_repeat:
+            has_occurred = has_occurred.scatter_(dim=1, index=idx, value=1)
+            has_occurred[:, 1] = 0
+            if hasattr(model, "time_tokens"):
+                has_occurred[:, model.time_tokens] = 0
+            next_logits[has_occurred.bool()] = -torch.inf
+        next_idx, time_til_next = model.sample_next(next_logits)
+        next_age = next_age[..., [-1]] + time_til_next
+        past_key_values = hf_output_dict.past_key_values
+        if isinstance(past_key_values, tuple):
+            past_key_values = DynamicCache.from_legacy_cache(past_key_values)
+        position_ids = position_ids[:, [-1]] + 1
+        attention_mask = torch.cat(
+            (attention_mask, torch.ones((n, 1), device=attention_mask.device)),
+            dim=1,
+        )
+
         gen_idx_lst.append(next_idx)
         gen_age_lst.append(next_age)
-        gen_logits_lst.append(next_logits)
+        gen_logits_lst.append(next_raw_logits)
 
         has_termin_token = torch.logical_or(
             has_termin_token, torch.isin(next_idx, termination_tokens)
