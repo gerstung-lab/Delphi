@@ -13,7 +13,6 @@ from delphi.model.transformer import (
     count_params,
     initialize_weights,
 )
-from delphi.sampler import homogenize_piecewise_lambda, sample_piecewise_exponentials
 
 
 def estimate_pieces(
@@ -339,19 +338,3 @@ class Model(torch.nn.Module):
         )
 
         return log_lambda, idx, age
-
-    @torch.no_grad()
-    def next_token(self, idx: torch.Tensor, age: torch.Tensor, **kwargs):
-        log_lambda, _ = self.forward(idx, age)
-        idx_next, time_til_next = sample_piecewise_exponentials(
-            log_lambda.squeeze(1),
-            self.motor_head.time_bins,
-            self.motor_head.task_tokens,
-        )
-
-        age_next = age[..., [-1]] + time_til_next
-
-        idx = torch.cat((idx, idx_next), dim=1)
-        age = torch.cat((age, age_next), dim=1)
-
-        return idx, age
