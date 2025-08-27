@@ -9,6 +9,7 @@ common_commands.txt
 data/ukb_real_data
 data/mimic
 data/ukb
+data/ehrshot
 data/horizon_call
 data/.gitattributes
 .ipynb_checkpoints
@@ -17,3 +18,4 @@ submit/dkfz/exp/*.yaml
 notebook
 .env
 .envrc
+pyrightconfig.json
