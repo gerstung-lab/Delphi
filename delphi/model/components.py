@@ -180,8 +180,12 @@ class CompetingExpHead(nn.Module):
 
         if self.zero_inflate:
             pi = self.pi_head(logits).squeeze()
-            pi = F.sigmoid(pi)
-            loss_dt = -exp_log_likelihood * (1 - pi) + pi * (delta_t == 0).float()
+            zero_case_nll = -(F.softplus(-pi + lse) - F.softplus(-pi))
+            nonzero_case_nll = -(exp_log_likelihood - pi - F.softplus(-pi))
+            loss_dt = (
+                zero_case_nll * (delta_t == 0).float()
+                + nonzero_case_nll * (delta_t > 0).float()
+            )
         else:
             loss_dt = -exp_log_likelihood
 
