@@ -72,16 +72,12 @@ def generate(
     n, l = idx.shape
     has_termin_token = torch.zeros(n, device=device).bool()
     out_of_time = torch.zeros_like(has_termin_token).bool()
-    start_age = age[:, [-1]]
-    if max_age is None:
-        assert max_time is not None
-        max_age = start_age + max_time  # type: ignore
-    else:
-        assert max_time is None
 
     position_ids = model.position_ids(idx=idx)
     attention_mask = (idx > 0).long()
     past_key_values = None
+    prompt_idx = idx.clone()
+    prompt_age = age.clone()
     next_idx = idx
     next_age = age
 
@@ -92,34 +88,8 @@ def generate(
     gen_age_lst = []
     gen_logits_lst = []
     active_pos = torch.arange(n).to(device)
+    time_elapsed = torch.zeros((n,)).to(device)
     while True:
-        terminated = torch.logical_or(has_termin_token, out_of_time)
-        if terminated.all():
-            break
-        if l >= model.config.block_size and stop_at_block_size:
-            break
-        if (token_budget is not None) and (budget >= token_budget):
-            break
-
-        active_pos = active_pos[~terminated]
-        next_idx = next_idx[~terminated]
-        next_age = next_age[~terminated]
-        position_ids = position_ids[~terminated]
-        attention_mask = attention_mask[~terminated]
-        has_occurred = has_occurred[~terminated]
-        if isinstance(past_key_values, DynamicCache):
-            kv_cache = DynamicCache()
-            for i in range(len(past_key_values.layers)):
-                if (
-                    past_key_values.layers[i].keys is not None
-                    and past_key_values.layers[i].values is not None
-                ):
-                    kv_cache.update(
-                        past_key_values.layers[i].keys[~terminated],
-                        past_key_values.layers[i].values[~terminated],
-                        i,
-                    )
-            past_key_values = kv_cache
 
         logits, _, hf_output_dict = model(
             idx=next_idx,
@@ -143,14 +113,7 @@ def generate(
             next_logits[has_occurred.bool()] = -torch.inf
         next_idx, time_til_next = model.sample_next(next_logits)
         next_age = next_age[..., [-1]] + time_til_next
-        past_key_values = hf_output_dict.past_key_values
-        if isinstance(past_key_values, tuple):
-            past_key_values = DynamicCache.from_legacy_cache(past_key_values)
-        position_ids = position_ids[:, [-1]] + 1
-        attention_mask = torch.cat(
-            (attention_mask, torch.ones((attention_mask.shape[0], 1), device=device)),
-            dim=1,
-        )
+        time_elapsed += time_til_next.squeeze(-1)
 
         batch_next_idx = torch.zeros((n, 1), device=device).long()
         batch_next_age = torch.full_like(batch_next_idx, fill_value=-1e4).float()
@@ -164,10 +127,65 @@ def generate(
         gen_age_lst.append(batch_next_age)
         gen_logits_lst.append(batch_next_logits)
 
+        out_of_time = torch.zeros_like(time_elapsed).bool()
+        if max_time is not None:
+            out_of_time = torch.logical_or(out_of_time, time_elapsed >= max_time)
+        if max_age is not None:
+            out_of_time = torch.logical_or(
+                out_of_time, (next_age >= max_age).squeeze(1)
+            )
         has_termin_token = torch.isin(next_idx, termination_tokens).squeeze(1)
-        out_of_time = (next_age >= max_age).squeeze(1)
+        terminated = torch.logical_or(has_termin_token, out_of_time)
+        if terminated.all():
+            break
         l += 1
+        if l >= model.config.block_size and stop_at_block_size:
+            break
         budget += 1
+        if (token_budget is not None) and (budget >= token_budget):
+            break
+
+        if l >= model.config.block_size:
+            past_key_values = None
+            next_idx = torch.cat((prompt_idx, *gen_idx_lst), dim=1)
+            next_idx = next_idx[active_pos, -model.config.block_size :]
+            next_age = torch.cat((prompt_age, *gen_age_lst), dim=1)
+            next_age = next_age[active_pos, -model.config.block_size :]
+            position_ids = model.position_ids(idx=next_idx)
+            attention_mask = (next_idx > 0).long()
+        else:
+            past_key_values = hf_output_dict.past_key_values
+            if isinstance(past_key_values, tuple):
+                past_key_values = DynamicCache.from_legacy_cache(past_key_values)
+            position_ids = position_ids[:, [-1]] + 1
+            attention_mask = torch.cat(
+                (
+                    attention_mask,
+                    torch.ones((attention_mask.shape[0], 1), device=device),
+                ),
+                dim=1,
+            )
+
+        active_pos = active_pos[~terminated]
+        time_elapsed = time_elapsed[~terminated]
+        next_idx = next_idx[~terminated]
+        next_age = next_age[~terminated]
+        position_ids = position_ids[~terminated]
+        attention_mask = attention_mask[~terminated]
+        has_occurred = has_occurred[~terminated]
+        if isinstance(past_key_values, DynamicCache):
+            kv_cache = DynamicCache()
+            for i in range(len(past_key_values.layers)):
+                if (
+                    past_key_values.layers[i].keys is not None
+                    and past_key_values.layers[i].values is not None
+                ):
+                    kv_cache.update(
+                        past_key_values.layers[i].keys[~terminated],  # type: ignore
+                        past_key_values.layers[i].values[~terminated],  # type: ignore
+                        i,
+                    )
+            past_key_values = kv_cache
 
     idx = torch.cat(gen_idx_lst, dim=1)
     age = torch.cat(gen_age_lst, dim=1)
