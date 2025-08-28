@@ -2,12 +2,14 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import transformers
 
+from delphi import DAYS_PER_YEAR
 from delphi.model.components import AgeEncoding, CrossEntropyHead, target_mask
-from delphi.model.config import GPT2Config
+from delphi.model.config import GPT2Config, parse_token_list
 from delphi.model.transformer import (
     causal_attention_mask,
     count_params,
@@ -56,6 +58,8 @@ def homogenize_piecewise_lambda(
 
 @dataclass
 class ModelConfig(GPT2Config):
+    time_scale: str = "year"  # year or day
+    interval: str = "day"  # day or mi
     ce_beta: float = 0.0
     motor_beta: float = 1.0
     motor_n_hidden: int = 32
@@ -69,8 +73,10 @@ class MotorHead(nn.Module):
     def __init__(self, config: ModelConfig):
         super().__init__()
         self.config = config
-        self.register_buffer("time_bins", torch.Tensor(self.config.motor_pieces))
-        self.register_buffer("task_tokens", torch.Tensor(self.config.motor_task_tokens))
+        self.register_buffer("time_bins", torch.tensor(self.config.motor_pieces))
+        self.register_buffer(
+            "task_tokens", torch.tensor(list(range(1, self.config.vocab_size)))
+        )
         self.n_bins = len(self.time_bins) - 1
 
         assert config.vocab_size is not None
@@ -245,7 +251,15 @@ class Model(torch.nn.Module):
     def __init__(self, config: ModelConfig):
         super().__init__()
         self.config = config
-        self.age_embed = AgeEncoding(n_embd=config.n_embd)
+        if config.time_scale == "year":
+            # pd.to_timedelta does not support 'year' as a time unit
+            time_scale = DAYS_PER_YEAR * pd.to_timedelta(f"1 day").total_seconds()
+        else:
+            time_scale = pd.to_timedelta(f"1 {config.time_scale}").total_seconds()
+        norm_factor = (
+            time_scale / pd.to_timedelta(f"1 {config.interval}").total_seconds()
+        )
+        self.age_embed = AgeEncoding(n_embd=config.n_embd, norm_factor=norm_factor)
 
         gpt2_config = transformers.GPT2Config(
             vocab_size=config.vocab_size,
@@ -305,7 +319,7 @@ class Model(torch.nn.Module):
         else:
             loss = None
 
-        return log_lambda, loss
+        return log_lambda, loss, output_dict
 
     def eval_step(self, idx: torch.Tensor, age: torch.Tensor, horizon: float):
 

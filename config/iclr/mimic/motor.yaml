@@ -1,5 +1,5 @@
 model_type: motor
-ckpt_dir: motor
+ckpt_dir: mimic
 eval_interval: 500
 eval_iters: 25
 eval_only: false
@@ -9,19 +9,18 @@ gradient_accumulation_steps: 1
 batch_size: 256
 device: cuda
 data:
-  data_dir: ukb_real_data
-  train_subject_list: participants/train_fold.bin
-  val_subject_list: participants/val_fold.bin
+  data_dir: mimic
   seed: 42
   block_size: ${model.block_size}
-  no_event_interval: 1826.25
+  timestep: since_start
 model:
-  vocab_size: 1270
-  n_layer: 12
-  n_head: 12
-  n_embd: 120
+  vocab_size: 4544
+  n_layer: 10
+  n_head: 8
+  n_embd: 256
+  embd_pdrop: 0.3
   bias: true
-  block_size: 256
+  block_size: 1026
   ce_beta: 0.0
   motor_beta: 1.0
   motor_n_hidden: 32

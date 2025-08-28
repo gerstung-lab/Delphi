@@ -82,7 +82,8 @@ def configure_optimizers(
     # will only return the first occurrence, key'd by 'transformer.wte.weight', below.
     # so let's manually remove 'lm_head.weight' from decay set. This will include
     # this tensor into optimization via transformer.wte.weight only, and not decayed.
-    decay.remove("gpt2.lm_head.weight")
+    if "gpt2.lm_head.weight" in decay:
+        decay.remove("gpt2.lm_head.weight")
 
     # validate that we considered every parameter
     param_dict = {pn: p for pn, p in model.named_parameters()}
