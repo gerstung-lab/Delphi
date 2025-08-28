@@ -18,7 +18,7 @@ from delphi.data.mimic import (
 from delphi.data.utils import duplicate_participants, eval_iter, move_batch_to_device
 from delphi.env import DELPHI_DATA_DIR
 from delphi.eval import eval_task
-from delphi.sampler import generate
+from delphi.generate import generate
 from delphi.train import load_ckpt
 
 

@@ -16,8 +16,8 @@ from delphi.data.ukb import UKBDataConfig, UKBDataset
 from delphi.data.utils import duplicate_participants, eval_iter
 from delphi.eval import eval_task
 from delphi.eval.ukb.auc import mann_whitney_auc
+from delphi.generate import generate
 from delphi.model.delphi import integrate_risk
-from delphi.sampler import generate
 from delphi.train import load_ckpt
 
 

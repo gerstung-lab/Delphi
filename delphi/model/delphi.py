@@ -14,7 +14,39 @@ from delphi.model.components import (
     target_mask,
 )
 from delphi.model.transformer import initialize_weights
-from delphi.sampler import sample_competing_exponentials, truncate_top_k
+
+
+def sample_competing_exponentials(
+    logits: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+
+    t_next = torch.clamp(
+        -torch.exp(-logits) * torch.rand(logits.shape, device=logits.device).log(),
+        min=0,
+        max=DAYS_PER_YEAR * 80.0,
+    ).min(1)
+    next_token = t_next[1][:, None]
+    time_til_next = t_next[0][:, None]
+
+    return next_token, time_til_next
+
+
+def sample_zero_inflated_exponentials(
+    logits: torch.Tensor,
+    pi: torch.Tensor,
+    always_single_tokens: list,
+) -> tuple[torch.Tensor, torch.Tensor]:
+
+    next_token, time_til_next = sample_competing_exponentials(logits)
+
+    pi = torch.sigmoid(pi)
+    is_comorbid = torch.bernoulli(pi).to(torch.bool)
+    should_be_single = torch.isin(
+        next_token, torch.tensor(always_single_tokens, device=logits.device)
+    )
+    time_til_next[is_comorbid & ~should_be_single] = 0.0
+
+    return next_token, time_til_nex
 
 
 @dataclass
