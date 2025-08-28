@@ -8,8 +8,6 @@ from typing import Iterable
 
 import torch as th
 
-from delphi.tokenizer import Tokenizer
-
 from ._sharded_data import ShardedData
 from .constants import STATIC_DATA_FN
 from .constants import SpecialToken as ST
@@ -85,7 +83,7 @@ class MIMICDataset:
 
     @property
     def tokenizer(self):
-        return Tokenizer(name2id=self.vocab.stoi)
+        return self.vocab.stoi
 
     @property
     def tokens(self):

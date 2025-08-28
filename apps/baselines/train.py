@@ -16,7 +16,6 @@ from delphi.log import TrainLogConfig
 from delphi.model import delphi
 from delphi.model.config import GPT2Config, parse_token_list
 from delphi.optim import OptimConfig
-from delphi.tokenizer import Tokenizer, update_tokenizer
 from delphi.train import BaseTrainer, TrainBaseConfig
 
 

@@ -15,9 +15,9 @@ from delphi.data.ukb import (
     collate_batch_time,
     load_core_data_package,
 )
+from delphi.data.utils import update_tokenizer
 from delphi.env import DELPHI_DATA_DIR
 from delphi.multimodal import Modality
-from delphi.tokenizer import Tokenizer, update_tokenizer
 
 
 @dataclass
@@ -152,7 +152,6 @@ class M4Dataset:
             self.expansion_packs.append(
                 ExpansionPack(path=pack_path, offset=offset, memmap=memmap)
             )
-        self.tokenizer = Tokenizer(base_tokenizer)  # type: ignore
 
         self.biomarker_dir = os.path.join(DELPHI_DATA_DIR, cfg.biomarker_dir)
         self.mod_ds = {}
@@ -203,7 +202,7 @@ class M4Dataset:
 
     @property
     def vocab_size(self):
-        return self.tokenizer.vocab_size
+        return len(self.tokenizer)
 
     @property
     def expansion_tokens(self):

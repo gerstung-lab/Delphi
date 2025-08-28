@@ -42,3 +42,16 @@ def duplicate_participants(args: Iterable[torch.Tensor], n_repeat: int):
     return tuple(
         [torch.repeat_interleave(arg, repeats=n_repeat, dim=0) for arg in args]
     )
+
+
+def update_tokenizer(base_tokenizer: dict, add_tokenizer: dict) -> tuple[dict, int]:
+
+    assert min(base_tokenizer.values()) == 0, "base tokenizer must start with 0"
+    assert min(add_tokenizer.values()) == 1, "additional tokenizer must start with 1"
+    offset = len(base_tokenizer) - 1
+    for key, value in add_tokenizer.items():
+        if key not in base_tokenizer:
+            base_tokenizer[key] = value + offset
+        else:
+            raise ValueError(f"{key} already exists in base tokenizer")
+    return base_tokenizer, offset

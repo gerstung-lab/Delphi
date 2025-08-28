@@ -15,7 +15,6 @@ from delphi.model.components import (
     ties_adjusted_delta_t,
 )
 from delphi.model.config import DelphiConfig, GPT2Config
-from delphi.tokenizer import load_tokenizer_from_yaml
 
 
 class LayerNorm(nn.Module):

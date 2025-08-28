@@ -172,7 +172,7 @@ def train(cfg: TrainConfig):
         print(f"\t- all expansion pack tokens")
         ignore_tokens = set(ignore_tokens).union(set(train_ds.expansion_tokens))
         ignore_tokens = list(ignore_tokens)
-    cfg.model.ignore_tokens = train_ds.tokenizer.encode(ignore_tokens)  # type: ignore
+    cfg.model.ignore_tokens = [train_ds.tokenizer[token] for token in ignore_tokens]
 
     iter_num = 0
 
@@ -229,7 +229,7 @@ def train(cfg: TrainConfig):
         cfg=cfg.log,
         exp_cfg=asdict(cfg),
         dump_dir=run_dir,
-        tokenizer=tokenizer.to_dict(),
+        tokenizer=tokenizer,
         model=model,  # type: ignore
         optimizer=optimizer,
         scheduler=scheduler,

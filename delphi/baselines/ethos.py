@@ -7,10 +7,10 @@ import transformers
 from transformers import DynamicCache
 
 from delphi.data.ukb import UKBDataset as BaseUKBDataset
+from delphi.data.utils import update_tokenizer
 from delphi.model.components import CrossEntropyHead, target_mask
 from delphi.model.config import GPT2Config
 from delphi.model.transformer import initialize_weights
-from delphi.tokenizer import Tokenizer, update_tokenizer
 
 
 def create_ethos_sequence(
@@ -64,7 +64,7 @@ class UKBDataset(BaseUKBDataset):
         )
         self.time_bins = np.array(time_bins)
 
-        self.base_vocab_size = self.tokenizer.vocab_size
+        self.base_vocab_size = len(self.tokenizer)
         n_bins = len(self.time_bins)
         time_tokenizer = dict()
         for i in range(n_bins):
@@ -76,10 +76,9 @@ class UKBDataset(BaseUKBDataset):
             else:
                 time_tokenizer[f"time-{start}-inf"] = token
 
-        tokenizer, self.time_token_offset = update_tokenizer(
-            base_tokenizer=self.tokenizer.to_dict(), add_tokenizer=time_tokenizer
+        self.tokenizer, self.time_token_offset = update_tokenizer(
+            base_tokenizer=self.tokenizer, add_tokenizer=time_tokenizer
         )
-        self.tokenizer = Tokenizer(tokenizer)
 
     def __getitem__(self, idx: int):
 

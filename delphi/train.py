@@ -7,6 +7,7 @@ from typing import Any, Iterable, Optional
 
 import torch
 import torch.distributed as dist
+import yaml
 from omegaconf import OmegaConf
 
 from delphi import distributed
@@ -18,7 +19,6 @@ from delphi.model import delphi
 from delphi.model.config import GPT2Config
 from delphi.model.transformer import Delphi, DelphiConfig
 from delphi.optim import OptimConfig, configure_optimizers
-from delphi.tokenizer import load_tokenizer_from_yaml
 
 
 @dataclass
@@ -129,7 +129,7 @@ class BaseTrainer:
             cfg=cfg.log,
             exp_cfg=asdict(cfg),
             dump_dir=run_dir,
-            tokenizer=train_ds.tokenizer.to_dict(),
+            tokenizer=train_ds.tokenizer,
             model=self.model,  # type: ignore
             optimizer=self.optimizer,
             scheduler=self.scheduler,
@@ -259,6 +259,7 @@ def load_ckpt(ckpt_path):
     model.load_state_dict(ckpt_dict["model"])
     model = model.eval()
 
-    tokenizer = load_tokenizer_from_yaml(ckpt_path / "tokenizer.yaml")
+    with open(ckpt_path / "tokenizer.yaml", "r") as f:
+        tokenizer = yaml.safe_load(f)
 
     return model, train_cfg, tokenizer

@@ -11,7 +11,6 @@ from scipy.sparse import coo_array
 
 from delphi.data.transform import add_no_event, crop_contiguous, sort_by_time
 from delphi.env import DELPHI_DATA_DIR
-from delphi.tokenizer import Tokenizer
 
 
 def get_p2i(data):
@@ -109,7 +108,7 @@ class UKBDataset:
     ):
 
         (
-            tokenizer,
+            self.tokenizer,
             self.start_pos,
             self.seq_len,
             self.participants,
@@ -119,7 +118,6 @@ class UKBDataset:
             data_dir=data_dir, subject_list=subject_list, memmap=memmap
         )
         self.rng = np.random.default_rng(seed)
-        self.tokenizer = Tokenizer(tokenizer)
 
         if no_event_interval is not None:
             self.add_no_event = functools.partial(
@@ -143,7 +141,7 @@ class UKBDataset:
 
     @property
     def vocab_size(self):
-        return self.tokenizer.vocab_size
+        return len(self.tokenizer)
 
     def __getitem__(self, idx: int):
 

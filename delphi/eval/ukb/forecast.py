@@ -82,7 +82,7 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
     if model.model_type == "ethos":
         time_tokens = list()
         time_intervals = list()
-        for token_name, token in tokenizer.to_dict().items():
+        for token_name, token in tokenizer.items():
             if token_name.startswith("time"):
                 time_tokens.append(token)
                 _, start, end = token_name.split("-")
@@ -121,67 +121,76 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
             n_sample = task_args.n_samples
             n_person = prompt_idx.shape[0]
 
-            prompt_idx, prompt_age = duplicate_participants(
-                [prompt_idx, prompt_age], n_repeat=task_args.n_samples
-            )
-            prompt_logits, _, _ = model(prompt_idx, prompt_age)
-
-            gen_idx, gen_age, gen_logits = generate(
-                model=model,
-                idx=prompt_idx,
-                age=prompt_age,
-                seed=task_args.seed,
-                no_repeat=task_args.no_repeat,
-                top_k=task_args.top_k,
-                temperature=task_args.temperature,
-                max_age=end_age,
-                termination_tokens=torch.tensor([tokenizer["death"]], device=device),
-                token_budget=task_args.token_budget,
-            )
-            pred_age = torch.cat((prompt_age[:, [-1]], gen_age[:, 1:]), dim=1)
-            sort_by_age = torch.argsort(pred_age, dim=1)
-            gen_idx = torch.take_along_dim(input=gen_idx, indices=sort_by_age, dim=1)
-            pred_age = torch.take_along_dim(input=pred_age, indices=sort_by_age, dim=1)
-            gen_age = torch.take_along_dim(input=gen_age, indices=sort_by_age, dim=1)
-            gen_logits = torch.take_along_dim(
-                input=gen_logits, indices=sort_by_age.unsqueeze(-1), dim=1
-            )
-
-            baseline_logits = prompt_logits[:, -1, :]
-            baseline_logits = baseline_logits.reshape((n_person, n_sample, -1))
-            baseline_prob = F.softmax(baseline_logits, dim=-1)
-            baseline_prob = torch.mean(baseline_prob, dim=-2, keepdim=False)
-            risks["baseline"].append(baseline_prob.detach().cpu().numpy())
-
-            if model.model_type == "delphi":
-                pos = torch.arange(gen_idx.shape[1], device=gen_logits.device)
-                occur_pos = torch.full(
-                    (gen_logits.shape[0], gen_logits.shape[-1]),
-                    fill_value=gen_idx.shape[1] - 1,
-                ).to(gen_logits.device)
-                occur_pos = occur_pos.scatter_(
-                    src=pos.broadcast_to(gen_idx.shape),
-                    index=gen_idx,
-                    dim=1,
-                ).unsqueeze(1)
-                occur_logits = torch.gather(input=gen_logits, index=occur_pos, dim=1)
-                gen_logits = torch.where(
-                    condition=pos.view(1, -1, 1) >= occur_pos,
-                    input=occur_logits,
-                    other=gen_logits,
-                )
-                integrated_risks = integrate_risk(
-                    log_lambda=gen_logits,
-                    age=pred_age,
-                    start=start_age,
-                    end=end_age,
-                )
-                integrated_risks = integrated_risks.reshape(n_person, n_sample, -1)
-                batch_risks = 1 - torch.exp(-integrated_risks)
-                batch_risks = torch.nanmean(batch_risks, dim=-2, keepdim=False)
-                risks["forecast"].append(batch_risks.detach().cpu().numpy())
-
             if model.model_type == "delphi" or model.model_type == "ethos":
+                prompt_idx, prompt_age = duplicate_participants(
+                    [prompt_idx, prompt_age], n_repeat=task_args.n_samples
+                )
+                prompt_logits, _, _ = model(prompt_idx, prompt_age)
+                gen_idx, gen_age, gen_logits = generate(
+                    model=model,
+                    idx=prompt_idx,
+                    age=prompt_age,
+                    seed=task_args.seed,
+                    no_repeat=task_args.no_repeat,
+                    top_k=task_args.top_k,
+                    temperature=task_args.temperature,
+                    max_age=end_age,
+                    termination_tokens=torch.tensor(
+                        [tokenizer["death"]], device=device
+                    ),
+                    token_budget=task_args.token_budget,
+                )
+                pred_age = torch.cat((prompt_age[:, [-1]], gen_age[:, 1:]), dim=1)
+                sort_by_age = torch.argsort(pred_age, dim=1)
+                gen_idx = torch.take_along_dim(
+                    input=gen_idx, indices=sort_by_age, dim=1
+                )
+                pred_age = torch.take_along_dim(
+                    input=pred_age, indices=sort_by_age, dim=1
+                )
+                gen_age = torch.take_along_dim(
+                    input=gen_age, indices=sort_by_age, dim=1
+                )
+                gen_logits = torch.take_along_dim(
+                    input=gen_logits, indices=sort_by_age.unsqueeze(-1), dim=1
+                )
+
+                baseline_logits = prompt_logits[:, -1, :]
+                baseline_logits = baseline_logits.reshape((n_person, n_sample, -1))
+                baseline_prob = F.softmax(baseline_logits, dim=-1)
+                baseline_prob = torch.mean(baseline_prob, dim=-2, keepdim=False)
+                risks["baseline"].append(baseline_prob.detach().cpu().numpy())
+
+                if model.model_type == "delphi":
+                    pos = torch.arange(gen_idx.shape[1], device=gen_logits.device)
+                    occur_pos = torch.full(
+                        (gen_logits.shape[0], gen_logits.shape[-1]),
+                        fill_value=gen_idx.shape[1] - 1,
+                    ).to(gen_logits.device)
+                    occur_pos = occur_pos.scatter_(
+                        src=pos.broadcast_to(gen_idx.shape),
+                        index=gen_idx,
+                        dim=1,
+                    ).unsqueeze(1)
+                    occur_logits = torch.gather(
+                        input=gen_logits, index=occur_pos, dim=1
+                    )
+                    gen_logits = torch.where(
+                        condition=pos.view(1, -1, 1) >= occur_pos,
+                        input=occur_logits,
+                        other=gen_logits,
+                    )
+                    integrated_risks = integrate_risk(
+                        log_lambda=gen_logits,
+                        age=pred_age,
+                        start=start_age,
+                        end=end_age,
+                    )
+                    integrated_risks = integrated_risks.reshape(n_person, n_sample, -1)
+                    batch_risks = 1 - torch.exp(-integrated_risks)
+                    batch_risks = torch.nanmean(batch_risks, dim=-2, keepdim=False)
+                    risks["forecast"].append(batch_risks.detach().cpu().numpy())
+
                 gen_idx = gen_idx.reshape((n_person, n_sample, -1))
                 occur = torch.zeros(
                     (n_person, n_sample, gen_logits.shape[-1]),
@@ -196,6 +205,9 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
                 risks["sampling"].append(frac_occur.detach().cpu().numpy())
 
             if model.model_type == "motor":
+
+                # log_lambda, _, output_dict = model(prompt_idx, prompt_age)
+
                 raise NotImplementedError
 
             tokens_in_range = target_idx.clone()
@@ -233,6 +245,7 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
     is_gender["either"] = np.ones_like(is_gender["male"]).astype(bool)  # type: ignore
     logbook = defaultdict(dict)
     logbook["rate_bins"] = [float(f"{rate:.3e}") for rate in bins]  # type: ignore
+    reverse_tokenizer = {v: k for k, v in tokenizer.items()}
     for i in range(2, labels.shape[1]):
         for gender in ["male", "female", "either"]:
             disease_labels = labels[:, i]
@@ -240,7 +253,7 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
             is_ctl = (disease_labels == 0) & is_gender[gender]
             is_dis = (disease_labels == 1) & is_gender[gender]
 
-            disease = tokenizer.decode(i)
+            disease = reverse_tokenizer[i]
             logbook[disease][gender] = {
                 "n_ctl": int(is_ctl.sum()),
                 "n_dis": int(is_dis.sum()),

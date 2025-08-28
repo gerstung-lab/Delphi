@@ -13,7 +13,6 @@ from delphi.test.test_expansion_packs import (
     required_files_exist,
     total_seq_len_add_up,
 )
-from delphi.tokenizer import FEMALE, MALE, NO_EVENT, PADDING
 
 
 def tokenizer_contiguous(tokenizer: dict):
@@ -27,7 +26,7 @@ def tokenizer_contiguous(tokenizer: dict):
 
 def tokenizer_contains_required_pairs(tokenizer: dict):
 
-    mandatory_tokens = [PADDING, NO_EVENT, MALE, FEMALE]
+    mandatory_tokens = ["padding", "no_event", "male", "female"]
     for token in mandatory_tokens:
         if token not in tokenizer.keys():
             return False
