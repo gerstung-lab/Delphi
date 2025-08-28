@@ -32,21 +32,16 @@ def sample_competing_exponentials(
 
 
 def sample_zero_inflated_exponentials(
-    logits: torch.Tensor,
-    pi: torch.Tensor,
-    always_single_tokens: list,
+    logits: torch.Tensor, pi: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
 
     next_token, time_til_next = sample_competing_exponentials(logits)
 
     pi = torch.sigmoid(pi)
     is_comorbid = torch.bernoulli(pi).to(torch.bool)
-    should_be_single = torch.isin(
-        next_token, torch.tensor(always_single_tokens, device=logits.device)
-    )
-    time_til_next[is_comorbid & ~should_be_single] = 0.0
+    time_til_next[is_comorbid] = 0.0
 
-    return next_token, time_til_nex
+    return next_token, time_til_next
 
 
 @dataclass
@@ -175,8 +170,12 @@ class Model(torch.nn.Module):
 
         return logits, loss, output_dict
 
-    def sample_next(self, logits: torch.Tensor):
-        idx, time_til_next = sample_competing_exponentials(logits)
+    def sample_next(self, logits: torch.Tensor, output_dict: dict):
+        if self.config.zero_inflate:
+            pi = self.dt_head.pi_head(output_dict["logits"][:, -1, :])
+            idx, time_til_next = sample_zero_inflated_exponentials(logits=logits, pi=pi)
+        else:
+            idx, time_til_next = sample_competing_exponentials(logits)
         return idx, time_til_next
 
 

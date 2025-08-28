@@ -174,7 +174,7 @@ class Model(torch.nn.Module):
 
         return logits, loss, output_dict
 
-    def sample_next(self, logits: torch.Tensor):
+    def sample_next(self, logits: torch.Tensor, output_dict: dict):
         assert hasattr(self, "token_to_time")
         probs = F.softmax(logits, dim=-1)
         idx_next = torch.multinomial(probs, num_samples=1)

@@ -67,7 +67,7 @@ def generate(
             past_key_values=past_key_values,
         )
         next_raw_logits = logits[:, [-1], :].clone()
-        next_logits = logits[:, -1, :]
+        next_logits = logits[:, -1, :].clone()
         next_logits[..., 0] = -torch.inf
         next_logits /= temperature
         if top_k is not None:
@@ -78,7 +78,9 @@ def generate(
             if hasattr(model, "time_tokens"):
                 has_occurred[:, model.time_tokens] = 0
             next_logits[has_occurred.bool()] = -torch.inf
-        next_idx, time_til_next = model.sample_next(next_logits)
+        next_idx, time_til_next = model.sample_next(
+            logits=next_logits, output_dict=hf_output_dict
+        )
         next_age = next_age[..., [-1]] + time_til_next
         time_elapsed += time_til_next.squeeze(-1)
 
