@@ -41,7 +41,6 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
 
     device = task_args.device
     model, _, _ = load_ckpt(ckpt)
-    model.to(device)
     model.eval()
 
     data_dir = Path(DELPHI_DATA_DIR) / "mimic" / "test"
@@ -61,23 +60,25 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
             n_positions=n_positions,
             sep_time_tokens=(model.model_type != "ethos"),
         )
-        termination_events = ["MEDS_DEATH", "ICU_DISCHARGE"]
-        outcome = "MEDS_DEATH"
+        termination_events = [SpecialToken.DEATH, SpecialToken.ICU_DISCHARGE]
+        outcome = SpecialToken.DEATH
         max_time = 30 * 24 * 60
     else:
         raise NotImplementedError
-    termination_tokens = torch.tensor(
-        eval_ds.vocab.encode(termination_events), device=device
-    )
+    termination_tokens = eval_ds.vocab.encode(termination_events)
     target_token = eval_ds.vocab.encode(outcome)
+    termination_tokens = list(set(termination_tokens + [target_token]))
+    termination_tokens = torch.tensor(termination_tokens, device=device)
 
     if model.model_type == "ethos":
-        token_to_time = torch.zeros((model.config.vocab_size,))
         time_token_to_mean = eval_ds.interval_estimates["mean"]
+        time_tokens = list()
+        time_bins = list()
         for time_token, mean_time in time_token_to_mean.items():
             time_token = eval_ds.vocab.encode(time_token)
-            token_to_time[time_token] = mean_time / 1e6 / 60
-        model.set_time(token_to_time)
+            time_tokens.append(time_token)
+            time_bins.append(mean_time / 1e6 / 60)
+        model.set_time(time_tokens=time_tokens, time_intervals=time_bins)
         model.to(device)
 
     assert task_args.batch_size >= task_args.n_samples

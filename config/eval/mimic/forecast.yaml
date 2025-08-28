@@ -1,5 +1,5 @@
 task_name: ${task_args.task}
-task_type: mimic-ares
+task_type: mimic-forecast
 task_args:
   task: hospital_mortality
   seed: 42
