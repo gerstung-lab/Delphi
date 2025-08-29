@@ -1,6 +1,8 @@
+import json
 import math
 from collections import defaultdict
 from pathlib import Path
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -13,7 +15,9 @@ from delphi.model.components import target_mask
 from delphi.train import load_ckpt
 
 
-def estimate_loss(ckpt, device: str = "cuda", batch_size: int = 256):
+def estimate_loss(
+    ckpt, device: str = "cuda", batch_size: int = 256, subsample: Optional[int] = None
+):
 
     model, _, _ = load_ckpt(ckpt)
     model.to(device)
@@ -25,9 +29,10 @@ def estimate_loss(ckpt, device: str = "cuda", batch_size: int = 256):
         sep_time_tokens=model.model_type != "ethos",
     )
 
+    total_size = subsample if subsample is not None else len(ds)
     it = tqdm(
-        eval_iter(total_size=len(ds), batch_size=batch_size),
-        total=math.ceil(len(ds) / batch_size),
+        eval_iter(total_size=total_size, batch_size=batch_size),
+        total=math.ceil(total_size / batch_size),
         leave=False,
     )
     loss = defaultdict(float)
@@ -35,14 +40,10 @@ def estimate_loss(ckpt, device: str = "cuda", batch_size: int = 256):
         for batch_idx in it:
             batch_input = ds.get_batch(batch_idx)
             batch_input = move_batch_to_device(batch_input, device=device)
-
-            if model.model_type == "ethos":
-                targets = batch_input[1]
-            else:
-                targets = batch_input[2]
+            targets = batch_input[2]
 
             batch_size = batch_idx.shape[0]
-            batch_logits, batch_loss = model(*batch_input)
+            batch_logits, batch_loss, _ = model(*batch_input)
 
             batch_logits[:, :, ds.time_tokens] = -torch.inf
             batch_logits = batch_logits.permute(0, 2, 1)
@@ -54,5 +55,8 @@ def estimate_loss(ckpt, device: str = "cuda", batch_size: int = 256):
             for key in batch_loss.keys():
                 loss[key] += batch_loss[key].item() * batch_size
 
-    loss = {key: value / len(ds) for key, value in loss.items()}
+    loss = {key: value / total_size for key, value in loss.items()}
     print(loss)
+    logbook_path = Path(ckpt) / "mimic_loss.json"
+    with open(logbook_path, "w") as f:
+        json.dump(loss, f, indent=4)
