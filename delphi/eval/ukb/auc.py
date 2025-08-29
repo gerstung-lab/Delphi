@@ -14,7 +14,6 @@ from delphi import DAYS_PER_YEAR
 from delphi.data import ukb
 from delphi.data.transform import sort_by_time
 from delphi.data.utils import eval_iter, move_batch_to_device
-from delphi.eval import eval_task
 from delphi.train import load_ckpt
 
 
@@ -36,6 +35,7 @@ class InstantAUCArgs:
     subsample: Optional[int] = None
     device: str = "cpu"
     batch_size: int = 128
+    log_name: str = "next_token_auc"
 
 
 def parse_time_bins(time_bins: TimeBins) -> list[tuple[int, int]]:
@@ -132,10 +132,8 @@ def corrective_indices(T0: np.ndarray, T1: np.ndarray, offset: float):
     return C
 
 
-@eval_task.register
 def calibrate_auc(
     task_args: InstantAUCArgs,
-    task_name: str,
     ckpt: str,
 ) -> None:
 
@@ -167,7 +165,7 @@ def calibrate_auc(
             batch_input = move_batch_to_device(batch_input, device=device)
             batch_X, batch_T = batch_input[0], batch_input[1]
 
-            batch_logits, _ = model(batch_X, batch_T)
+            batch_logits, _, _ = model(batch_X, batch_T)
 
             batch_X = batch_X.detach().cpu().numpy()
             batch_T = batch_T.detach().cpu().numpy()
@@ -270,6 +268,6 @@ def calibrate_auc(
                 "dis_count": len(all_dis),
             }
 
-    logbook_path = os.path.join(ckpt, f"{task_name}.json")
+    logbook_path = os.path.join(ckpt, f"{task_args.log_name}.json")
     with open(logbook_path, "w") as f:
         json.dump(logbook, f, indent=4)

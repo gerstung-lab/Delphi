@@ -17,14 +17,13 @@ from delphi.data.mimic import (
 )
 from delphi.data.utils import duplicate_participants, eval_iter, move_batch_to_device
 from delphi.env import DELPHI_DATA_DIR
-from delphi.eval import eval_task
 from delphi.generate import generate
 from delphi.train import load_ckpt
 
 
 @dataclass
 class ForecastArgs:
-    task: str = "hospital_mortality"
+    outcome: str = "hospital_mortality"
     n_samples: int = 30
     subsample: Optional[int] = None
     batch_size: int = 128
@@ -34,10 +33,10 @@ class ForecastArgs:
     top_k: Optional[int] = None
     temperature: float = 1.0
     termination_tokens: list[str] = field(default_factory=list)
+    log_name: str = "forecast.yaml"
 
 
-@eval_task.register
-def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
+def sample_future(task_args: ForecastArgs, ckpt: str) -> None:
 
     device = task_args.device
     model, _, _ = load_ckpt(ckpt)
@@ -45,7 +44,7 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
 
     data_dir = Path(DELPHI_DATA_DIR) / "mimic" / "test"
     n_positions = model.config.block_size
-    if task_args.task == "hospital_mortality":
+    if task_args.outcome == "hospital_mortality":
         eval_ds = HospitalMortalityDataset(
             input_dir=data_dir,
             n_positions=n_positions,
@@ -54,7 +53,7 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
         termination_events = [SpecialToken.TIMELINE_END, SpecialToken.DISCHARGE]
         outcome = SpecialToken.DEATH
         max_time = 30 * 24 * 60
-    elif task_args.task == "icu_mortality":
+    elif task_args.outcome == "icu_mortality":
         eval_ds = ICUMortalityDataset(
             input_dir=data_dir,
             n_positions=n_positions,
@@ -141,5 +140,5 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
     y_true = torch.cat(y_true, dim=0).detach().cpu().numpy()
 
     logbook = {"auc": sklearn.metrics.roc_auc_score(y_true, y_prob)}
-    with open(Path(ckpt) / f"{task_name}.json", "w") as f:
+    with open(Path(ckpt) / f"{task_args.log_name}.json", "w") as f:
         json.dump(logbook, f, indent=4)

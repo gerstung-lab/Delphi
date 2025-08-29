@@ -14,7 +14,6 @@ from delphi import DAYS_PER_YEAR
 from delphi.baselines import ethos
 from delphi.data.ukb import UKBDataConfig, UKBDataset
 from delphi.data.utils import duplicate_participants, eval_iter
-from delphi.eval import eval_task
 from delphi.eval.ukb.auc import mann_whitney_auc
 from delphi.generate import generate
 from delphi.model.delphi import integrate_risk
@@ -35,6 +34,7 @@ class ForecastArgs:
     top_k: Optional[int] = None
     temperature: float = 1.0
     token_budget: Optional[int] = None
+    log_name: str = "forecast.yaml"
 
 
 def calibrate(rates: np.ndarray, occur: np.ndarray, bins: list):
@@ -71,8 +71,7 @@ def cleanse_nan(obj):
         return obj
 
 
-@eval_task.register
-def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
+def sample_future(task_args: ForecastArgs, ckpt: str) -> None:
     assert task_args.batch_size >= task_args.n_samples
     assert task_args.batch_size % task_args.n_samples == 0
     n_persons_per_batch = int(task_args.batch_size / task_args.n_samples)
@@ -277,5 +276,5 @@ def sample_future(task_args: ForecastArgs, task_name: str, ckpt: str) -> None:
                 }
 
     logbook = cleanse_nan(logbook)
-    with open(Path(ckpt) / f"{task_name}.json", "w") as f:
+    with open(Path(ckpt) / f"{task_args.log_name}.json", "w") as f:
         json.dump(logbook, f, indent=2, separators=(",", ": "))

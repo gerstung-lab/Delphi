@@ -1,7 +1,4 @@
-task_name: ${task_args.task}
-task_type: mimic-forecast
-task_args:
-  task: hospital_mortality
-  seed: 42
-  batch_size: 150
-  n_samples: 30
+seed: 42
+batch_size: 150
+n_samples: 30
+log_name: ${outcome}

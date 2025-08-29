@@ -14,13 +14,3 @@ def clock(func):
         return result
 
     return wrapper
-
-
-@clock
-@singledispatch
-def eval_task(task_args: object, **kwargs) -> None:
-
-    raise ValueError(
-        f"task type {task_args.__class__.__name__} not supported. "
-        f"please register a new task with the @eval_task.register decorator."
-    )

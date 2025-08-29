@@ -1,5 +1,4 @@
 import json
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -12,23 +11,16 @@ from tqdm import tqdm
 from delphi.data.mimic import DrgPredictionDataset
 from delphi.data.utils import eval_iter, move_batch_to_device
 from delphi.env import DELPHI_DATA_DIR
-from delphi.eval import eval_task
 from delphi.train import load_ckpt
 
 
-@dataclass
-class DRGClassificationArgs:
-    subsample: Optional[int] = None
-    batch_size: int = 128
-    device: str = "cuda"
-
-
-@eval_task.register
-def drg_classification(
-    task_args: DRGClassificationArgs, task_name: str, ckpt: str
+def eval(
+    ckpt: str,
+    device: str = "cuda",
+    batch_size: int = 128,
+    subsample: Optional[int] = None,
 ) -> None:
 
-    device = task_args.device
     model, _, _ = load_ckpt(ckpt)
     model.to(device)
     model.eval()
@@ -46,11 +38,9 @@ def drg_classification(
         else:
             drg_tokens.append(token)
 
-    n_participants = (
-        len(eval_ds) if task_args.subsample is None else task_args.subsample
-    )
+    n_participants = len(eval_ds) if subsample is None else subsample
     it = tqdm(
-        eval_iter(total_size=n_participants, batch_size=task_args.batch_size),
+        eval_iter(total_size=n_participants, batch_size=batch_size),
         total=n_participants,
         leave=True,
     )
