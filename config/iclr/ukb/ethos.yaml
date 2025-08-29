@@ -15,17 +15,7 @@ data:
   seed: 42
   block_size: ${model.block_size}
   no_event_interval: 1826.25
-  time_bins:
-    - 1.0
-    - 62.0
-    - 148.0
-    - 261.0
-    - 401.0
-    - 585.0
-    - 831.0
-    - 1168.0
-    - 1681.0
-    - 2610.0
+  time_bins: config/time_interval/ukb-ethos-10token-preset.yaml
 model:
   vocab_size: 1280
   n_layer: 12

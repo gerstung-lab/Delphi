@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import yaml
 from omegaconf import OmegaConf
 
 from delphi import distributed
@@ -46,15 +47,15 @@ def experiment(cfg: TrainConfig):
             "block_size": cfg.data["block_size"],
         }
         if cfg.model_type == "ethos":
+            with open(cfg.data["time_bins"], "r") as f:
+                common_args["time_bins"] = yaml.safe_load(f)
             train_ds = ethos.UKBDataset(
                 **common_args,
                 subject_list=cfg.data["train_subject_list"],
-                time_bins=cfg.data["time_bins"],
             )
             val_ds = ethos.UKBDataset(
                 **common_args,
                 subject_list=cfg.data["train_subject_list"],
-                time_bins=cfg.data["time_bins"],
             )
         else:
             train_ds = UKBDataset(

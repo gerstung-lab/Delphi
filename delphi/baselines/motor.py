@@ -6,6 +6,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 import transformers
+import yaml
 
 from delphi import DAYS_PER_YEAR
 from delphi.model.components import AgeEncoding, CrossEntropyHead, target_mask
@@ -63,7 +64,6 @@ class ModelConfig(GPT2Config):
     ce_beta: float = 0.0
     motor_beta: float = 1.0
     motor_n_hidden: int = 32
-    motor_n_pieces: int = 8
     motor_pieces: Optional[list] = None
     motor_task_tokens: list = field(default_factory=list)
 
@@ -73,10 +73,14 @@ class MotorHead(nn.Module):
     def __init__(self, config: ModelConfig):
         super().__init__()
         self.config = config
-        self.register_buffer("time_bins", torch.tensor(self.config.motor_pieces))
-        self.register_buffer(
-            "task_tokens", torch.tensor(list(range(1, self.config.vocab_size)))
-        )
+        with open(self.config.motor_pieces, "r") as f:
+            motor_pieces = yaml.safe_load(f)
+        self.register_buffer("time_bins", torch.tensor(motor_pieces))
+        if self.config.motor_task_tokens == "all":
+            task_tokens = np.arange(1, self.config.vocab_size)
+        else:
+            task_tokens = parse_token_list(self.config.motor_task_tokens)
+        self.register_buffer("task_tokens", torch.tensor(task_tokens))
         self.n_bins = len(self.time_bins) - 1
 
         assert config.vocab_size is not None
