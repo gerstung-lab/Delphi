@@ -17,7 +17,7 @@ def drg_classification(
     ckpt: str,
     device: str = "cuda",
     batch_size: int = 128,
-    subsample: Optional[int] = Non,
+    subsample: Optional[int] = None,
 ) -> None:
 
     model, _, _ = load_ckpt(ckpt)
