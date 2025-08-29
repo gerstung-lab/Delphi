@@ -39,7 +39,7 @@ def experiment(cfg: TrainConfig):
     )
     backend = distributed.make_backend_from_args(cfg)
 
-    if cfg.data["data_dir"] == "ukb_real_data":
+    if cfg.data["data_dir"].startswith("ukb"):
         common_args = {
             "data_dir": cfg.data["data_dir"],
             "seed": cfg.data["seed"],
