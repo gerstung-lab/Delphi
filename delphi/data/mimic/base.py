@@ -86,6 +86,10 @@ class MIMICDataset:
         return self.vocab.stoi
 
     @property
+    def vocab_size(self):
+        return len(self.vocab.stoi)
+
+    @property
     def tokens(self):
         return self._data.tokens
 
@@ -143,7 +147,7 @@ class MIMICDataset:
         return len(self.patient_ids)
 
     @staticmethod
-    def convert_time(timesteps: th.Tensor):
+    def convert_to_min(timesteps: th.Tensor):
         return timesteps / 1e6 / 60
 
     def __getitem__(self, idx: int) -> tuple:
@@ -170,7 +174,7 @@ class MIMICDataset:
             timesteps -= time_of_birth
         else:
             raise ValueError(f"unknown timestep: {self.timestep}")
-        timesteps = self.convert_time(timesteps)
+        timesteps = self.convert_to_min(timesteps)
 
         pt_ctx_timesteps = th.full(size=pt_ctx.shape, fill_value=timesteps[0].item())
 
@@ -287,7 +291,7 @@ class InferenceDataset(MIMICDataset, abc.ABC):
             timesteps -= time_of_birth
         else:
             raise ValueError(f"unknown timestep: {self.timestep}")
-        timesteps = self.convert_time(timesteps)
+        timesteps = self.convert_to_min(timesteps)
 
         pt_ctx_timesteps = th.full(size=pt_ctx.shape, fill_value=timesteps[0].item())
 
