@@ -9,6 +9,7 @@ common_commands.txt
 data/ukb_real_data
 data/mimic
 data/ukb
+data/ukb_ehr
 data/ehrshot
 data/horizon_call
 data/.gitattributes

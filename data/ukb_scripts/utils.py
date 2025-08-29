@@ -21,7 +21,7 @@ expansion_pack_dir = ukb_dir / "expansion_packs"
 biomarker_dir = ukb_dir / "biomarkers"
 token_list_dir = Path("config/disease_list")
 
-with open("data/gather_biomarker/panel.yaml", "r") as f:
+with open("data/ukb_scripts/panel.yaml", "r") as f:
     biomarkers = yaml.safe_load(f)
 
 
