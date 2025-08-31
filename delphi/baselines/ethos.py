@@ -80,6 +80,10 @@ class UKBDataset(BaseUKBDataset):
             base_tokenizer=self.tokenizer, add_tokenizer=time_tokenizer
         )
 
+    @property
+    def time_tokens(self):
+        return np.arange(len(self.tokenizer) - len(self.time_bins), len(self.tokenizer))
+
     def __getitem__(self, idx: int):
 
         pid = self.participants[idx]
