@@ -94,9 +94,6 @@ class Model(torch.nn.Module):
                 time_scale / pd.to_timedelta(f"1 {config.interval}").total_seconds()
             )
             self.pos_emb = AgeEncoding(n_embd=config.n_embd, norm_factor=norm_factor)
-            self.gpt2.transformer.wpe.weight.data *= 0
-            for param in self.gpt2.transformer.wpe.parameters():
-                param.requires_grad = False
 
     def inputs_embeds(self, idx: torch.Tensor, age: torch.Tensor):
 
