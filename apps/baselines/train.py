@@ -72,7 +72,6 @@ def experiment(cfg: TrainConfig):
             "sep_time_tokens": sep_time_tokens,
             "n_positions": cfg.data["block_size"],
             "timestep": cfg.data["timestep"],
-            "min_time_resolution": "day",
         }
         train_ds = MIMICDataset(
             **common_args,

@@ -4,7 +4,7 @@ import pickle
 from collections.abc import Sequence
 from datetime import timedelta
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable
 
 import torch as th
 
@@ -51,7 +51,6 @@ class MIMICDataset:
         is_encoder_decoder: bool = False,
         sep_time_tokens: bool = False,
         timestep: str = "since_start",  # "since_start", "age"
-        min_time_resolution: Optional[str] = None,  # "min", "day"
         seed: int = 42,
     ):
         input_dir = Path(input_dir)
@@ -76,24 +75,6 @@ class MIMICDataset:
             self.interval_estimates = json.load(f)
         time_intervals = list(self.interval_estimates["min"].keys())
         self.time_tokens = th.tensor(self.vocab.encode(time_intervals))
-
-        if min_time_resolution is not None:
-            if min_time_resolution == "day":
-                blacklist = [
-                    "5m-15m",
-                    "15m-45m",
-                    "45m-1h15m",
-                    "1h15m-2h",
-                    "2h-3h",
-                    "3h-5h",
-                    "5h-8h",
-                    "8h-12h",
-                    "12h-18h",
-                    "18h-1d",
-                ]
-                self.blacklist_time_tokens = th.tensor(self.vocab.encode(blacklist))
-            else:
-                raise NotImplementedError
 
         self.sep_time_tokens = sep_time_tokens
         self.timestep = timestep
@@ -201,11 +182,6 @@ class MIMICDataset:
             is_time_token = th.isin(tokens, self.time_tokens)
             tokens = tokens[~is_time_token]
             timesteps = timesteps[~is_time_token]
-
-        if hasattr(self, "blacklist_time_tokens"):
-            blacklisted = th.isin(tokens, self.blacklist_time_tokens)
-            tokens = tokens[~blacklisted]
-            timesteps = timesteps[~blacklisted]
 
         if self.is_encoder_decoder:
             return (pt_ctx, tokens[:-1]), tokens[1:]
