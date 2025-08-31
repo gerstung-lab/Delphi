@@ -47,6 +47,7 @@ def sample_zero_inflated_exponentials(
 @dataclass
 class ModelConfig(config.GPT2Config):
     age_as_position: bool = True
+    absolute_position: bool = False
     time_scale: str = "year"  # year or day
     interval: str = "day"  # day or min
     ce_beta: float = 1.0
@@ -94,6 +95,7 @@ class Model(torch.nn.Module):
                 time_scale / pd.to_timedelta(f"1 {config.interval}").total_seconds()
             )
             self.pos_emb = AgeEncoding(n_embd=config.n_embd, norm_factor=norm_factor)
+        if not self.config.absolute_position:
             self.gpt2.transformer.wpe.weight.data *= 0
             for param in self.gpt2.transformer.wpe.parameters():
                 param.requires_grad = False
