@@ -66,18 +66,18 @@ def generate(
             use_cache=True,
             past_key_values=past_key_values,
         )
-        next_raw_logits = logits[:, [-1], :].clone()
-        next_logits = logits[:, -1, :].clone()
-        next_logits[..., 0] = -torch.inf
-        next_logits /= temperature
-        if top_k is not None:
-            next_logits = truncate_top_k(next_logits, top_k)
+        next_raw_logits = logits[:, -1, :].clone()
         if no_repeat:
             has_occurred = has_occurred.scatter_(index=next_idx, dim=1, value=1)
             has_occurred[:, 1] = 0
             if hasattr(model, "time_tokens"):
                 has_occurred[:, model.time_tokens] = 0
-            next_logits[has_occurred.bool()] = -torch.inf
+            next_raw_logits[has_occurred.bool()] = -torch.inf
+        next_logits = next_raw_logits.clone()
+        next_logits[..., 0] = -torch.inf
+        next_logits /= temperature
+        if top_k is not None:
+            next_logits = truncate_top_k(next_logits, top_k)
         next_idx, time_til_next = model.sample_next(
             logits=next_logits, output_dict=hf_output_dict
         )
@@ -86,12 +86,12 @@ def generate(
 
         batch_next_idx = torch.zeros((n, 1), device=device).long()
         batch_next_age = torch.full_like(batch_next_idx, fill_value=-1e4).float()
-        batch_next_logits = torch.zeros(
-            (n, 1, model.config.vocab_size), device=device
+        batch_next_logits = torch.full(
+            (n, 1, model.config.vocab_size), fill_value=-torch.inf, device=device
         ).float()
         batch_next_idx[active_pos, :] = next_idx
         batch_next_age[active_pos, :] = next_age
-        batch_next_logits[active_pos, ...] = next_raw_logits
+        batch_next_logits[active_pos, ...] = next_raw_logits.unsqueeze(1)
         gen_idx_lst.append(batch_next_idx)
         gen_age_lst.append(batch_next_age)
         gen_logits_lst.append(batch_next_logits)

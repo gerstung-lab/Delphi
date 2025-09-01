@@ -186,7 +186,7 @@ class Model(torch.nn.Module):
 
 
 def integrate_risk(
-    log_lambda: torch.Tensor, age: torch.Tensor, start: float, end: float | torch.Tensor
+    log_lambda: torch.Tensor, age: torch.Tensor, start: float, end: float
 ):
     r"""
     Aggregate values x over time intervals t within a specified time window [start, end].
@@ -208,23 +208,16 @@ def integrate_risk(
     Returns:
         Aggregated risk values, normalized by time exposure
     """
-    B, L = age.shape
-    _, _, V = log_lambda.shape
-    age = age.unsqueeze(-1).broadcast_to((B, L, V))
-    pad = age[:, [-1], :]
-    if not isinstance(end, torch.Tensor):
-        end = torch.full_like(pad, fill_value=end)
-    else:
-        assert end.shape == (B, V)
-        end = end.unsqueeze(1)
-    age = torch.cat([age, torch.maximum(pad, end)], dim=1)
+    pad = torch.clamp(age[:, [-1]], min=end)
+    age = torch.cat([age, pad], dim=1)
 
-    start = torch.full_like(end, fill_value=start)
     t_clamped = age.clamp(start, end)
     dt = t_clamped.diff(1, dim=1)
     dt_norm = dt / (dt.sum(1, keepdim=True) + 1e-6) * (end - start)
 
-    risk = log_lambda.exp() * dt_norm
+    risk = log_lambda.exp() * dt_norm.unsqueeze(-1)
     risk = risk.sum(-2)
+
+    risk[dt.sum(dim=1) == 0] = torch.nan
 
     return risk

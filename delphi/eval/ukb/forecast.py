@@ -161,24 +161,6 @@ def sample_future(task_args: ForecastArgs, ckpt: str) -> None:
                 risks["baseline"].append(baseline_prob.detach().cpu().numpy())
 
                 if model.model_type == "delphi":
-                    pos = torch.arange(gen_idx.shape[1], device=gen_logits.device)
-                    occur_pos = torch.full(
-                        (gen_logits.shape[0], gen_logits.shape[-1]),
-                        fill_value=gen_idx.shape[1] - 1,
-                    ).to(gen_logits.device)
-                    occur_pos = occur_pos.scatter_(
-                        src=pos.broadcast_to(gen_idx.shape),
-                        index=gen_idx,
-                        dim=1,
-                    ).unsqueeze(1)
-                    occur_logits = torch.gather(
-                        input=gen_logits, index=occur_pos, dim=1
-                    )
-                    gen_logits = torch.where(
-                        condition=pos.view(1, -1, 1) >= occur_pos,
-                        input=occur_logits,
-                        other=gen_logits,
-                    )
                     integrated_risks = integrate_risk(
                         log_lambda=gen_logits,
                         age=pred_age,
