@@ -3,6 +3,7 @@ from typing import Optional
 
 import pandas as pd
 import torch
+import torch.nn.functional as F
 from transformers import DynamicCache, GPT2Config, GPT2LMHeadModel
 
 from delphi import DAYS_PER_YEAR
@@ -40,6 +41,9 @@ def sample_zero_inflated_exponentials(
     pi = torch.sigmoid(pi)
     is_comorbid = torch.bernoulli(pi).to(torch.bool)
     time_til_next[is_comorbid] = 0.0
+    next_token[is_comorbid.squeeze(-1)] = torch.multinomial(
+        F.softmax(logits[is_comorbid.squeeze(-1), :], dim=-1), num_samples=1
+    )
 
     return next_token, time_til_next
 
