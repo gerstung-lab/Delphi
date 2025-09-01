@@ -16,7 +16,11 @@ from delphi.train import load_ckpt
 
 
 def estimate_loss(
-    ckpt, device: str = "cuda", batch_size: int = 256, subsample: Optional[int] = None
+    ckpt,
+    device: str = "cuda",
+    batch_size: int = 256,
+    subsample: Optional[int] = None,
+    mask_logits: bool = False,
 ):
 
     model, _, _ = load_ckpt(ckpt)
@@ -45,7 +49,8 @@ def estimate_loss(
             batch_size = batch_idx.shape[0]
             batch_logits, batch_loss, _ = model(*batch_input)
 
-            batch_logits[:, :, ds.time_tokens] = -torch.inf
+            if mask_logits:
+                batch_logits[:, :, ds.time_tokens] = -torch.inf
             batch_logits = batch_logits.permute(0, 2, 1)
             loss_ce = F.cross_entropy(batch_logits, targets, reduction="none")
             timeless_ce = torch.mean(

@@ -1,3 +1,4 @@
+import json
 import math
 from collections import defaultdict
 from pathlib import Path
@@ -20,6 +21,7 @@ def estimate_loss(
     batch_size: int = 1024,
     data_dir: str = "ukb_real_data",
     subject_list: str = "participants/val_fold.bin",
+    mask_logits: bool = False,
 ):
 
     model, cfg, tokenizer = load_ckpt(ckpt)
@@ -60,7 +62,8 @@ def estimate_loss(
             batch_logits, batch_loss, _ = model(*batch_input)
 
             if hasattr(ds, "time_tokens"):
-                batch_logits[:, :, ds.time_tokens] = -torch.inf
+                if mask_logits:
+                    batch_logits[:, :, ds.time_tokens] = -torch.inf
                 batch_logits = batch_logits.permute(0, 2, 1)
                 loss_ce = F.cross_entropy(batch_logits, targets, reduction="none")
                 timeless_ce = torch.mean(
@@ -72,3 +75,6 @@ def estimate_loss(
 
     loss = {key: value / len(ds) for key, value in loss.items()}
     print(loss)
+    logbook_path = Path(ckpt) / "ukb_loss.json"
+    with open(logbook_path, "w") as f:
+        json.dump(loss, f, indent=4)
