@@ -73,7 +73,7 @@ def generate(
         if top_k is not None:
             next_logits = truncate_top_k(next_logits, top_k)
         if no_repeat:
-            has_occurred[:, next_idx[:, -1]] = 1
+            has_occurred = has_occurred.scatter_(index=next_idx, dim=1, value=1)
             has_occurred[:, 1] = 0
             if hasattr(model, "time_tokens"):
                 has_occurred[:, model.time_tokens] = 0
