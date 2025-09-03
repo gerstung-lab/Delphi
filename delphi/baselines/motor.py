@@ -12,8 +12,6 @@ from delphi import DAYS_PER_YEAR
 from delphi.model.components import AgeEncoding, CrossEntropyHead, target_mask
 from delphi.model.config import GPT2Config, parse_token_list
 from delphi.model.transformer import (
-    causal_attention_mask,
-    count_params,
     initialize_weights,
 )
 

@@ -1,9 +1,10 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import pandas as pd
 import torch
 import torch.nn.functional as F
+from torch import nn
 from transformers import DynamicCache, GPT2Config, GPT2LMHeadModel
 
 from delphi import DAYS_PER_YEAR
@@ -12,9 +13,11 @@ from delphi.model.components import (
     AgeEncoding,
     CompetingExpHead,
     CrossEntropyHead,
+    causal_attention_mask,
     target_mask,
+    ties_adjusted_delta_t,
 )
-from delphi.model.transformer import initialize_weights
+from delphi.model.transformer import Block, LayerNorm, initialize_weights
 
 
 def sample_competing_exponentials(
@@ -183,6 +186,104 @@ class Model(torch.nn.Module):
         else:
             idx, time_til_next = sample_competing_exponentials(logits)
         return idx, time_til_next
+
+
+@dataclass
+class Delphi2MConfig(config.GPT2Config):
+    dropout: float = 0.1
+    token_dropout: float = 0.0
+    ignore_tokens: list = field(default_factory=list)
+    ce_beta: float = 1.0
+    dt_beta: float = 1.0
+    mask_ties: bool = True
+    t_min: float = 1.0
+
+
+class Delphi2M(torch.nn.Module):
+    model_type = "delphi-2m"
+
+    def __init__(self, config: Delphi2MConfig):
+        super().__init__()
+        self.config = config
+
+        self.transformer = nn.ModuleDict(
+            dict(
+                wte=nn.Embedding(config.vocab_size, config.n_embd),
+                wae=AgeEncoding(n_embd=config.n_embd, norm_factor=DAYS_PER_YEAR),
+                drop=nn.Dropout(config.dropout),
+                h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+                ln_f=LayerNorm(config.n_embd, bias=config.bias),
+            )
+        )
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.transformer.wte.weight = self.lm_head.weight
+
+        self.ce_head = CrossEntropyHead(config)
+        self.dt_head = CompetingExpHead(zero_inflate=False)
+
+        initialize_weights(self, config=config)
+
+    def forward(
+        self,
+        idx: torch.Tensor,
+        age: torch.Tensor,
+        targets: Optional[torch.Tensor] = None,
+        targets_age: Optional[torch.Tensor] = None,
+        validation_loss_mode: bool = False,
+    ) -> tuple[torch.Tensor, Optional[dict[str, torch.Tensor]], torch.Tensor]:
+
+        tok_emb = self.transformer.wte(idx)
+        age_emb = self.transformer.wae(age.unsqueeze(-1))
+
+        x = tok_emb + age_emb
+        x = self.transformer.drop(x)
+
+        attn_mask = causal_attention_mask(
+            pad=(idx == 0), t1=targets_age, t0=age, mask_ties=self.config.mask_ties
+        )
+
+        att = []
+        for block in self.transformer.h:
+            x, a = block(x, attn_mask)
+            att.append(a)
+        x = self.transformer.ln_f(x)
+        att = torch.stack(att)
+
+        if (targets is not None) and (targets_age is not None):
+            logits = self.lm_head(x)
+
+            logits_cp = logits.clone()
+            ignored_tokens = self.config.ignore_tokens.copy()
+            if validation_loss_mode:
+                ignored_tokens += [1]
+                logits_cp[..., ignored_tokens] = -torch.inf
+
+            dt = ties_adjusted_delta_t(
+                t0=age,
+                t1=targets_age,
+                attn_mask=attn_mask,
+                mask_ties=self.config.mask_ties,
+                eps=self.config.t_min,
+            )
+
+            is_valid_target = target_mask(targets, ignore_tokens=ignored_tokens)
+            loss_ce = self.ce_head(logits=logits_cp, targets=targets)
+            loss_ce = torch.mean(loss_ce[is_valid_target])
+            loss_dt = self.dt_head(logits=logits, delta_t=dt)
+            loss_dt = torch.mean(loss_dt[is_valid_target])
+
+            loss = {
+                "loss_ce": loss_ce * self.config.ce_beta,
+                "loss_dt": loss_dt * self.config.dt_beta,
+            }
+        else:
+            # inference-time mini-optimization: only forward the lm_head on the very last position
+            logits = self.lm_head(
+                x[:, :, :]
+            )  # note: using list [-1] to preserve the time dim
+            loss = None
+
+        return logits, loss, att
 
 
 def integrate_risk(

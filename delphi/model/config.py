@@ -28,7 +28,8 @@ class GPT2Config:
 @dataclass
 class DelphiConfig(GPT2Config):
     vocab_size: Optional[int] = None
-    # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    dropout: float = 0.1
+    token_dropout: float = 0.1
     mask_ties: bool = False
     ignore_tokens: list = field(default_factory=lambda: [0])
     biomarkers: dict[str, BiomarkerEmbedConfig] = field(default_factory=dict)

@@ -1,9 +1,7 @@
 import os
-from copy import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import numpy as np
 import torch
 import yaml
 from omegaconf import OmegaConf
@@ -12,10 +10,10 @@ from delphi import distributed
 from delphi.baselines import ethos, motor
 from delphi.data.mimic import MIMICDataset
 from delphi.data.ukb import UKBDataset
-from delphi.env import DELPHI_CKPT_DIR, DELPHI_DATA_DIR
+from delphi.env import DELPHI_DATA_DIR
 from delphi.log import TrainLogConfig
 from delphi.model import delphi
-from delphi.model.config import GPT2Config, parse_token_list
+from delphi.model.config import GPT2Config
 from delphi.optim import OptimConfig
 from delphi.train import BaseTrainer, TrainBaseConfig
 
@@ -93,6 +91,9 @@ def experiment(cfg: TrainConfig):
     elif cfg.model_type == "delphi":
         model_cls = delphi.Model
         model_cfg_cls = delphi.ModelConfig
+    elif cfg.model_type == "delphi-2m":
+        model_cls = delphi.Delphi2M
+        model_cfg_cls = delphi.Delphi2MConfig
     else:
         raise ValueError
 

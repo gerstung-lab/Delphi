@@ -11,7 +11,7 @@ from delphi.multimodal import Modality, module_name
 
 class AgeEncoding(nn.Module):
 
-    def __init__(self, n_embd: int, norm_factor: float):
+    def __init__(self, n_embd: int, norm_factor: float = 365.25):
         super().__init__()
         div_term = torch.exp(torch.arange(0, n_embd, 2) * (-math.log(10000.0) / n_embd))
         self.register_buffer("div_term", div_term)
@@ -148,11 +148,17 @@ class CrossEntropyHead(nn.Module):
 
 
 class CompetingExpHead(nn.Module):
-    def __init__(self, n_input: int, zero_inflate: bool, pi_head: Optional[str] = None):
+    def __init__(
+        self,
+        n_input: Optional[int] = None,
+        zero_inflate: bool = False,
+        pi_head: Optional[str] = None,
+    ):
         super().__init__()
 
         self.zero_inflate = zero_inflate
         if zero_inflate:
+            assert n_input is not None
             assert pi_head is not None
             if pi_head == "linear":
                 self.pi_head = nn.Linear(n_input, 1, bias=False)

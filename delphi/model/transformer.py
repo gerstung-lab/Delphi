@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from delphi.generate import truncate_top_k
 from delphi.model.components import (
     CompetingExpHead,
     CrossEntropyHead,
@@ -44,8 +43,12 @@ class CausalSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.dropout = config.dropout
-        # flash attention make GPU go brrrrr but support is only in PyTorch nightly and still a bit scary
-        self.flash = False  # hasattr(torch.nn.functional, 'scaled_dot_product_attention') and self.dropout == 0.0
+        self.register_buffer(
+            "bias",
+            torch.tril(torch.ones(config.block_size, config.block_size)).view(
+                1, 1, config.block_size, config.block_size
+            ),
+        )
 
     def forward(self, x, attn_mask):
         B, T, C = x.size()
@@ -64,19 +67,13 @@ class CausalSelfAttention(nn.Module):
         )  # (B, nh, T, hs)
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-        if self.flash:
-            # efficient attention using Flash Attention CUDA kernels
-            y = torch.nn.functional.scaled_dot_product_attention(
-                q, k, v, attn_mask=None, dropout_p=self.dropout, is_causal=True
-            )
-        else:
-            # manual implementation of attention
-            att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-            # att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
-            att = att.masked_fill(attn_mask == 0, float("-inf"))
-            att = F.softmax(att, dim=-1)
-            att = self.attn_dropout(att)
-            y = att @ v  # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+        # manual implementation of attention
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        # att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
+        att = att.masked_fill(attn_mask == 0, float("-inf"))
+        att = F.softmax(att, dim=-1)
+        att = self.attn_dropout(att)
+        y = att @ v  # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         y = (
             y.transpose(1, 2).contiguous().view(B, T, C)
         )  # re-assemble all head outputs side by side
@@ -119,11 +116,6 @@ class Block(nn.Module):
         return x, att
 
 
-def count_params(model: torch.nn.Module):
-    n_params = sum(p.numel() for p in model.parameters())
-    return n_params
-
-
 def initialize_weights(model: torch.nn.Module, config: GPT2Config):
 
     def _init_weights(module: torch.nn.Module):
@@ -149,8 +141,6 @@ class Delphi(torch.nn.Module):
         self.config = config
         self.build_model(config)
         initialize_weights(self, config=config)
-        n_params = count_params(self)
-        print("number of parameters: %.2fM" % (n_params / 1e6,))
 
     def build_model(self, config: DelphiConfig):
 
@@ -233,37 +223,3 @@ class Delphi(torch.nn.Module):
             loss = None
 
         return logits, loss, att
-
-    @torch.no_grad()
-    def next_token(
-        self,
-        idx: torch.Tensor,
-        age: torch.Tensor,
-        modality: torch.Tensor,
-        biomarker: Optional[dict[str, torch.Tensor]],
-        temperature: float = 1.0,
-        top_k: Optional[int] = None,
-        no_repeat: bool = True,
-    ):
-
-        logits, _, _ = self.forward(idx, age, modality, biomarker)
-        logits = logits[:, -1, :] / temperature
-        logits[:, self.config.ignore_tokens] = -torch.inf
-
-        if top_k is not None:
-            logits = truncate_top_k(logits, top_k)
-
-        if no_repeat:
-            fill = idx + 0
-            fill[fill == 1] = 0
-            logits = logits.scatter_(1, fill, -torch.inf)
-
-        idx_next, time_til_next = sample_competing_exponentials(logits)
-        age_next = age[..., [-1]] + time_til_next
-        modality_ext = torch.zeros_like(time_til_next)
-
-        idx = torch.cat((idx, idx_next), dim=1)
-        age = torch.cat((age, age_next), dim=1)
-        modality = torch.cat((modality, modality_ext), dim=1)
-
-        return idx, age, modality, biomarker
