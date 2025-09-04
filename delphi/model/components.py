@@ -38,6 +38,18 @@ class AgeEncoding(nn.Module):
         return y
 
 
+class Time2Vec(nn.Module):
+
+    def __init__(self, n_embd: int, norm_factor: float = 365.25):
+        super().__init__()
+        self.linear = torch.nn.Linear(1, n_embd, bias=True)
+        self.norm_factor = norm_factor
+
+    def forward(self, x: torch.Tensor):
+        x = self.linear(x / self.norm_factor)
+        return torch.cat([x[..., :1], torch.sin(x[..., 1:])], dim=-1)
+
+
 class PiecewiseAgeEncoding(nn.Module):
 
     def __init__(
@@ -48,9 +60,9 @@ class PiecewiseAgeEncoding(nn.Module):
     ):
         super().__init__()
         assert n_embd % len(norm_factors) == 0
+        piece_n_embd = n_embd / len(norm_factors)
         div_term = torch.exp(
-            torch.arange(0, n_embd / len(norm_factors), 2)
-            * (-math.log(max_wavelen) / n_embd)
+            torch.arange(0, piece_n_embd, 2) * (-math.log(max_wavelen) / piece_n_embd)
         )
         self.register_buffer("div_term", div_term)
         self.n_embd = n_embd

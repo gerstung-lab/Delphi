@@ -22,7 +22,7 @@ model:
   n_embd: 120
   bias: true
   block_size: 256
-  age_as_position: true
+  encode_time: time2vec
   ce_beta: 1.0
   dt_beta: 1.0
   zero_inflate: false
