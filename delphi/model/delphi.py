@@ -13,6 +13,7 @@ from delphi.model.components import (
     AgeEncoding,
     CompetingExpHead,
     CrossEntropyHead,
+    PiecewiseAgeEncoding,
     causal_attention_mask,
     target_mask,
     ties_adjusted_delta_t,
@@ -54,6 +55,7 @@ def sample_zero_inflated_exponentials(
 @dataclass
 class ModelConfig(config.GPT2Config):
     age_as_position: bool = True
+    max_wavelen: float = 10000.0
     absolute_position: bool = False
     time_scale: str = "year"  # year or day
     interval: str = "day"  # day or min
@@ -93,15 +95,29 @@ class Model(torch.nn.Module):
 
         initialize_weights(self, config=config)
         if self.config.age_as_position:
-            if config.time_scale == "year":
-                # pd.to_timedelta does not support 'year' as a time unit
-                time_scale = DAYS_PER_YEAR * pd.to_timedelta(f"1 day").total_seconds()
+            if config.time_scale == "year-day":
+                self.pos_emb = PiecewiseAgeEncoding(
+                    n_embd=config.n_embd, max_wavelen=config.max_wavelen
+                )
             else:
-                time_scale = pd.to_timedelta(f"1 {config.time_scale}").total_seconds()
-            norm_factor = (
-                time_scale / pd.to_timedelta(f"1 {config.interval}").total_seconds()
-            )
-            self.pos_emb = AgeEncoding(n_embd=config.n_embd, norm_factor=norm_factor)
+                if config.time_scale == "year":
+                    # pd.to_timedelta does not support 'year' as a time unit
+                    time_scale = (
+                        DAYS_PER_YEAR * pd.to_timedelta(f"1 day").total_seconds()
+                    )
+                else:
+                    time_scale = pd.to_timedelta(
+                        f"1 {config.time_scale}"
+                    ).total_seconds()
+                norm_factor = (
+                    time_scale / pd.to_timedelta(f"1 {config.interval}").total_seconds()
+                )
+                self.pos_emb = AgeEncoding(
+                    n_embd=config.n_embd,
+                    norm_factor=norm_factor,
+                    max_wavelen=config.max_wavelen,
+                )
+
         if not self.config.absolute_position:
             self.gpt2.transformer.wpe.weight.data *= 0
             for param in self.gpt2.transformer.wpe.parameters():

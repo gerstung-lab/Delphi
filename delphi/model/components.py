@@ -11,9 +11,13 @@ from delphi.multimodal import Modality, module_name
 
 class AgeEncoding(nn.Module):
 
-    def __init__(self, n_embd: int, norm_factor: float = 365.25):
+    def __init__(
+        self, n_embd: int, norm_factor: float = 365.25, max_wavelen: float = 10000.0
+    ):
         super().__init__()
-        div_term = torch.exp(torch.arange(0, n_embd, 2) * (-math.log(10000.0) / n_embd))
+        div_term = torch.exp(
+            torch.arange(0, n_embd, 2) * (-math.log(max_wavelen) / n_embd)
+        )
         self.register_buffer("div_term", div_term)
         self.n_embd = n_embd
         self.linear = torch.nn.Linear(n_embd, n_embd, bias=False)
@@ -29,6 +33,41 @@ class AgeEncoding(nn.Module):
         y = torch.zeros(x.shape[0], x.shape[1], self.n_embd, device=x.device)
         y[..., 0::2] = torch.sin(time_years * self.div_term)  # * (1-self.div_term)
         y[..., 1::2] = torch.cos(time_years * self.div_term)  # * (1-self.div_term)
+        y = self.linear(y)
+
+        return y
+
+
+class PiecewiseAgeEncoding(nn.Module):
+
+    def __init__(
+        self,
+        n_embd: int,
+        norm_factors: list[float] = [365.25, 1.0],
+        max_wavelen: float = 10000.0,
+    ):
+        super().__init__()
+        assert n_embd % len(norm_factors) == 0
+        div_term = torch.exp(
+            torch.arange(0, n_embd / len(norm_factors), 2)
+            * (-math.log(max_wavelen) / n_embd)
+        )
+        self.register_buffer("div_term", div_term)
+        self.n_embd = n_embd
+        self.linear = torch.nn.Linear(n_embd, n_embd, bias=False)
+
+        self.norm_factors = norm_factors
+
+    def forward(self, x: torch.Tensor):
+        y = torch.zeros(x.shape[0], x.shape[1], self.n_embd, device=x.device)
+        for i, norm_factor in enumerate(self.norm_factors):
+            piece_start = int(i / len(self.norm_factors) * self.n_embd)
+            piece_end = int((i + 1) / len(self.norm_factors) * self.n_embd)
+            y[..., piece_start:piece_end:2] = torch.sin(x / norm_factor * self.div_term)
+            y[..., piece_start + 1 : piece_end : 2] = torch.cos(
+                x / norm_factor * self.div_term
+            )
+            x = torch.remainder(x, norm_factor)
         y = self.linear(y)
 
         return y
