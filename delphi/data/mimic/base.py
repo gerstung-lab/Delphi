@@ -305,7 +305,7 @@ class InferenceDataset(MIMICDataset, abc.ABC):
 
         return th.cat((pt_ctx, tokens)), th.cat((pt_ctx_timesteps, timesteps))
 
-    def get_batch(self, batch_idx: Iterable, include_time: bool = True):
+    def get_batch(self, batch_idx: Iterable):
 
         X, X_t, labels = list(), list(), list()
         for idx in batch_idx:
@@ -317,10 +317,7 @@ class InferenceDataset(MIMICDataset, abc.ABC):
         X = collate_batch_data(X)
         X_t = collate_batch_time(X_t)
 
-        if include_time:
-            return X, X_t, labels
-        else:
-            return X, labels
+        return X, X_t, labels
 
     def _get_indices_of_stokens(self, stokens: str | Sequence[str]) -> th.Tensor:
         if isinstance(stokens, str):

@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from typing import Optional
+import math
 
 import numpy as np
 import torch
@@ -41,7 +42,7 @@ def eval(
     n_participants = len(eval_ds) if subsample is None else subsample
     it = tqdm(
         eval_iter(total_size=n_participants, batch_size=batch_size),
-        total=n_participants,
+        total=math.ceil(n_participants / batch_size),
         leave=True,
     )
 
@@ -49,12 +50,10 @@ def eval(
     y_true = list()
     with torch.no_grad():
         for batch_idx in it:
-            *batch_input, batch_label = eval_ds.get_batch(
-                batch_idx, include_time=(model.model_type != "ethos")
-            )
+            *batch_input, batch_label = eval_ds.get_batch(batch_idx)
             batch_input = move_batch_to_device(batch_input, device=device)
 
-            batch_logits, _ = model(*batch_input)
+            batch_logits, _, _ = model(*batch_input)
             drg_logits = batch_logits[:, -1, :]
             drg_logits[:, non_drg_tokens] = -torch.inf
             y_prob.append(F.softmax(drg_logits, dim=-1))
