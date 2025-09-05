@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import torch
@@ -94,6 +94,9 @@ def experiment(cfg: TrainConfig):
     elif cfg.model_type == "delphi-2m":
         model_cls = delphi.Delphi2M
         model_cfg_cls = delphi.Delphi2MConfig
+    elif cfg.model_type == "delphi-chronos":
+        model_cls = delphi.DelphiChronos
+        model_cfg_cls = delphi.ModelConfig
     else:
         raise ValueError
 
@@ -102,6 +105,7 @@ def experiment(cfg: TrainConfig):
         model = model_cls(model_cfg)  # type: ignore
     else:
         raise NotImplementedError
+    cfg.model = asdict(model_cfg)
 
     trainer = BaseTrainer(
         cfg=cfg,
