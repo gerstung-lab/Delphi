@@ -9,7 +9,7 @@ import transformers
 import yaml
 
 from delphi import DAYS_PER_YEAR
-from delphi.model.components import AgeEncoding, CrossEntropyHead, target_mask
+from delphi.model.components import AgeEncoding, CrossEntropyHead
 from delphi.model.config import GPT2Config, parse_token_list
 from delphi.model.transformer import (
     initialize_weights,
@@ -303,54 +303,13 @@ class Model(torch.nn.Module):
         output_dict = self.gpt2(inputs_embeds=x, attention_mask=attn_mask)
         x = output_dict["last_hidden_state"]
 
+        loss_motor, log_lambda = self.motor_head(h=x, age=age, targets=targets, targets_age=targets_age)
+
         if targets is not None:
-            logits = self.lm_head(x)
-            loss_ce = self.ce_head(logits=logits, targets=targets)
-            is_valid_target = target_mask(x1=targets, ignore_tokens=[])
-            loss_ce = torch.mean(loss_ce[is_valid_target])
-
             assert targets_age is not None
-            loss_motor, log_lambda = self.motor_head(
-                h=x, age=age, targets=targets, targets_age=targets_age
-            )
-
-            loss = {
-                "loss_ce": loss_ce * self.config.ce_beta,
-                "loss_motor": loss_motor * self.config.motor_beta,
-            }
+            loss = {"loss_motor": loss_motor}
         else:
             loss = None
 
         return log_lambda, loss, output_dict
 
-    def eval_step(self, idx: torch.Tensor, age: torch.Tensor, horizon: float):
-
-        batch_size, seq_len = idx.shape
-        x, _ = self.forward_backbone(idx=idx, age=age)
-
-        # log_lambda: [B, L, P, V]
-        _, log_lambda = self.motor_head(h=x, age=age)
-
-        log_task_lambda = homogenize_piecewise_lambda(
-            log_lambda=log_lambda,
-            piece_edges=self.motor_head.time_bins,
-            horizon=horizon,
-        )
-
-        # log_lambda[i][j][k] = log_task_lambda[i][j][r] where r = rank of k in task tokens
-        # self[i][j][index[i][j][k]] = src[i][j][k]  # if dim == 2
-        ranked_task_tokens, _ = torch.sort(self.motor_head.task_tokens)
-        ranked_task_tokens = torch.broadcast_to(
-            ranked_task_tokens, (batch_size, seq_len, -1)
-        ).long()
-        # non-task tokens have nan for lambda's
-        log_lambda = torch.full(
-            (batch_size, seq_len, self.config.vocab_size),
-            fill_value=float("nan"),
-            device=log_task_lambda.device,
-        )
-        log_lambda = log_lambda.scatter_(
-            dim=2, index=ranked_task_tokens, src=log_task_lambda
-        )
-
-        return log_lambda, idx, age
