@@ -113,10 +113,12 @@ class Model(torch.nn.Module):
                 )
             elif config.encode_time == "piecewise":
                 self.pos_emb = PiecewiseAgeEncoding(
-                    n_embd=config.n_embd, max_wavelen=config.max_wavelen
+                    n_embd=config.n_embd,
+                    max_wavelen=config.max_wavelen,
+                    norm_factors=[norm_factor, 1.0]
                 )
             elif config.encode_time == "time2vec":
-                self.pos_emb = Time2Vec(n_embd=config.n_embd)
+                self.pos_emb = Time2Vec(n_embd=config.n_embd, norm_factor=norm_factor)
             else:
                 raise ValueError(f"unknown time encoding: {config.encode_time}")
 
