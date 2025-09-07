@@ -14,6 +14,83 @@ def truncate_top_k(logits: torch.Tensor, k: int) -> torch.Tensor:
 
 
 @torch.no_grad()
+def legacy_generate(model, idx, age, max_new_tokens=100, max_age = 85*365.25, temperature=1.0, top_k=None, no_repeat=True):
+    """
+    Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
+    the sequence max_new_tokens times, feeding the predictions back into the model each time.
+    Most likely you'll want to make sure to be in model.eval() mode of operation for this.
+    """
+    if max_new_tokens == -1:
+        max_new_tokens = 1000
+    
+    len_start = idx.shape[1]
+    idx = torch.cat((idx, torch.zeros((idx.shape[0], max_new_tokens), device=idx.device, dtype=torch.uint8)), dim=1)
+    age = torch.cat((age, torch.zeros((age.shape[0], max_new_tokens), device=age.device, dtype=torch.float32)), dim=1)
+
+    for i    in range(max_new_tokens):
+        # if the sequence context is growing too long we must crop it at block_size
+        #idx_cond = idx #if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
+        #age_cond = age #if age.size(1) <= self.config.block_size else age[:, -self.config.block_size:]
+
+        # forward the model to get the logits for the index in the sequence
+        logits, _, _ = model(idx[:,:len_start+i], age[:,:len_start+i])
+        # pluck the logits at the final step and scale by desired temperature
+        logits = logits[:, -1, :] / temperature
+
+        if hasattr(model.config, "ignore_tokens"):
+            ignore_tokens = model.config.ignore_tokens
+        else:
+            ignore_tokens = [0]
+        logits[:, ignore_tokens] = -float('Inf')
+
+        
+        # optionally crop the logits to only the top k options
+        if top_k is not None:
+            v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+            logits[logits < v[:, [-1]]] = -float('Inf')
+            
+        if no_repeat:
+            fill = idx + 0
+            fill[fill == 1] = 0
+            logits = logits.scatter_(1, fill, -float("Inf"))
+        
+        # apply softmax to convert logits to (normalized) probabilities
+        # probs = F.softmax(logits, dim=-1)
+        # sample from the distribution
+        # idx_next = torch.multinomial(probs, num_samples=1)
+        # lse = torch.logsumexp(logits, -1)[:,None]
+        t_next = torch.clamp( -torch.exp(-logits) * torch.rand(logits.shape, device=idx.device).log(),
+            min=0, max=365*80.
+        ).min(1)
+        #age_next = age[...,[-1]] + torch.clamp(-torch.exp(-lse) * torch.rand(lse.shape, device=idx.device).log(), min=self.config.t_min, max=365*80.) #torch.normal(torch.zeros((1,1), device=idx.device),1.)
+        idx_next = t_next[1]#[:,None]
+        age_next = age[:,len_start+i-1] + t_next[0]
+        
+        # append sampled index to the running sequence and continue
+        #idx = torch.cat((idx, idx_next), dim=1)
+        #age = torch.cat((age, age_next), dim=1)
+        idx[:,len_start+i] = idx_next
+        age[:,len_start+i] = age_next
+        
+        if torch.all(idx_next == model.config.vocab_size -1) or torch.all(age_next > max_age):
+            idx = idx[:,:len_start+i+1]
+            age = age[:,:len_start+i+1]
+            break
+    
+    pad = (torch.cumsum(torch.cumsum(idx == model.config.vocab_size -1,1).int(),1) > 1) + (age > max_age)
+    logits, _, _ = model(idx, age)
+    idx[pad] = 0
+    age[pad] = float('NaN')
+    if no_repeat:
+        fill = idx + 0
+        fill[fill == 1] = 0
+        logits = torch.stack([logits[:,j].scatter_(1, fill[:,:j+1], float("NaN")) for j in range(fill.shape[1])]).transpose(0,1)
+
+    return idx, age, logits
+
+
+
+@torch.no_grad()
 def generate(
     model: torch.nn.Module,
     idx: torch.Tensor,
@@ -21,7 +98,7 @@ def generate(
     seed: int,
     max_age: Optional[float] = None,  # in days
     max_time: Optional[float] = None,
-    termination_tokens: Optional[torch.Tensor] = None,
+    termination_tokens: Optional[list | torch.Tensor] = None,
     no_repeat: bool = True,
     top_k: Optional[int] = None,
     temperature: float = 1.0,
@@ -32,6 +109,8 @@ def generate(
     device = idx.device
     if termination_tokens is None:
         termination_tokens = torch.Tensor([model.config.vocab_size], device=device)
+    else:
+        termination_tokens = torch.tensor(termination_tokens).to(device)
 
     torch.manual_seed(seed)
 
