@@ -9,7 +9,7 @@ import torch
 import yaml
 from scipy.sparse import coo_array
 
-from delphi.data.transform import add_no_event, crop_contiguous, sort_by_time
+from delphi.data.transform import add_no_event, crop_contiguous, sort_by_time, trim_margin
 from delphi.env import DELPHI_DATA_DIR
 
 
@@ -155,7 +155,7 @@ class UKBDataset:
 
         return x_pid, t_pid
 
-    def get_batch(self, batch_idx: Iterable):
+    def get_batch(self, batch_idx: Iterable, cut: bool = True):
 
         X = []
         T = []
@@ -171,7 +171,10 @@ class UKBDataset:
         X = torch.tensor(X, dtype=torch.long)
         T = torch.tensor(T, dtype=torch.float32)
 
-        return X[:, :-1], T[:, :-1], X[:, 1:], T[:, 1:]
+        if cut:
+            return X[:, :-1], T[:, :-1], X[:, 1:], T[:, 1:]
+        else:
+            return X, T
 
     def get_prompt_batch(self, batch_idx: Iterable, start_age: float):
 
@@ -191,6 +194,7 @@ class UKBDataset:
         X = collate_batch_data(X)
         T = collate_batch_time(T)
         T, X = sort_by_time(T, X)
+        X, T = trim_margin(X, T, trim_val=0)
 
         X = torch.tensor(X, dtype=torch.long)
         T = torch.tensor(T, dtype=torch.float32)
