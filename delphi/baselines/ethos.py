@@ -91,7 +91,7 @@ class UKBDataset(BaseUKBDataset):
         l = self.seq_len[pid]
         x_pid = self.tokens[i : i + l]
         t_pid = self.time_steps[i : i + l]
-        x_pid, t_pid = self.add_no_event(x_pid, t_pid)
+        x_pid, t_pid = self.append_no_event(x_pid, t_pid)
         x_pid, t_pid = create_ethos_sequence(
             x_pid, t_pid, time_bins=self.time_bins, offset=self.base_vocab_size - 1
         )

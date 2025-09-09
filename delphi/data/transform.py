@@ -1,11 +1,11 @@
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import numpy as np
 
 from delphi.multimodal import Modality
 
 
-def add_no_event(
+def append_no_event(
     x: np.ndarray,
     t: np.ndarray,
     rng: np.random.Generator,
@@ -15,7 +15,8 @@ def add_no_event(
 ) -> tuple[np.ndarray, np.ndarray]:
 
     max_age = np.max(t)
-    min_age = max(np.min(t), 0)
+    # add 1 to ensure no_event does not co-occur with first token
+    min_age = max(np.min(t[t >= 0]), 0) + 1
     age_range = max_age - min_age
     n = int(age_range // interval)
 
@@ -31,9 +32,6 @@ def add_no_event(
 
     x = np.concatenate((x, no_event_X))
     t = np.concatenate((t, no_event_t))
-
-    s = np.argsort(t)
-    x, t = x[s], t[s]
 
     return x, t
 
@@ -57,18 +55,26 @@ def trim_margin(reference: np.ndarray, *args: np.ndarray, trim_val: Any):
 
 
 def crop_contiguous(
-    x: np.ndarray, *args: np.ndarray, block_size: int, rng: np.random.Generator
+    x: np.ndarray,
+    *args: np.ndarray,
+    block_size: int,
+    rng: np.random.Generator,
+    mode: Literal["left", "right", "random"] = "left",
 ):
 
     L = x.shape[0]
 
     if L <= block_size:
-        if args:
-            return x, *args
-        else:
-            return x
+        return (x, *args) if args else x
     else:
-        start = rng.integers(0, L - block_size + 1)
+        if mode == "left":
+            start = 0
+        elif mode == "right":
+            start = L - block_size
+        elif mode == "random":
+            start = rng.integers(0, L - block_size + 1)
+        else:
+            raise ValueError
         cut = slice(start, start + block_size)
         if args:
             return x[cut], *[arr[cut] for arr in args]

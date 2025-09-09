@@ -7,81 +7,49 @@ import numpy as np
 import pandas as pd
 import torch
 import yaml
-from scipy.sparse import coo_array
 
-from delphi.data.transform import add_no_event, crop_contiguous, sort_by_time, trim_margin
+from delphi.data.transform import append_no_event, crop_contiguous, trim_margin
 from delphi.env import DELPHI_DATA_DIR
 
 
-def get_p2i(data):
-    """
-    Get the patient to index mapping. (patient index in data -> length of sequence)
-    """
-
-    px = data[:, 0].astype("int")
-    p2i = []
-    j = 0
-    q = px[0]
-    for i, p in enumerate(px):
-        if p != q:
-            p2i.append([j, i - j])
-            q = p
-            j = i
-        if i == len(px) - 1:
-            # add last participant
-            p2i.append([j, i - j + 1])
-    return np.array(p2i)
+def _identity_transform(*args):
+    return args
 
 
-def tricolumnar_to_2d(data):
-    """
-    Convert a tricolumnar array to a 2D array.
-    The first column is the participant index, the second column is the time step,
-    and the third column is the token.
-    """
-    p2i = get_p2i(data)
-    sub_idx = np.repeat(np.arange(p2i.shape[0]), p2i[:, 1])
-    pos_idx = np.concatenate([np.arange(p2i[i, 1]) for i in range(p2i.shape[0])])
-
-    X = coo_array(
-        (data[:, 2], (sub_idx, pos_idx)), shape=(p2i.shape[0], p2i[:, 1].max())
-    ).toarray()
-
-    T = np.full(X.shape, -10000, dtype=np.float32)
-    T[sub_idx, pos_idx] = data[:, 1]
-
-    sort_by_time = np.argsort(T, axis=1)
-    X = np.take_along_axis(X, sort_by_time, axis=1)
-    T = np.take_along_axis(T, sort_by_time, axis=1)
-
-    return X, T
+def sort_by_time(t: np.ndarray, *args: np.ndarray):
+    s = np.argsort(t)
+    t = t[s]
+    return t, *[arg[s] for arg in args]
 
 
-def collate_batch_data(batch_data: list[np.ndarray]) -> np.ndarray:
-
-    if len(batch_data) > 0:
-        max_len = max([bd.size for bd in batch_data])
-        collated_batch = np.full(
-            shape=(len(batch_data), max_len),
-            fill_value=0,
-            dtype=batch_data[0].dtype,
-        )
-        for i, bd in enumerate(batch_data):
-            collated_batch[i, : bd.size] = bd
-    else:
-        return np.empty(shape=(0, 0), dtype=np.float64)
-
-    return collated_batch
+def perturb_time(
+    x: np.ndarray,
+    t: np.ndarray,
+    tokens: np.ndarray,
+    rng: np.random.Generator,
+    low: int = int(-20 * 365.25),
+    high: int = int(40 * 365.25),
+):
+    to_perturb = np.isin(x, tokens)
+    t[to_perturb] += rng.integers(low=low, high=high, size=(to_perturb.sum(),))
+    return x, t
 
 
-def collate_batch_time(batch_time: list[np.ndarray]) -> np.ndarray:
+def collate_batch(
+    batch_data: list[np.ndarray], fill_value: int | float = 0, pad_left: bool = True
+) -> np.ndarray:
 
-    max_len = max([bt.size for bt in batch_time])
+    max_len = max([bd.size for bd in batch_data])
     collated_batch = np.full(
-        shape=(len(batch_time), max_len), fill_value=-1e4, dtype=np.float32
+        shape=(len(batch_data), max_len),
+        fill_value=fill_value,
+        dtype=batch_data[0].dtype,
     )
-    for i, bt in enumerate(batch_time):
-        collated_batch[i, : bt.size] = bt
+    for i, bd in enumerate(batch_data):
+        if pad_left:
+            collated_batch[i, -bd.size :] = bd
+        else:
+            collated_batch[i, : bd.size] = bd
 
     return collated_batch
 
@@ -89,9 +57,9 @@ def collate_batch_time(batch_time: list[np.ndarray]) -> np.ndarray:
 @dataclass
 class UKBDataConfig:
     data_dir: str = "ukb_real_data"
-    subject_list: str = "participants.bin"
+    subject_list: str = "participants/train_fold.bin"
     seed: int = 42
-    no_event_interval: Optional[float] = 5
+    no_event_interval: Optional[float] = 5 * 365.25
     block_size: Optional[int] = 64
 
 
@@ -99,10 +67,12 @@ class UKBDataset:
 
     def __init__(
         self,
-        data_dir: str,
-        subject_list: str,
-        no_event_interval: Optional[float] = None,
+        data_dir: str = "ukb_real_data",
+        subject_list: str = "participants/train_fold.bin",
+        no_event_interval: Optional[float] = 5 * 365.25,
         block_size: Optional[int] = None,
+        perturb: bool = True,
+        perturb_tokens: Optional[list] = None,
         seed: int = 42,
         memmap: bool = False,
     ):
@@ -120,21 +90,43 @@ class UKBDataset:
         self.rng = np.random.default_rng(seed)
 
         if no_event_interval is not None:
-            self.add_no_event = functools.partial(
-                add_no_event,
+            self.append_no_event = functools.partial(
+                append_no_event,
                 rng=self.rng,
                 interval=no_event_interval,
                 token=self.tokenizer["no_event"],
             )
         else:
-            self.add_no_event = lambda *args: args
+            self.append_no_event = _identity_transform
+
+        if perturb:
+            if perturb_tokens is None:
+                perturb_tokens = [
+                    "bmi_low",
+                    "bmi_mid",
+                    "bmi_high",
+                    "smoking_low",
+                    "smoking_mid",
+                    "smoking_high",
+                    "alcohol_low",
+                    "alcohol_mid",
+                    "alcohol_high",
+                ]
+            self.perturb_tokens = np.array(
+                [self.tokenizer[event] for event in perturb_tokens]
+            )
+            self.perturb_time = functools.partial(
+                perturb_time, tokens=self.perturb_tokens, rng=self.rng
+            )
+        else:
+            self.perturb_time = _identity_transform
 
         if block_size is not None:
             self.crop_block_size = functools.partial(
                 crop_contiguous, block_size=block_size, rng=self.rng
             )
         else:
-            self.crop_block_size = lambda *args: args
+            self.crop_block_size = _identity_transform
 
     def __len__(self):
         return self.participants.size
@@ -150,7 +142,9 @@ class UKBDataset:
         l = self.seq_len[pid]
         x_pid = self.tokens[i : i + l]
         t_pid = self.time_steps[i : i + l]
-        x_pid, t_pid = self.add_no_event(x_pid, t_pid)
+        x_pid, t_pid = self.append_no_event(x_pid, t_pid)
+        x_pid, t_pid = self.perturb_time(x_pid, t_pid)
+        t_pid, x_pid = sort_by_time(t_pid, x_pid)
         x_pid, t_pid = self.crop_block_size(x_pid, t_pid)
 
         return x_pid, t_pid
@@ -164,9 +158,8 @@ class UKBDataset:
             X.append(x)
             T.append(t)
 
-        X = collate_batch_data(X)
-        T = collate_batch_time(T)
-        T, X = sort_by_time(T, X)
+        X = collate_batch(X)
+        T = collate_batch(T, fill_value=-1e4)
 
         X = torch.tensor(X, dtype=torch.long)
         T = torch.tensor(T, dtype=torch.float32)
@@ -191,9 +184,8 @@ class UKBDataset:
             X.append(x)
             T.append(t)
 
-        X = collate_batch_data(X)
-        T = collate_batch_time(T)
-        T, X = sort_by_time(T, X)
+        X = collate_batch(X)
+        T = collate_batch(T, fill_value=-1e4)
         X, T = trim_margin(X, T, trim_val=0)
 
         X = torch.tensor(X, dtype=torch.long)

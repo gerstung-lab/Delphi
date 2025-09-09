@@ -8,16 +8,48 @@ import pandas as pd
 import torch
 import yaml
 
-from delphi.data.transform import add_no_event, crop_priority, sort_by_time, trim_margin
+from delphi.data.transform import (
+    append_no_event,
+    crop_priority,
+    sort_by_time,
+    trim_margin,
+)
 from delphi.data.ukb import (
     UKBDataConfig,
-    collate_batch_data,
-    collate_batch_time,
     load_core_data_package,
 )
 from delphi.data.utils import update_tokenizer
 from delphi.env import DELPHI_DATA_DIR
 from delphi.multimodal import Modality
+
+
+def collate_batch_data(batch_data: list[np.ndarray]) -> np.ndarray:
+
+    if len(batch_data) > 0:
+        max_len = max([bd.size for bd in batch_data])
+        collated_batch = np.full(
+            shape=(len(batch_data), max_len),
+            fill_value=0,
+            dtype=batch_data[0].dtype,
+        )
+        for i, bd in enumerate(batch_data):
+            collated_batch[i, : bd.size] = bd
+    else:
+        return np.empty(shape=(0, 0), dtype=np.float64)
+
+    return collated_batch
+
+
+def collate_batch_time(batch_time: list[np.ndarray]) -> np.ndarray:
+
+    max_len = max([bt.size for bt in batch_time])
+    collated_batch = np.full(
+        shape=(len(batch_time), max_len), fill_value=-1e4, dtype=np.float32
+    )
+    for i, bt in enumerate(batch_time):
+        collated_batch[i, : bt.size] = bt
+
+    return collated_batch
 
 
 @dataclass
@@ -177,7 +209,7 @@ class M4Dataset:
 
         if cfg.no_event_interval is not None:
             self.add_no_event = functools.partial(
-                add_no_event,
+                append_no_event,
                 rng=self.rng,
                 interval=cfg.no_event_interval,
                 token=self.tokenizer["no_event"],
