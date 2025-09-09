@@ -61,7 +61,7 @@ def configure_optimizers(
     no_decay = set()
     blacklist_weight_modules = (torch.nn.LayerNorm, LayerNorm, torch.nn.Embedding)
     for mn, m in model.named_modules():
-        if len(list(m.children())) == 0:
+        if len(list(m.children())) == 0:  # leaf nodes only
             for pn, p in m.named_parameters():
                 fpn = "%s.%s" % (mn, pn) if mn else pn  # full param name
                 # random note: because named_modules and named_parameters are recursive
@@ -83,7 +83,11 @@ def configure_optimizers(
     # so let's manually remove 'lm_head.weight' from decay set. This will include
     # this tensor into optimization via transformer.wte.weight only, and not decayed.
     if "gpt2.lm_head.weight" in decay:
+        # for hf transformers implementation
         decay.remove("gpt2.lm_head.weight")
+    if "lm_head.weight" in decay:
+        # for nano-gpt implementation
+        decay.remove("lm_head.weight")
 
     # validate that we considered every parameter
     param_dict = {pn: p for pn, p in model.named_parameters()}
@@ -99,11 +103,16 @@ def configure_optimizers(
     )
 
     trainable = set()
+    frozen = set()
     for pn, p in model.named_parameters():
         if p.requires_grad:
             trainable.add(pn)
+        else:
+            frozen.add(pn)
     decay = decay.intersection(trainable)
     no_decay = no_decay.intersection(trainable)
+    if len(frozen) > 0:
+        print(f"frozen parameters: {frozen}")
 
     # create the pytorch optimizer object
     optim_groups = [
