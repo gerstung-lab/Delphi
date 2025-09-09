@@ -1,4 +1,5 @@
 import math
+from dataclasses import dataclass, field
 from typing import Optional
 
 import torch
@@ -6,6 +7,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 from delphi.model.components import (
+    AgeEncoding,
     CompetingExpHead,
     CrossEntropyHead,
     DelphiEmbedding,
@@ -220,6 +222,136 @@ class Delphi(torch.nn.Module):
             logits = self.lm_head(
                 x[:, :, :]
             )  # note: using list [-1] to preserve the time dim
+            loss = None
+
+        return logits, loss, att
+
+
+@dataclass
+class Delphi2MConfig:
+    # defaults to config of the OG delphi-2m ckpt
+    block_size: int = 48
+    vocab_size: int = 1270
+    n_layer: int = 12
+    n_head: int = 12
+    n_embd: int = 120
+    dropout: float = 0.0
+    token_dropout: float = 0.0
+    t_min: float = 0.1
+    bias: bool = False
+    mask_ties: bool = True
+    ignore_tokens: list = field(
+        default_factory=lambda: [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    )
+
+
+class Delphi2M(nn.Module):
+    """
+    slightly cleaned up version of delphi-2m
+    """
+
+    model_type = "delphi-2m"
+
+    def __init__(self, config: Delphi2MConfig):
+        super().__init__()
+        assert config.vocab_size is not None
+        assert config.block_size is not None
+        self.config = config
+
+        self.transformer = nn.ModuleDict(
+            dict(
+                wte=nn.Embedding(config.vocab_size, config.n_embd),
+                wae=AgeEncoding(n_embd=config.n_embd),
+                token_drop=nn.Dropout(config.token_dropout),
+                drop=nn.Dropout(config.dropout),
+                h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+                ln_f=LayerNorm(config.n_embd, bias=config.bias),
+            )
+        )
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        # with weight tying when using torch.compile() some warnings get generated:
+        # "UserWarning: functional_call was passed multiple values for tied weights.
+        # This behavior is deprecated and will be an error in future versions"
+        # not 100% sure what this is, so far seems to be harmless. TODO investigate
+        self.transformer.wte.weight = (
+            self.lm_head.weight
+        )  # https://paperswithcode.com/method/weight-tying
+
+        # init all weights
+        self.apply(self._init_weights)
+        # apply special scaled init to the residual projections, per GPT-2 paper
+        for pn, p in self.named_parameters():
+            if pn.endswith("c_proj.weight"):
+                torch.nn.init.normal_(
+                    p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer)
+                )
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    def forward(
+        self, idx, age, targets=None, targets_age=None, validation_loss_mode=False
+    ):
+        tok_emb = self.transformer.wte(idx)
+        age_emb = self.transformer.wae(age.unsqueeze(-1))
+        x = self.transformer.token_drop(tok_emb) * (1 - self.config.token_dropout)
+        x = x + age_emb
+        x = self.transformer.drop(x)
+
+        attn_mask = causal_attention_mask(
+            pad=idx > 0, mask_ties=self.config.mask_ties, t0=age, t1=targets_age
+        )
+
+        att = []
+        for block in self.transformer.h:
+            x, a = block(x, attn_mask)
+            att.append(a)
+        x = self.transformer.ln_f(x)
+        att = torch.stack(att)
+
+        logits = self.lm_head(x)
+        if targets is not None:
+            assert targets_age is not None
+
+            ignored_tokens = self.config.ignore_tokens.copy()
+            if validation_loss_mode:
+                ignored_tokens += [1]
+                logits[..., ignored_tokens] = -torch.inf
+            targets = targets.reshape(-1)
+            pass_tokens = targets != -1
+            for k in ignored_tokens:  # and gender
+                pass_tokens *= targets != k
+
+            loss_ce = F.cross_entropy(
+                logits.reshape(-1, logits.size(-1))[pass_tokens],
+                targets[pass_tokens],
+                ignore_index=-1,
+            )
+
+            lse = torch.logsumexp(logits, -1)
+            lse = -torch.log(torch.exp(-lse) + self.config.t_min)
+            dt = ties_adjusted_delta_t(
+                t0=age,
+                t1=targets_age,
+                attn_mask=attn_mask,
+                mask_ties=self.config.mask_ties,
+                eps=self.config.t_min,
+            )
+            ldt = -torch.log(dt + self.config.t_min).view(-1)
+
+            loss_dt = -(
+                lse.reshape(-1) - torch.exp(lse.reshape(-1) - ldt.reshape(-1))
+            )  ## Exponential log-likelihood (real statistics, TM)
+            loss_dt = torch.mean(loss_dt[pass_tokens])
+
+            loss = {"loss_ce": loss_ce, "loss_dt": loss_dt}
+
+        else:
             loss = None
 
         return logits, loss, att
