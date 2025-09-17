@@ -27,11 +27,11 @@ def perturb_time(
     t: np.ndarray,
     tokens: np.ndarray,
     rng: np.random.Generator,
-    low: int = int(-20 * 365.25),
-    high: int = int(40 * 365.25),
+    low: float = -20 * 365.25,
+    high: float = 40 * 365.25,
 ):
     to_perturb = np.isin(x, tokens)
-    t[to_perturb] += rng.integers(low=low, high=high, size=(to_perturb.sum(),))
+    t[to_perturb] += rng.uniform(low=low, high=high, size=(to_perturb.sum(),))
     return x, t
 
 
@@ -140,8 +140,8 @@ class UKBDataset:
         pid = self.participants[idx]
         i = self.start_pos[pid]
         l = self.seq_len[pid]
-        x_pid = self.tokens[i : i + l]
-        t_pid = self.time_steps[i : i + l]
+        x_pid = self.tokens[i : i + l].astype(np.uint32)
+        t_pid = self.time_steps[i : i + l].astype(np.float32)
         x_pid, t_pid = self.append_no_event(x_pid, t_pid)
         x_pid, t_pid = self.perturb_time(x_pid, t_pid)
         t_pid, x_pid = sort_by_time(t_pid, x_pid)

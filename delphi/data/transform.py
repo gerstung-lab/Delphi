@@ -15,15 +15,18 @@ def append_no_event(
 ) -> tuple[np.ndarray, np.ndarray]:
 
     max_age = np.max(t)
-    # add 1 to ensure no_event does not co-occur with first token
-    min_age = max(np.min(t[t >= 0]), 0) + 1
+    # add 1e-6 to ensure no_event does not co-occur with first token
+    min_age = max(np.min(t[t >= 0]), 0) + 1e-6
+    if min_age >= max_age - interval:
+        return x, t
+
     age_range = max_age - min_age
-    n = int(age_range // interval)
+    n = int(age_range // interval) - 1
 
     if mode == "random":
-        no_event_t = rng.integers(min_age, int(max_age - interval), (n,))
+        no_event_t = rng.uniform(min_age, max_age, size=(n,))
     elif mode == "regular":
-        no_event_t = np.linspace(min_age, int(max_age) - interval, num=n)
+        no_event_t = np.linspace(min_age, max_age, num=n)
     else:
         raise ValueError
 
