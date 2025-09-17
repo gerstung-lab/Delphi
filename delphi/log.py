@@ -19,7 +19,7 @@ class TrainLogConfig:
     run_name: str = datetime.now().strftime("%Y-%m-%d-%H%M%S")
     always_ckpt_after_eval: bool = False
     ckpt_interval: Optional[int] = 1000
-    log_interval: int = 1
+    log_interval: int = 250
 
 
 class TrainLogger:

@@ -12,16 +12,16 @@ from delphi.model.transformer import LayerNorm
 class OptimConfig:
     # adamw optimizer
     learning_rate: float = 6e-4  # max learning rate
-    max_iters: int = 10000  # total number of training iterations
-    weight_decay: float = 1e-1
+    max_iters: int = 100000  # total number of training iterations
+    weight_decay: float = 1e-2
     beta1: float = 0.9
-    beta2: float = 0.95
+    beta2: float = 0.99
     grad_clip: float = 1.0  # clip gradients at this value, or disable if == 0.0
 
     # learning rate decay settings
     schedule: str = "cosine"  # consine, constant
-    warmup_iters: int = 2000  # how many steps to warm up for
-    lr_decay_iters: int = 10000  # should be ~= max_iters per Chinchilla
+    warmup_iters: int = 1000  # how many steps to warm up for
+    lr_decay_iters: int = 100000  # should be ~= max_iters per Chinchilla
     min_lr: float = (
         6e-5  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
     )

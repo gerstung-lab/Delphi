@@ -235,12 +235,12 @@ class Delphi2MConfig:
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 120
-    dropout: float = 0.0
+    dropout: float = 0.1
     token_dropout: float = 0.0
     t_min: float = 0.1
     bias: bool = False
     mask_ties: bool = True
-    ignore_tokens: list = field(
+    ignore_tokens: None | list = field(
         default_factory=lambda: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     )  # 0 always ignored
 
@@ -318,7 +318,9 @@ class Delphi2M(nn.Module):
         if targets is not None:
             assert targets_age is not None
 
-            ignored_tokens = [0] + self.config.ignore_tokens.copy()
+            ignored_tokens = [0]
+            if self.config.ignore_tokens is not None:
+                ignored_tokens += self.config.ignore_tokens.copy()
             if validation_loss_mode:
                 ignored_tokens += [1]
                 logits[..., ignored_tokens] = -torch.inf
