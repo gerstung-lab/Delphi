@@ -38,10 +38,12 @@ def experiment(cfg: TrainConfig):
     }
     train_ds = UKBDataset(
         **data_args,
+        perturb=cfg.augment_lifestyle,
         subject_list=cfg.train_subject_list,
     )
     val_ds = UKBDataset(
         **data_args,
+        perturb=False,
         subject_list=cfg.val_subject_list,
     )
 
