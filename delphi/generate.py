@@ -23,6 +23,7 @@ def legacy_generate(
     no_repeat=True,
     termination_tokens=None,
     top_k=None,
+    stop_at_block_size: bool = True,
 ):
     """
     Take a conditioning sequence of indices idx (LongTensor of shape (b,t)) and complete
@@ -55,10 +56,9 @@ def legacy_generate(
     for _ in range(max_new_tokens):
         logits, _, _ = model(idx, age)
         logits = logits[:, -1, :]
-        if hasattr(model.config, "ignore_tokens"):
-            ignore_tokens = model.config.ignore_tokens
-        else:
-            ignore_tokens = [0]
+        ignore_tokens = [0]
+        if hasattr(model.config, "ignore_tokens") and model.config.ignore_tokens is not None:
+            ignore_tokens += model.config.ignore_tokens
         logits[:, ignore_tokens] = -torch.inf
 
         # optionally crop the logits to only the top k options
@@ -77,10 +77,8 @@ def legacy_generate(
             min=0,
             max=365 * 80,
         ).min(1)
-        idx_next = t_next[1][:, None]  # the index of the min sampled time
-        age_next = (
-            age[..., [-1]] + t_next[0][:, None]
-        )  # the value of the min sampled time
+        idx_next = t_next[1][:, None]
+        age_next = age[..., [-1]] + t_next[0][:, None]
 
         # append sampled index to the running sequence and continue
         idx = torch.cat((idx, idx_next), dim=1)
@@ -89,6 +87,9 @@ def legacy_generate(
         if torch.logical_or(
             torch.isin(idx, termination_tokens).any(-1), age_next > max_age
         ).all():
+            break
+
+        if (idx.shape[1] > model.config.block_size) and stop_at_block_size:
             break
 
     pad = (
