@@ -38,7 +38,7 @@ model.eval()
 model = model.to(device)
 
 
-DATA_ROOT = # fill here
+DATA_ROOT = "data/ukb_simulated_data"
 
 train = np.fromfile(f'{DATA_ROOT}/train.bin', dtype=np.uint32).reshape(-1,3)
 val = np.fromfile(f'{DATA_ROOT}/val.bin', dtype=np.uint32).reshape(-1,3)
