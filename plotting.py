@@ -37,7 +37,7 @@ def waterfall(shap_values, ages=None, max_display=10, show=True):
     shap_values : Explanation
         A one-dimensional :class:`.Explanation` object that contains the feature values and SHAP values to plot.
 
-    max_display : str
+    max_display : int
         The maximum number of features to plot (default is 10).
 
     show : bool
