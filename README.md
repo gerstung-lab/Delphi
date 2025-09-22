@@ -5,7 +5,7 @@
 
 ## Learning the natural history of human disease with generative transformers
 
-[[`Paper`](https://www.medrxiv.org/content/10.1101/2024.06.07.24308553)] [[`BibTeX`](#Citation)]
+[[`Paper`](https://doi.org/10.1038/s41586-025-09529-3)] [[`BibTeX`](#Citation)]
 
 Artem Shmatko*, Alexander Wolfgang Jung*, Kumar Gaurav*, Søren Brunak, Laust Mortensen, Ewan Birney, Tom Fitzgerald, Moritz Gerstung (*Equal Contribution)
 
@@ -86,12 +86,13 @@ There are the following notebooks in the root folder:
 ## Citation
 
 ```bibtex
-@article{Shmatko2024.06.07.24308553,
-	title = {Learning the natural history of human disease with generative transformers},
-    	author = {Shmatko, Artem and Jung, Alexander Wolfgang and Gaurav, Kumar and Brunak, S{\o}ren and Mortensen, Laust and Birney, Ewan and Fitzgerald, Tom and Gerstung, Moritz},
-	doi = {10.1101/2024.06.07.24308553},
-	journal = {medRxiv},
-	publisher = {Cold Spring Harbor Laboratory Press},
-	year = {2024}
+@article{shmatko2025,
+  title = {Learning the natural history of human disease with generative transformers},
+  author = {Artem Shmatko and Alexander Wolfgang Jung and Kumar Gaurav and Søren Brunak and Laust Hvas Mortensen and Ewan Birney and Tom Fitzgerald and Moritz Gerstung},
+  journal = {Nature},
+  year = {2025},
+  isbn = {1476-4687},
+  doi = {10.1038/s41586-025-09529-3},
+  url = {https://doi.org/10.1038/s41586-025-09529-3}
 }
 ```
