@@ -47,7 +47,7 @@ To convert raw UK Biobank data into the format required for training, please ref
 
 If you are interested in using your own data, please refer to the `data/README.md` file for the details on how to transform it into a Delphi-compatible format.
 
-The synthetic dataset that is available in the `data/ukb_simulated_data/` is already in the desired format and can be used for model training demo. 
+The synthetic dataset that is available in the `data/ukb_simulated_data/` is already in the desired format and can be used for the model training demo. 
 
 ## Training
 
@@ -70,10 +70,10 @@ We provide a Dockerfile to run the training and downstream analyses. Please refe
 
 ## Notebooks
 
-After training the model, the obtailed checkpoints can be used to run the analysis notebooks.
+After training the model, the obtained checkpoints can be used to run the analysis notebooks.
 Please note that in order to reproduce the results from the paper, it is necessary to train the model on the UK Biobank data. 
 
-The `notebooks` folder contains the following notebooks:
+There are the following notebooks in the root folder:
 
 `evaluate_delphi.ipynb`: The notebook is used to evaluate Delphi-2M in terms of prediction accuracy compared to age-sex-based epidemiological baseline and calibration of the predicted risks. Furthermore, it explores the attention mechanism of the model and the structure of the latent space using UMAP of the learned disease embeddings.
 
