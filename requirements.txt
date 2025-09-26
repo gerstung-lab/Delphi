@@ -7,3 +7,6 @@ pandas
 umap-learn
 tqdm
 statsmodels
+fastapi
+uvicorn
+pyyaml
