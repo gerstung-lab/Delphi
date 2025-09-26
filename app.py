@@ -44,11 +44,15 @@ async def get_model_stats():
 @app.post("/extrapolate_trajectory")
 async def extrapolate_trajectory(trajectory: List[HealthEvent], max_new_tokens: int = 100):
     try:
-        # Convert to list of tuples
+        # Validate ages
+        for event in trajectory:
+            if not isinstance(event.age, (float, int)) or event.age < 0 or event.age > 36525.0:
+                raise HTTPException(status_code=400, detail=f"Invalid age: {event.age}. Must be a float between 0 and 36525.0.")
+                # Convert to list of tuples
         traj_list = [(event.event, event.age) for event in trajectory]
         
-        # Convert ages to days
-        traj_days = [(a, b * 365.25) for a, b in traj_list]
+        # Ages are already in days, no conversion needed
+        traj_days = traj_list
         
         # Get events and ages
         events = [name_to_token_id.get(event[0], 0) for event in traj_days]  # Default to 0 if not found
