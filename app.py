@@ -31,18 +31,66 @@ model = model.to(device)
 delphi_labels = pd.read_csv('delphi_labels_chapters_colours_icd.csv')
 name_to_token_id = {row[1]['name']: row[1]['index'] for row in delphi_labels.iterrows()}
 
-app = FastAPI(title="Delphi Health Trajectory Extrapolator")
+app = FastAPI(
+    title="Delphi Health Trajectory Extrapolator",
+    description="A FastAPI service for health trajectory extrapolation using the Delphi model. "
+               "Delphi is a modified GPT-2 model that learns the natural history of human disease.",
+    version="1.0.0",
+    contact={
+        "name": "Delphi Team",
+        "url": "https://github.com/gerstung-lab/Delphi",
+    },
+    license_info={
+        "name": "MIT",
+        "url": "https://opensource.org/license/mit",
+    },
+)
 
 class HealthEvent(BaseModel):
-    event: str
-    age: float
+    event: str = "The health event name (e.g., 'Male', 'B01 Varicella [chickenpox]', 'No event')"
+    age: float = "Age in days (0.0 to 36525.0, where 36525.0 = 100 years)"
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "event": "B01 Varicella [chickenpox]",
+                "age": 730.5
+            }
+        }
 
-@app.get("/model_stats")
+class TrajectoryResponse(BaseModel):
+    trajectory: List[dict]
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "trajectory": [
+                    {"age": 0.0, "event": "Male"},
+                    {"age": 2.0, "event": "B01 Varicella [chickenpox]"},
+                    {"age": 45.8, "event": "B35 Dermatophytosis"},
+                    {"age": 73.7, "event": "Death"}
+                ]
+            }
+        }
+
+@app.get("/model_stats", 
+         summary="Get Model Statistics", 
+         description="Returns the model configuration parameters from the loaded checkpoint.",
+         response_description="Dictionary containing model arguments and configuration")
 async def get_model_stats():
     return checkpoint['model_args']
 
-@app.post("/extrapolate_trajectory")
-async def extrapolate_trajectory(trajectory: List[HealthEvent], max_new_tokens: int = 100):
+@app.post("/extrapolate_trajectory", 
+          response_model=TrajectoryResponse,
+          summary="Extrapolate Health Trajectory", 
+          description="Extrapolates a partial health trajectory using the Delphi model. "
+                     "Provide a list of health events with ages in days, and the model will "
+                     "generate future health events until death or max_new_tokens is reached.",
+          response_description="Complete health trajectory including input events and generated future events")
+async def extrapolate_trajectory(
+    trajectory: List[HealthEvent], 
+    max_new_tokens: int = 100
+):
     try:
         # Validate ages
         for event in trajectory:

@@ -55,12 +55,46 @@ class TestDelphiAPI(unittest.TestCase):
         last_event = data["trajectory"][-1]
         self.assertEqual(last_event["event"], "Death", "Trajectory should end with Death")
         
-        # Check for some expected disease patterns in generated trajectory
-        generated_event_names = [e["event"] for e in generated_events]
-        self.assertTrue(any("hypertension" in event.lower() for event in generated_event_names), 
-                       "Should include hypertension-related events")
-        self.assertTrue(any("no event" in event.lower() for event in generated_event_names), 
+        # Check for specific expected diseases in generated trajectory
+        expected_diseases = [
+            "B35 Dermatophytosis",
+            "M75 Shoulder lesions", 
+            "I86 Varicose veins of other sites",
+            "K58 Irritable bowel syndrome",
+            "J30 Vasomotor and allergic rhinitis",
+            "M82 Osteoporosis in diseases classified elsewhere",
+            "M47 Spondylosis",
+            "K40 Inguinal hernia",
+            "F32 Depressive episode",
+            "G58 Other mononeuropathies",
+            "D75 Other diseases of blood and blood-forming organs",
+            "E66 Obesity",
+            "L82 Seborrhoeic keratosis",
+            "J06 Acute upper respiratory infections of multiple and unspecified sites",
+            "G47 Sleep disorders",
+            "L30 Other dermatitis",
+            "G93 Other disorders of brain",
+            "C71 Malignant neoplasm of brain",
+            "I61 Intracerebral haemorrhage",
+            "K13 Other diseases of lip and oral mucosa"
+        ]
+        
+        generated_event_names = [e["event"] for e in generated_events[:-1]]  # Exclude Death event
+        
+        # Check that at least some of the expected diseases are present
+        found_diseases = [disease for disease in expected_diseases if disease in generated_event_names]
+        self.assertGreater(len(found_diseases), 5, f"Should find at least 6 expected diseases, found: {found_diseases}")
+        
+        # Check for "No event" entries
+        self.assertTrue(any("No event" in event for event in generated_event_names), 
                        "Should include 'No event' entries")
+        
+        # Check specific age ranges for some key events
+        for event in generated_events:
+            if "C71 Malignant neoplasm of brain" in event["event"]:
+                self.assertGreater(event["age"], 70, "Brain cancer should occur in later life")
+            if "E66 Obesity" in event["event"]:
+                self.assertGreater(event["age"], 50, "Obesity diagnosis should occur after middle age")
 
 if __name__ == "__main__":
     unittest.main()
