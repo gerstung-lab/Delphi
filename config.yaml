@@ -1,0 +1,3 @@
+ckpt_path: "Delphi-2M/ckpt.pt"
+device: "cpu"
+dtype: "float32"

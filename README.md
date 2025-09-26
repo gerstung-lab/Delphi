@@ -83,6 +83,47 @@ There are the following notebooks in the root folder:
 
 `data/ukb_simulated_data/example_ukb_to_bin.ipynb`: The notebook is used to convert the raw UK Biobank data into the format required for training.
 
+## FastAPI Service for Delphi
+
+A simple FastAPI service is provided to allow inference and model stats via HTTP endpoints.
+
+### Setup
+
+1. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. Edit `config.yaml` to specify the checkpoint path and device:
+   ```yaml
+   ckpt_path: "Delphi-2M/ckpt.pt"
+   device: "cpu"
+   dtype: "float32"
+   ```
+
+3. Start the service:
+   ```bash
+   uvicorn app:app --reload
+   ```
+
+### Endpoints
+
+- `POST /extrapolate_trajectory`  
+  Extrapolates a partial health trajectory. The POST body should be a JSON array of events:
+  ```json
+  [
+    {"event": "Male", "age": 0},
+    {"event": "B01 Varicella [chickenpox]", "age": 2},
+    ...
+  ]
+  ```
+  Returns the extrapolated trajectory as a list of events and ages.
+
+- `GET /model_stats`  
+  Returns the model arguments from the checkpoint (same as `checkpoint['model_args']`).
+
+API documentation is available at `/docs` when running the service.
+
 ## Citation
 
 ```bibtex
