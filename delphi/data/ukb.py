@@ -1,11 +1,12 @@
 import functools
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Literal, Optional
 
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 import yaml
 
 from delphi.data.transform import append_no_event, crop_contiguous, trim_margin
@@ -32,6 +33,17 @@ def perturb_time(
 ):
     to_perturb = np.isin(x, tokens)
     t[to_perturb] += rng.uniform(low=low, high=high, size=(to_perturb.sum(),))
+    return x, t
+
+
+def exclude_tokens(
+    x: np.ndarray,
+    t: np.ndarray,
+    blacklist: np.ndarray
+):
+    to_exclude = np.isin(x, blacklist)
+    x = x[~to_exclude]
+    t = t[~to_exclude]
     return x, t
 
 
@@ -72,7 +84,11 @@ class UKBDataset:
         no_event_interval: Optional[float] = 5 * 365.25,
         block_size: Optional[int] = None,
         perturb: bool = True,
-        perturb_tokens: Optional[list] = None,
+        perturb_list: Optional[list] = None,
+        exclude: bool = False,
+        exclude_list: Optional[list] = None,
+        crop_mode: Literal["left", "right", "random"] = "right",
+        shift_no_event_target: bool = False,
         seed: int = 42,
         memmap: bool = False,
     ):
@@ -89,6 +105,8 @@ class UKBDataset:
         )
         self.rng = np.random.default_rng(seed)
 
+        self.no_event_interval = no_event_interval
+        self.shift_no_event_target = shift_no_event_target
         if no_event_interval is not None:
             self.append_no_event = functools.partial(
                 append_no_event,
@@ -99,31 +117,44 @@ class UKBDataset:
         else:
             self.append_no_event = _identity_transform
 
+        lifestyle = [
+            "bmi_low",
+            "bmi_mid",
+            "bmi_high",
+            "smoking_low",
+            "smoking_mid",
+            "smoking_high",
+            "alcohol_low",
+            "alcohol_mid",
+            "alcohol_high",
+        ]
+        if exclude:
+            if exclude_list is None:
+                exclude_list = lifestyle
+            tokens_to_exclude = np.array(
+                [self.tokenizer[event] for event in exclude_list]
+            )
+            self.exclude_tokens = functools.partial(
+                exclude_tokens, blacklist=tokens_to_exclude
+            )
+        else:
+            self.exclude_tokens = _identity_transform
+
         if perturb:
-            if perturb_tokens is None:
-                perturb_tokens = [
-                    "bmi_low",
-                    "bmi_mid",
-                    "bmi_high",
-                    "smoking_low",
-                    "smoking_mid",
-                    "smoking_high",
-                    "alcohol_low",
-                    "alcohol_mid",
-                    "alcohol_high",
-                ]
-            self.perturb_tokens = np.array(
-                [self.tokenizer[event] for event in perturb_tokens]
+            if perturb_list is None:
+                perturb_list = lifestyle
+            tokens_to_perturb = np.array(
+                [self.tokenizer[event] for event in perturb_list]
             )
             self.perturb_time = functools.partial(
-                perturb_time, tokens=self.perturb_tokens, rng=self.rng
+                perturb_time, tokens=tokens_to_perturb, rng=self.rng
             )
         else:
             self.perturb_time = _identity_transform
 
         if block_size is not None:
             self.crop_block_size = functools.partial(
-                crop_contiguous, block_size=block_size, rng=self.rng
+                crop_contiguous, block_size=block_size, rng=self.rng, mode=crop_mode
             )
         else:
             self.crop_block_size = _identity_transform
@@ -142,6 +173,7 @@ class UKBDataset:
         l = self.seq_len[pid]
         x_pid = self.tokens[i : i + l].astype(np.uint32)
         t_pid = self.time_steps[i : i + l].astype(np.float32)
+        x_pid, t_pid = self.exclude_tokens(x_pid, t_pid)
         x_pid, t_pid = self.append_no_event(x_pid, t_pid)
         x_pid, t_pid = self.perturb_time(x_pid, t_pid)
         t_pid, x_pid = sort_by_time(t_pid, x_pid)
@@ -168,30 +200,6 @@ class UKBDataset:
             return X[:, :-1], T[:, :-1], X[:, 1:], T[:, 1:]
         else:
             return X, T
-
-    def get_prompt_batch(self, batch_idx: Iterable, start_age: float):
-
-        X = []
-        T = []
-        for idx in batch_idx:
-            x, t = self[idx]
-            too_old = t > start_age
-            x[too_old] = 0
-            t[too_old] = -1e4
-            no_event_token = self.tokenizer["no_event"]
-            x = np.pad(x, (0, 1), "constant", constant_values=no_event_token)
-            t = np.pad(t, (0, 1), "constant", constant_values=start_age)
-            X.append(x)
-            T.append(t)
-
-        X = collate_batch(X)
-        T = collate_batch(T, fill_value=-1e4)
-        X, T = trim_margin(X, T, trim_val=0)
-
-        X = torch.tensor(X, dtype=torch.long)
-        T = torch.tensor(T, dtype=torch.float32)
-
-        return X, T
 
 
 def load_core_data_package(data_dir: str, subject_list: str, memmap: bool = False):
