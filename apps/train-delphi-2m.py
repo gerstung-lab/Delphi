@@ -6,7 +6,7 @@ from omegaconf import OmegaConf
 
 from delphi import distributed
 from delphi.data.ukb import UKBDataset
-from delphi.model import Delphi2M, Delphi2MConfig
+from delphi.model import DelphiZero, Delphi2M, Delphi2MConfig
 from delphi.train import BaseTrainer, TrainBaseConfig
 
 
@@ -18,7 +18,10 @@ class TrainConfig(TrainBaseConfig):
     val_subject_list: str = "participants/val_fold.bin"
     seed: int = 42
     no_event_interval: float = 5.0 * 365.25
+    exclude_lifestyle: bool = False
     augment_lifestyle: bool = True
+    crop_mode: str = "right"
+    model_type: str = "delphi-2m"
     model: Delphi2MConfig = field(default_factory=Delphi2MConfig)
 
 
@@ -35,6 +38,8 @@ def experiment(cfg: TrainConfig):
         "seed": cfg.seed,
         "no_event_interval": cfg.no_event_interval,
         "block_size": cfg.model.block_size,
+        "crop_mode": cfg.crop_mode,
+        "exclude": cfg.exclude_lifestyle
     }
     train_ds = UKBDataset(
         **data_args,
@@ -48,7 +53,13 @@ def experiment(cfg: TrainConfig):
     )
 
     if cfg.init_from == "scratch":
-        model = Delphi2M(cfg.model)
+        print(f"initializing {cfg.model_type} from scratch")
+        if cfg.model_type == "delphi-2m":
+            model = Delphi2M(cfg.model)
+        elif cfg.model_type == "delphi-zero":
+            model = DelphiZero(cfg.model)
+        else:
+            raise NotImplementedError
     else:
         raise NotImplementedError
 
