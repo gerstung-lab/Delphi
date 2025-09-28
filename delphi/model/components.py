@@ -292,8 +292,8 @@ def target_mask(
 def ties_adjusted_delta_t(
     t0: torch.Tensor,
     t1: torch.Tensor,
-    attn_mask: torch.Tensor,
     mask_ties: bool,
+    attn_mask: torch.Tensor | None = None,
     eps: float = 1.0,
 ) -> torch.Tensor:
 
@@ -301,6 +301,7 @@ def ties_adjusted_delta_t(
     delta_t = torch.clamp(delta_t, min=eps)
 
     if mask_ties:
+        assert attn_mask is not None
         delta_t = torch.gather(
             delta_t,
             -1,
