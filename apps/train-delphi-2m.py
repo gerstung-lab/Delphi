@@ -6,7 +6,7 @@ from omegaconf import OmegaConf
 
 from delphi import distributed
 from delphi.data.ukb import UKBDataset
-from delphi.model import DelphiZero, Delphi2M, Delphi2MConfig
+from delphi.model import Delphi2M, Delphi2MConfig
 from delphi.train import BaseTrainer, TrainBaseConfig
 
 
@@ -22,6 +22,7 @@ class TrainConfig(TrainBaseConfig):
     exclude_lifestyle: bool = False
     augment_lifestyle: bool = True
     crop_mode: str = "right"
+    fix_no_event_rate: bool = False
     model_type: str = "delphi-2m"
     model: Delphi2MConfig = field(default_factory=Delphi2MConfig)
 
@@ -41,7 +42,7 @@ def experiment(cfg: TrainConfig):
         "no_event_mode": cfg.no_event_mode,
         "block_size": cfg.model.block_size,
         "crop_mode": cfg.crop_mode,
-        "exclude": cfg.exclude_lifestyle
+        "exclude": cfg.exclude_lifestyle,
     }
     train_ds = UKBDataset(
         **data_args,
@@ -54,14 +55,12 @@ def experiment(cfg: TrainConfig):
         subject_list=cfg.val_subject_list,
     )
 
+    if cfg.fix_no_event_rate:
+        cfg.model.no_event_rate = 1 / cfg.no_event_interval
+
     if cfg.init_from == "scratch":
         print(f"initializing {cfg.model_type} from scratch")
-        if cfg.model_type == "delphi-2m":
-            model = Delphi2M(cfg.model)
-        elif cfg.model_type == "delphi-zero":
-            model = DelphiZero(cfg.model)
-        else:
-            raise NotImplementedError
+        model = Delphi2M(cfg.model)
     else:
         raise NotImplementedError
 

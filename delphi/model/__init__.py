@@ -1,1 +1,1 @@
-from .transformer import DelphiZero, Delphi2M, Delphi2MConfig
+from .transformer import Delphi2M, Delphi2MConfig

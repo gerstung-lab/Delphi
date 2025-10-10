@@ -6,7 +6,10 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from delphi.exponential import sample_competing_exponentials, sample_zero_inflated_exponentials
+from delphi.exponential import (
+    sample_competing_exponentials,
+    sample_zero_inflated_exponentials,
+)
 from delphi.model.components import (
     AgeEncoding,
     CompetingExpHead,
@@ -244,11 +247,17 @@ class Delphi2MConfig:
     ignore_tokens: None | list = field(
         default_factory=lambda: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     )  # 0 always ignored
+    zero_inflate: bool = False
+    no_event_rate: None | float = None
+    mask_no_event_attention: bool = False
 
 
 class Delphi2M(nn.Module):
     """
-    slightly cleaned up version of delphi-2m
+    slightly cleaned up version of delphi-2m with extra features:
+        - zero inflation
+        - fix no-event rate as a model parameter
+        - mask attention to previous no-event tokens
     """
 
     model_type = "delphi-2m"
@@ -278,6 +287,14 @@ class Delphi2M(nn.Module):
             self.lm_head.weight
         )  # https://paperswithcode.com/method/weight-tying
 
+        if config.zero_inflate:
+            assert not config.mask_ties, "mask_ties must be False for zero inflation"
+            self.pi_head = nn.Sequential(
+                nn.Linear(config.n_embd, 32, bias=False),
+                nn.ReLU(),
+                nn.Linear(32, 1, bias=False),
+            )
+
         # init all weights
         self.apply(self._init_weights)
         # apply special scaled init to the residual projections, per GPT-2 paper
@@ -304,8 +321,11 @@ class Delphi2M(nn.Module):
         x = x + age_emb
         x = self.transformer.drop(x)
 
+        pad = idx > 0
+        if self.config.mask_no_event_attention:
+            pad = idx > 1
         attn_mask = causal_attention_mask(
-            pad=idx > 0, mask_ties=self.config.mask_ties, t0=age, t1=targets_age
+            pad=pad, mask_ties=self.config.mask_ties, t0=age, t1=targets_age
         )
 
         att = []
@@ -316,6 +336,13 @@ class Delphi2M(nn.Module):
         att = torch.stack(att)
 
         logits = self.lm_head(x)
+        if self.config.no_event_rate is not None:
+            logits[..., 1] = math.log(self.config.no_event_rate)
+        output = {"logits": logits}
+        if self.config.zero_inflate:
+            pi = self.pi_head(x).squeeze(-1)
+            output["pi"] = pi
+
         if targets is not None:
             assert targets_age is not None
 
@@ -344,12 +371,26 @@ class Delphi2M(nn.Module):
                 attn_mask=attn_mask,
                 mask_ties=self.config.mask_ties,
                 eps=self.config.t_min,
-            )
-            ldt = -torch.log(dt + self.config.t_min).view(-1)
+            ).view(-1)
+            ldt = -torch.log(dt + self.config.t_min)
 
-            loss_dt = -(
-                lse.reshape(-1) - torch.exp(lse.reshape(-1) - ldt.reshape(-1))
-            )  ## Exponential log-likelihood (real statistics, TM)
+            if not self.config.zero_inflate:
+                loss_dt = -(
+                    lse.reshape(-1) - torch.exp(lse.reshape(-1) - ldt.reshape(-1))
+                )  ## Exponential log-likelihood (real statistics, TM)
+            else:
+                log_likelihood = lse.reshape(-1) - torch.exp(lse.reshape(-1) - ldt)
+                lse = lse.view(-1)
+                zero_case_nll = -(
+                    F.softplus(-pi.view(-1) + lse) - F.softplus(-pi.view(-1))
+                )
+                nonzero_case_nll = -(
+                    log_likelihood - pi.view(-1) - F.softplus(-pi.view(-1))
+                )
+                loss_dt = (
+                    zero_case_nll * (dt == 0).float()
+                    + nonzero_case_nll * (dt > 0).float()
+                )
             loss_dt = torch.mean(loss_dt[pass_tokens])
 
             loss = {"loss_ce": loss_ce, "loss_dt": loss_dt}
@@ -357,7 +398,7 @@ class Delphi2M(nn.Module):
         else:
             loss = None
 
-        return logits, loss, att
+        return output, loss, att
 
     @torch.no_grad()
     def generate(
@@ -388,10 +429,14 @@ class Delphi2M(nn.Module):
             max_new_tokens = 128
 
         for _ in range(max_new_tokens):
-            logits, _, _ = self.forward(idx, age)
+            output, _, _ = self.forward(idx, age)
+            logits = output["logits"]
             logits = logits[:, -1, :]
             ignore_tokens = [0]
-            if hasattr(self.config, "ignore_tokens") and self.config.ignore_tokens is not None:
+            if (
+                hasattr(self.config, "ignore_tokens")
+                and self.config.ignore_tokens is not None
+            ):
                 ignore_tokens += self.config.ignore_tokens
             logits[:, ignore_tokens] = -torch.inf
 
@@ -404,7 +449,13 @@ class Delphi2M(nn.Module):
                 fill[fill == 1] = 0
                 logits = logits.scatter_(1, fill, -torch.inf)
 
-            idx_next, time_til_next = sample_competing_exponentials(logits=logits)
+            if not self.config.zero_inflate:
+                idx_next, time_til_next = sample_competing_exponentials(logits=logits)
+            else:
+                idx_next, time_til_next = sample_zero_inflated_exponentials(
+                    logits=logits, pi=output["pi"]
+                )
+
             age_next = age[..., [-1]] + time_til_next
 
             idx = torch.cat((idx, idx_next), dim=1)
@@ -440,198 +491,3 @@ class Delphi2M(nn.Module):
             ).transpose(0, 1)
 
         return idx, age, logits
-
-
-class DelphiZero(nn.Module):
-
-    model_type = "delphi-zero"
-
-    def __init__(self, config: Delphi2MConfig):
-        super().__init__()
-        self.config = config
-
-        self.transformer = nn.ModuleDict(
-            dict(
-                wte=nn.Embedding(config.vocab_size, config.n_embd),
-                wae=AgeEncoding(n_embd=config.n_embd),
-                token_drop=nn.Dropout(config.token_dropout),
-                drop=nn.Dropout(config.dropout),
-                h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-                ln_f=LayerNorm(config.n_embd, bias=config.bias),
-            )
-        )
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.transformer.wte.weight = self.lm_head.weight
-        self.pi_head = nn.Sequential(
-            nn.Linear(config.n_embd, 32, bias=False),
-            nn.ReLU(),
-            nn.Linear(32, 1, bias=False),
-        )
-
-        self.apply(self._init_weights)
-        for pn, p in self.named_parameters():
-            if pn.endswith("c_proj.weight"):
-                torch.nn.init.normal_(
-                    p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer)
-                )
-
-    def _init_weights(self, module):
-        if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-
-    def forward(
-        self, idx, age, targets=None, targets_age=None, validation_loss_mode=False
-    ):
-        tok_emb = self.transformer.wte(idx)
-        age_emb = self.transformer.wae(age.unsqueeze(-1))
-        x = self.transformer.token_drop(tok_emb) * (1 - self.config.token_dropout)
-        x = x + age_emb
-        x = self.transformer.drop(x)
-
-        attn_mask = causal_attention_mask(
-            pad=idx > 0, mask_ties=False, t0=age, t1=targets_age
-        )
-
-        att = []
-        for block in self.transformer.h:
-            x, a = block(x, attn_mask)
-            att.append(a)
-        x = self.transformer.ln_f(x)
-        att = torch.stack(att)
-
-        logits = self.lm_head(x)
-        pi = self.pi_head(x).squeeze(-1)
-        if targets is not None:
-            assert targets_age is not None
-
-            ignored_tokens = [0]
-            if self.config.ignore_tokens is not None:
-                ignored_tokens += self.config.ignore_tokens.copy()
-            if validation_loss_mode:
-                ignored_tokens += [1]
-                logits[..., ignored_tokens] = -torch.inf
-            targets = targets.reshape(-1)
-            pass_tokens = targets != -1
-            for k in ignored_tokens:
-                pass_tokens *= targets != k
-
-            loss_ce = F.cross_entropy(
-                logits.reshape(-1, logits.size(-1))[pass_tokens],
-                targets[pass_tokens],
-                ignore_index=-1,
-            )
-
-            lse = torch.logsumexp(logits, -1)
-            lse = -torch.log(torch.exp(-lse) + self.config.t_min)
-            dt = ties_adjusted_delta_t(
-                t0=age,
-                t1=targets_age,
-                mask_ties=False,
-                eps=0,
-            ).view(-1)
-            ldt = -torch.log(dt + self.config.t_min)
-
-            log_likelihood = lse.reshape(-1) - torch.exp(lse.reshape(-1) - ldt)
-            lse = lse.view(-1)
-            zero_case_nll = -(F.softplus(-pi.view(-1) + lse) - F.softplus(-pi.view(-1)))
-            nonzero_case_nll = -(log_likelihood - pi.view(-1) - F.softplus(-pi.view(-1)))
-            loss_dt = (
-                zero_case_nll * (dt == 0).float()
-                + nonzero_case_nll * (dt > 0).float()
-            )
-            loss_dt = torch.mean(loss_dt[pass_tokens])
-
-            loss = {"loss_ce": loss_ce, "loss_dt": loss_dt}
-
-        else:
-            loss = None
-
-        return (logits, pi), loss, att
-
-    @torch.no_grad()
-    def generate(
-        self,
-        idx,
-        age,
-        max_new_tokens=100,
-        max_age=85 * 365.25,
-        no_repeat=True,
-        termination_tokens=None,
-        top_k=None,
-        stop_at_block_size: bool = True,
-    ):
-        if termination_tokens is None:
-            import warnings
-
-            warnings.warn(
-                "When using a custem dataset, consider changing the `termination_tokens` argument."
-            )
-            termination_tokens = [1269]
-
-        termination_tokens = torch.tensor(
-            termination_tokens, dtype=torch.int64, device=idx.device
-        )
-        mask_time = -10000
-
-        if max_new_tokens == -1:
-            max_new_tokens = 128
-
-        for _ in range(max_new_tokens):
-            (logits, pi), _, _ = self.forward(idx=idx, age=age)
-            logits = logits[:, -1, :]
-            pi = pi[:, -1]
-            ignore_tokens = [0]
-            if hasattr(self.config, "ignore_tokens") and self.config.ignore_tokens is not None:
-                ignore_tokens += self.config.ignore_tokens
-            logits[:, ignore_tokens] = -torch.inf
-
-            if top_k is not None:
-                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < v[:, [-1]]] = -torch.inf
-
-            if no_repeat:
-                fill = idx.clone()
-                fill[fill == 1] = 0
-                logits = logits.scatter_(1, fill, -torch.inf)
-
-            idx_next, time_til_next = sample_zero_inflated_exponentials(logits=logits, pi=pi)
-            age_next = age[..., [-1]] + time_til_next
-
-            idx = torch.cat((idx, idx_next), dim=1)
-            age = torch.cat((age, age_next), dim=1)
-
-            if torch.logical_or(
-                torch.isin(idx, termination_tokens).any(-1), age_next > max_age
-            ).all():
-                break
-
-            if (idx.shape[1] > self.config.block_size) and stop_at_block_size:
-                break
-
-        pad = (
-            torch.cumsum(
-                torch.cumsum(torch.isin(idx, termination_tokens), 1).bool().int(), 1
-            )
-            > 1
-        ) + (age > max_age)
-
-        (logits, _), _, _ = self.forward(idx, age)
-        idx[pad] = 0
-        age[pad] = mask_time
-
-        if no_repeat:
-            fill = idx + 0
-            fill[fill == 1] = 0
-            logits = torch.stack(
-                [
-                    logits[:, j].scatter_(1, fill[:, : j + 1], -torch.inf)
-                    for j in range(fill.shape[1])
-                ]
-            ).transpose(0, 1)
-
-        return idx, age, logits
-
