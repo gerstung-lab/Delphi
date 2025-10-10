@@ -14,26 +14,49 @@ def append_no_event(
     token: int = 1,
 ) -> tuple[np.ndarray, np.ndarray]:
 
-    max_age = np.max(t)
-    # add 1e-6 to ensure no_event does not co-occur with first token
-    min_age = max(np.min(t[t >= 0]), 0) + 1e-6
-    if min_age >= max_age - interval:
-        return x, t
-
-    age_range = max_age - min_age
-    n = int(age_range // interval) - 1
-
     if mode == "random":
-        no_event_t = rng.uniform(min_age, max_age, size=(n,))
+        max_age = np.max(t)
+        # add 1e-6 to ensure no_event does not co-occur with first token
+        min_age = max(np.min(t[t >= 0]), 0) + 1e-6
+        age_range = max_age - min_age
+        n = int(age_range // interval) - 1
+        if n <= 0:
+            no_event_t = np.array([])
+        else:
+            no_event_t = rng.uniform(min_age, max_age, size=(n,))
     elif mode == "regular":
-        no_event_t = np.linspace(min_age, max_age, num=n)
+        max_age = np.max(t)
+        min_age = max(np.min(t[t >= 0]), 0) + 1e-6
+        age_range = max_age - min_age
+        n = int(age_range // interval) - 1
+        if n <= 0:
+            no_event_t = np.array([])
+        else:
+            no_event_t = np.linspace(min_age, max_age, num=n)
+    elif mode == "legacy-random":
+        min_age = np.min(t[t >= 0])
+        max_age = np.max(t)
+        no_event_t = rng.uniform(1, 36525, size=(int(36525 / interval),))
+        no_event_t = no_event_t[np.logical_and(
+            no_event_t >= min_age, no_event_t < max_age
+        )]
+    elif mode == "exponential":
+        rate = 1 / interval
+        dt = np.diff(t)
+        n_gaps = len(dt)
+        max_per_gap = int(rate * dt.max() * 4)
+        exp_samples = rng.exponential(1/rate, size=(n_gaps, max_per_gap))
+        cumsum = np.cumsum(exp_samples, axis=1)
+        valid_mask = cumsum < dt[:, None]
+        absolute_times = t[:-1, None] + cumsum
+        no_event_t = absolute_times[valid_mask]
     else:
         raise ValueError
 
     no_event_t = no_event_t.astype(np.float32)
-    no_event_X = np.full(no_event_t.shape, token)
+    no_event_x = np.full(no_event_t.shape, token)
 
-    x = np.concatenate((x, no_event_X))
+    x = np.concatenate((x, no_event_x))
     t = np.concatenate((t, no_event_t))
 
     return x, t

@@ -18,6 +18,7 @@ class TrainConfig(TrainBaseConfig):
     val_subject_list: str = "participants/val_fold.bin"
     seed: int = 42
     no_event_interval: float = 5.0 * 365.25
+    no_event_mode: str = "legacy-random"
     exclude_lifestyle: bool = False
     augment_lifestyle: bool = True
     crop_mode: str = "right"
@@ -37,6 +38,7 @@ def experiment(cfg: TrainConfig):
         "data_dir": cfg.data_dir,
         "seed": cfg.seed,
         "no_event_interval": cfg.no_event_interval,
+        "no_event_mode": cfg.no_event_mode,
         "block_size": cfg.model.block_size,
         "crop_mode": cfg.crop_mode,
         "exclude": cfg.exclude_lifestyle

@@ -82,13 +82,14 @@ class UKBDataset:
         data_dir: str = "ukb_real_data",
         subject_list: str = "participants/train_fold.bin",
         no_event_interval: Optional[float] = 5 * 365.25,
+        no_event_mode: str = "legacy-random",
+        shift_no_event_target: bool = False,
         block_size: Optional[int] = None,
         perturb: bool = True,
         perturb_list: Optional[list] = None,
         exclude: bool = False,
         exclude_list: Optional[list] = None,
         crop_mode: Literal["left", "right", "random"] = "right",
-        shift_no_event_target: bool = False,
         seed: int = 42,
         memmap: bool = False,
     ):
@@ -113,6 +114,7 @@ class UKBDataset:
                 rng=self.rng,
                 interval=no_event_interval,
                 token=self.tokenizer["no_event"],
+                mode=no_event_mode
             )
         else:
             self.append_no_event = _identity_transform
