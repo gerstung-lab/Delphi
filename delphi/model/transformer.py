@@ -476,7 +476,8 @@ class Delphi2M(nn.Module):
             > 1
         ) + (age > max_age)
 
-        logits, _, _ = self.forward(idx, age)
+        outputs, _, _ = self.forward(idx, age)
+        logits = outputs["logits"]
         idx[pad] = 0
         age[pad] = mask_time
 
