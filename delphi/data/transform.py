@@ -1,8 +1,11 @@
-from typing import Any, Literal, Optional
+import itertools
+from typing import Literal
 
 import numpy as np
 
-from delphi.multimodal import Modality
+
+def identity_transform(*args):
+    return args
 
 
 def append_no_event(
@@ -37,15 +40,15 @@ def append_no_event(
         min_age = np.min(t[t >= 0])
         max_age = np.max(t)
         no_event_t = rng.uniform(1, 36525, size=(int(36525 / interval),))
-        no_event_t = no_event_t[np.logical_and(
-            no_event_t >= min_age, no_event_t < max_age
-        )]
+        no_event_t = no_event_t[
+            np.logical_and(no_event_t >= min_age, no_event_t < max_age)
+        ]
     elif mode == "exponential":
         rate = 1 / interval
         dt = np.diff(t)
         n_gaps = len(dt)
         max_per_gap = int(rate * dt.max() * 4)
-        exp_samples = rng.exponential(1/rate, size=(n_gaps, max_per_gap))
+        exp_samples = rng.exponential(1 / rate, size=(n_gaps, max_per_gap))
         cumsum = np.cumsum(exp_samples, axis=1)
         valid_mask = cumsum < dt[:, None]
         absolute_times = t[:-1, None] + cumsum
@@ -62,22 +65,16 @@ def append_no_event(
     return x, t
 
 
-def sort_by_time(T: np.ndarray, *args: np.ndarray):
-
-    s = np.argsort(T, axis=1)
-    T = np.take_along_axis(T, s, axis=1)
-
-    if args and any(arr.shape != T.shape for arr in args):
-        raise ValueError("all arrays must have the same shape as T")
-
-    return T, *[np.take_along_axis(arr, s, axis=1) for arr in args]
-
-
-def trim_margin(reference: np.ndarray, *args: np.ndarray, trim_val: Any):
-
-    margin = np.min(np.sum(reference == trim_val, axis=1))
-
-    return reference[:, margin:], *[arr[:, margin:] for arr in args]
+def _crop_slice(mode, max_len, block_size, rng):
+    if mode == "left":
+        start = 0
+    elif mode == "right":
+        start = max_len - block_size
+    elif mode == "random":
+        start = rng.integers(0, max_len - block_size + 1)
+    else:
+        raise ValueError
+    return slice(start, start + block_size)
 
 
 def crop_contiguous(
@@ -87,61 +84,75 @@ def crop_contiguous(
     rng: np.random.Generator,
     mode: Literal["left", "right", "random"] = "left",
 ):
+    """
+    input sequences should be sorted according to time
+    """
 
     L = x.shape[0]
-
     if L <= block_size:
         return (x, *args) if args else x
     else:
-        if mode == "left":
-            start = 0
-        elif mode == "right":
-            start = L - block_size
-        elif mode == "random":
-            start = rng.integers(0, L - block_size + 1)
-        else:
-            raise ValueError
-        cut = slice(start, start + block_size)
+        cut = _crop_slice(mode, L, block_size, rng)
         if args:
             return x[cut], *[arr[cut] for arr in args]
         else:
             return x[cut]
 
 
-def crop_priority(
-    X: np.ndarray,
-    T: np.ndarray,
-    M: np.ndarray,
-    biomarker_X: dict[Modality, np.ndarray],
-    priority_tokens: Optional[np.ndarray],
-    priority_modality: Optional[np.ndarray],
+def crop_contiguous_multimodal(
+    x: np.ndarray,
+    biomarker: dict,
+    t: np.ndarray,
+    m: np.ndarray,
     block_size: int,
     rng: np.random.Generator,
+    mode: Literal["left", "right", "random"] = "left",
 ):
     """
-    crop the input data to a fixed block size, prioritizing certain tokens and modalities and preferentially crop out padding tokens
+    input sequences should be sorted according to time
     """
 
-    priority_np = np.zeros(M.shape, dtype=np.uint8)
-    priority_np[M > 0] = 1
-    if priority_tokens is not None:
-        priority_np[np.isin(X, priority_tokens)] = 2
-    if priority_modality is not None:
-        priority_np[np.isin(M, priority_modality)] = 2
+    L = x.shape[0]
+    if L <= block_size:
+        return x, biomarker, t, m
+    else:
+        keep = _crop_slice(mode, L, block_size, rng)
+        mask = np.zeros_like(m).astype(bool)
+        mask[keep] = True
+        biomarker_keep = dict()
+        for modality in biomarker.keys():
+            modality_mask = mask[m == modality.value]
+            if modality_mask.sum() == 0:
+                continue
+            else:
+                biomarker_keep[modality] = list(
+                    itertools.compress(biomarker[modality], modality_mask)
+                )
 
-    tiebreaker = rng.integers(0, M.shape[1], size=M.shape, dtype=np.uint32)
-    s = np.lexsort((tiebreaker, priority_np), axis=1)
-    s_inv = np.argsort(s, axis=1)
-    to_keep = np.zeros_like(M, dtype=bool)
-    to_keep[:, -block_size:] = True
-    to_keep = np.take_along_axis(to_keep, s_inv, axis=1)
+        return x[keep], biomarker_keep, t[keep], m[keep]
 
-    for modality, m_X in biomarker_X.items():
-        sub_idx, pos_idx = np.where(M == modality.value)
-        biomarker_X[modality] = m_X[to_keep[sub_idx, pos_idx], :]
 
-    M = M[to_keep].reshape(M.shape[0], -1)
-    X = X[to_keep].reshape(X.shape[0], -1)
-    T = T[to_keep].reshape(T.shape[0], -1)
+def sort_by_time(t: np.ndarray, *args: np.ndarray):
+    s = np.argsort(t)
+    t = t[s]
+    return t, *[arg[s] for arg in args]
 
-    return X, T, M, biomarker_X
+
+def perturb_time(
+    x: np.ndarray,
+    t: np.ndarray,
+    tokens: np.ndarray,
+    rng: np.random.Generator,
+    low: float = -20 * 365.25,
+    high: float = 40 * 365.25,
+):
+    to_perturb = np.isin(x, tokens)
+    t[to_perturb] += rng.uniform(low=low, high=high, size=(to_perturb.sum(),))
+    return x, t
+
+
+def exclude_tokens(x: np.ndarray, t: np.ndarray, blacklist: np.ndarray):
+    to_exclude = np.isin(x, blacklist)
+    x = x[~to_exclude]
+    t = t[~to_exclude]
+    return x, t

@@ -5,10 +5,8 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as F
-import yaml
 from tqdm import tqdm
 
-from delphi.baselines import ethos
 from delphi.data.ukb import UKBDataset
 from delphi.data.utils import eval_iter, move_batch_to_device
 from delphi.model.components import target_mask
@@ -35,15 +33,7 @@ def estimate_loss(
         "no_event_interval": cfg.data["no_event_interval"],
         "memmap": False,
     }
-    if model.model_type == "ethos":
-        with open(cfg.data["time_bins"], "r") as f:
-            time_bins = yaml.safe_load(f)
-        ds = ethos.UKBDataset(
-            **common_args,
-            time_bins=time_bins,
-        )
-    else:
-        ds = UKBDataset(**common_args)
+    ds = UKBDataset(**common_args)
 
     it = tqdm(
         eval_iter(total_size=len(ds), batch_size=batch_size),

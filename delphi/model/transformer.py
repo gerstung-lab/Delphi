@@ -1,6 +1,5 @@
 import math
 from dataclasses import dataclass, field
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -10,16 +9,92 @@ from delphi.exponential import (
     sample_competing_exponentials,
     sample_zero_inflated_exponentials,
 )
-from delphi.model.components import (
-    AgeEncoding,
-    CompetingExpHead,
-    CrossEntropyHead,
-    DelphiEmbedding,
-    causal_attention_mask,
-    target_mask,
-    ties_adjusted_delta_t,
-)
-from delphi.model.config import DelphiConfig, GPT2Config
+
+
+def causal_attention_mask(
+    pad: torch.Tensor,
+    mask_ties: bool = False,
+    t0: None | torch.Tensor = None,
+    t1: None | torch.Tensor = None,
+) -> torch.Tensor:
+
+    b, l = pad.shape
+    device = pad.device
+
+    lower_tri_mask = torch.tril(torch.ones((l, l), device=device))
+    lower_tri_mask = lower_tri_mask.view(1, l, l)
+    pad_mask = pad.view(b, 1, l).to(torch.int)
+    attn_mask = pad_mask * lower_tri_mask
+
+    if mask_ties:
+        assert t0 is not None
+        if t1 is not None:
+            ties_mask = (t1.view(b, l, 1) != t0.view(b, 1, l)).to(torch.int)
+            attn_mask *= ties_mask
+
+    attn_mask += (attn_mask.sum(-1, keepdim=True) == 0) * torch.diag(
+        torch.ones(l, device=device)
+    ) > 0
+
+    return attn_mask.unsqueeze(1)
+
+
+def ties_adjusted_delta_t(
+    t0: torch.Tensor,
+    t1: torch.Tensor,
+    mask_ties: bool,
+    attn_mask: torch.Tensor | None = None,
+    eps: float = 1.0,
+) -> torch.Tensor:
+
+    delta_t = t1 - t0
+    delta_t = torch.clamp(delta_t, min=eps)
+
+    if mask_ties:
+        assert attn_mask is not None
+        delta_t = torch.gather(
+            delta_t,
+            -1,
+            (
+                attn_mask
+                * torch.arange(
+                    0, t0.size(1), device=t0.device, dtype=torch.float32
+                ).view(1, 1, 1, -1)
+            )
+            .max(-1)
+            .indices.squeeze((1, 2)),
+        )
+
+    return delta_t
+
+
+class AgeEncoding(nn.Module):
+
+    def __init__(
+        self, n_embd: int, norm_factor: float = 365.25, max_wavelen: float = 10000.0
+    ):
+        super().__init__()
+        div_term = torch.exp(
+            torch.arange(0, n_embd, 2) * (-math.log(max_wavelen) / n_embd)
+        )
+        self.register_buffer("div_term", div_term)
+        self.n_embd = n_embd
+        self.linear = torch.nn.Linear(n_embd, n_embd, bias=False)
+
+        self.norm_factor = norm_factor
+
+    def forward(self, x: torch.Tensor):
+        """
+        Arguments:
+            x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``
+        """
+        time_years = x / self.norm_factor
+        y = torch.zeros(x.shape[0], x.shape[1], self.n_embd, device=x.device)
+        y[..., 0::2] = torch.sin(time_years * self.div_term)  # * (1-self.div_term)
+        y[..., 1::2] = torch.cos(time_years * self.div_term)  # * (1-self.div_term)
+        y = self.linear(y)
+
+        return y
 
 
 class LayerNorm(nn.Module):
@@ -120,115 +195,6 @@ class Block(nn.Module):
         x = x + y
         x = x + self.mlp(self.ln_2(x))
         return x, att
-
-
-def initialize_weights(model: torch.nn.Module, config: GPT2Config):
-
-    def _init_weights(module: torch.nn.Module):
-        if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-            if module.bias is not None:
-                torch.nn.init.zeros_(module.bias)
-        elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-
-    model.apply(_init_weights)
-    # apply special scaled init to the residual projections, per GPT-2 paper
-    for pn, p in model.named_parameters():
-        if pn.endswith("c_proj.weight"):
-            torch.nn.init.normal_(p, mean=0.0, std=0.02 / math.sqrt(2 * config.n_layer))
-
-
-class Delphi(torch.nn.Module):
-    model_type = "delphi-m4"
-
-    def __init__(self, config: DelphiConfig):
-        super().__init__()
-        self.config = config
-        self.build_model(config)
-        initialize_weights(self, config=config)
-
-    def build_model(self, config: DelphiConfig):
-
-        self.transformer = nn.ModuleDict(
-            dict(
-                embed=DelphiEmbedding(config),
-                drop=nn.Dropout(config.dropout),
-                h=nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
-                ln_f=LayerNorm(config.n_embd, bias=config.bias),
-            )
-        )
-        assert config.vocab_size is not None
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.transformer.embed.token_embedding.weight = self.lm_head.weight
-
-        self.ce_head = CrossEntropyHead(config)
-        self.dt_head = CompetingExpHead(
-            n_input=config.n_embd,
-            zero_inflate=config.zero_inflate,
-            pi_head=config.zero_inflate_projector,
-        )
-
-    def forward(
-        self,
-        idx: torch.Tensor,
-        age: torch.Tensor,
-        modality: torch.Tensor,
-        biomarker: Optional[dict[str, torch.Tensor]] = None,
-        targets: Optional[torch.Tensor] = None,
-        targets_age: Optional[torch.Tensor] = None,
-        validation_loss_mode: bool = False,
-    ) -> tuple[torch.Tensor, Optional[dict[str, torch.Tensor]], torch.Tensor]:
-
-        x = self.transformer.embed(x0=idx, t0=age, M=modality, biomarker_x=biomarker)
-        x = self.transformer.drop(x)
-
-        attn_mask = causal_attention_mask(
-            pad=(modality > 0), t1=targets_age, t0=age, mask_ties=self.config.mask_ties
-        )
-
-        att = []
-        for block in self.transformer.h:
-            x, a = block(x, attn_mask)
-            att.append(a)
-        x = self.transformer.ln_f(x)
-        att = torch.stack(att)
-
-        if (targets is not None) and (targets_age is not None):
-            logits = self.lm_head(x)
-
-            logits_cp = logits.clone()
-            ignored_tokens = self.config.ignore_tokens.copy()
-            if validation_loss_mode:
-                ignored_tokens += [1]
-                logits_cp[..., ignored_tokens] = -torch.inf
-
-            dt = ties_adjusted_delta_t(
-                t0=age,
-                t1=targets_age,
-                attn_mask=attn_mask,
-                mask_ties=self.config.mask_ties,
-                eps=0.0 if self.config.zero_inflate else 1.0,
-            )
-
-            is_valid_target = target_mask(targets, ignore_tokens=ignored_tokens)
-            loss_ce = self.ce_head(logits=logits_cp, targets=targets)
-            loss_ce = torch.mean(loss_ce[is_valid_target])
-            loss_dt = self.dt_head(logits=logits, delta_t=dt)
-            loss_dt = torch.mean(loss_dt[is_valid_target])
-
-            loss = {
-                "loss_ce": loss_ce * self.config.ce_beta,
-                "loss_dt": loss_dt * self.config.dt_beta,
-            }
-        else:
-            # inference-time mini-optimization: only forward the lm_head on the very last position
-            logits = self.lm_head(
-                x[:, :, :]
-            )  # note: using list [-1] to preserve the time dim
-            loss = None
-
-        return logits, loss, att
 
 
 @dataclass

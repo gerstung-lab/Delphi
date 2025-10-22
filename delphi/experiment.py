@@ -3,22 +3,61 @@ from collections import defaultdict
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Iterator, Optional
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import yaml
 from omegaconf import OmegaConf
 
 from delphi import distributed
-from delphi.baselines import ethos, motor
-from delphi.data.utils import move_batch_to_device, train_iter
 from delphi.env import DELPHI_CKPT_DIR
 from delphi.log import TrainLogConfig, TrainLogger
-from delphi.model import delphi
-from delphi.model.config import GPT2Config
-from delphi.model.transformer import Delphi, DelphiConfig
+from delphi.model.multimodal import DelphiM4, DelphiM4Config
+from delphi.model.transformer import Delphi2M, Delphi2MConfig
 from delphi.optim import OptimConfig, configure_optimizers
+
+
+def move_batch_to_device(args: Iterable, device: str):
+
+    outputs = list()
+    for arg in args:
+        if isinstance(arg, torch.Tensor):
+            outputs.append(arg.to(device))
+        elif isinstance(arg, dict):
+            outputs.append({k: v.to(device) for k, v in arg.items()})
+        else:
+            raise NotImplementedError
+    return tuple(outputs)
+
+
+def train_iter(
+    seed: int,
+    total_size: int,
+    batch_size: int,
+    world_size: int = 1,
+    rank: int = 0,
+    step: int = 0,
+) -> Iterator[np.ndarray]:
+
+    while True:
+        seed_with_offset = seed + step * world_size + rank
+        rng = np.random.default_rng(seed_with_offset)
+        batch_idx = rng.integers(total_size, size=(batch_size,))
+        step += 1
+
+        yield batch_idx
+
+
+def eval_iter(total_size: int, batch_size: int) -> Iterator[np.ndarray]:
+
+    batch_start_pos = np.arange(0, total_size, batch_size)
+    batch_end_pos = batch_start_pos + batch_size
+    batch_end_pos[-1] = total_size
+
+    for start, end in zip(batch_start_pos, batch_end_pos):
+        yield np.arange(start, end)
 
 
 @dataclass
@@ -239,18 +278,12 @@ def load_ckpt(ckpt_path):
         map_location=torch.device("cpu") if not torch.cuda.is_available() else None,
     )
     model_type = ckpt_dict["model_type"]
-    if model_type == "delphi":
-        model_cfg_cls = delphi.ModelConfig
-        model_cls = delphi.Model
+    if model_type == "delphi-2m":
+        model_cfg_cls = Delphi2MConfig
+        model_cls = Delphi2M
     elif model_type == "delphi-m4":
-        model_cfg_cls = DelphiConfig
-        model_cls = Delphi
-    elif model_type == "ethos":
-        model_cfg_cls = GPT2Config
-        model_cls = ethos.Model
-    elif model_type == "motor":
-        model_cfg_cls = motor.ModelConfig
-        model_cls = motor.Model
+        model_cfg_cls = DelphiM4Config
+        model_cls = DelphiM4
     else:
         raise ValueError
 

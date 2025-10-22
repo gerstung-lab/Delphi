@@ -17,6 +17,17 @@ def sample_competing_exponentials(
     return next_token, time_til_next
 
 
+def exponential_nll(
+    delta_t: torch.Tensor,
+    log_lambda: torch.Tensor,
+    t_min: float,
+):
+    ldt = -torch.log(delta_t + t_min)
+    lse = -torch.log(torch.exp(-log_lambda) + t_min)
+    nll = -(lse - torch.exp(lse - ldt))
+    return nll
+
+
 def sample_zero_inflated_exponentials(
     logits: torch.Tensor, pi: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:

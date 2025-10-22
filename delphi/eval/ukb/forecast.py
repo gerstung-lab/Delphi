@@ -3,20 +3,18 @@ import math
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from tqdm import tqdm
 
 from delphi import DAYS_PER_YEAR
-from delphi.baselines import ethos
 from delphi.data.ukb import UKBDataConfig, UKBDataset
-from delphi.data.utils import duplicate_participants, eval_iter
+from delphi.data.utils import eval_iter
 from delphi.eval.ukb.auc import mann_whitney_auc
+from delphi.exponential import integrate_risk
 from delphi.generate import generate
-from delphi.model.delphi import integrate_risk
 from delphi.train import load_ckpt
 
 
@@ -37,26 +35,6 @@ class ForecastArgs:
     log_name: str = "forecast.yaml"
 
 
-def calibrate(rates: np.ndarray, occur: np.ndarray, bins: list):
-    n = occur.shape[0]
-    n_bins = len(bins) - 1
-
-    rate_per_bin, incidence_per_bin, n_per_bin = list(), list(), list()
-    for i in range(n_bins):
-        in_bin = np.logical_and(rates >= bins[i], rates < bins[i + 1])
-        mean_rate = float(np.nanmean(rates[in_bin])) if in_bin.sum() > 0 else np.nan
-        rate_per_bin.append(float(f"{mean_rate:.3e}"))
-        incidence = float(occur[in_bin].sum() / n) if n > 0 else np.nan
-        incidence_per_bin.append(float(f"{incidence:.3e}"))
-        n_per_bin.append(int(in_bin.sum()))
-
-    return {
-        "rate_per_bin": rate_per_bin,
-        "incidence_per_bin": incidence_per_bin,
-        "n_per_bin": n_per_bin,
-    }
-
-
 def cleanse_nan(obj):
     """Recursively handle NaN values in nested data structures"""
     if isinstance(obj, float) and math.isnan(obj):
@@ -69,6 +47,13 @@ def cleanse_nan(obj):
         return tuple(cleanse_nan(item) for item in obj)
     else:
         return obj
+
+
+def duplicate_participants(args: Iterable[torch.Tensor], n_repeat: int):
+
+    return tuple(
+        [torch.repeat_interleave(arg, repeats=n_repeat, dim=0) for arg in args]
+    )
 
 
 def sample_future(task_args: ForecastArgs, ckpt: str) -> None:
@@ -90,12 +75,7 @@ def sample_future(task_args: ForecastArgs, ckpt: str) -> None:
     model.to(device)
     model.eval()
 
-    if model.model_type == "ethos":
-        ds = ethos.UKBDataset(**asdict(task_args.data), time_bins=time_intervals)
-    elif model.model_type == "delphi-m4":
-        raise NotImplementedError
-    else:
-        ds = UKBDataset(**asdict(task_args.data))
+    ds = UKBDataset(**asdict(task_args.data))
 
     start_age = task_args.start_age_years * DAYS_PER_YEAR
     end_age = task_args.end_age_years * DAYS_PER_YEAR
@@ -103,14 +83,15 @@ def sample_future(task_args: ForecastArgs, ckpt: str) -> None:
     it = eval_iter(total_size=n_participants, batch_size=n_persons_per_batch)
     it = tqdm(it, total=math.ceil(n_participants / n_persons_per_batch), leave=True)
 
-    labels = list()
-    risks = defaultdict(list)
+    batch_occur = list()
+    batch_person_time = list()
+    batch_estimates = defaultdict(list)
     is_gender = {"male": list(), "female": list()}
 
     with torch.no_grad():
         for batch_idx in it:
             prompt_idx, prompt_age = ds.get_prompt_batch(batch_idx, start_age=start_age)
-            _, _, target_idx, target_age = ds.get_batch(batch_idx)
+            _, target_begin_age, target_idx, target_age = ds.get_batch(batch_idx)
 
             prompt_idx, prompt_age = prompt_idx.to(device), prompt_age.to(device)
             target_idx, target_age = target_idx.to(device), target_age.to(device)
@@ -156,21 +137,33 @@ def sample_future(task_args: ForecastArgs, ckpt: str) -> None:
 
                 baseline_logits = prompt_logits[:, -1, :]
                 baseline_logits = baseline_logits.reshape((n_person, n_sample, -1))
-                baseline_prob = F.softmax(baseline_logits, dim=-1)
-                baseline_prob = torch.mean(baseline_prob, dim=-2, keepdim=False)
-                risks["baseline"].append(baseline_prob.detach().cpu().numpy())
+                baseline_logits = torch.mean(baseline_logits, dim=-2, keepdim=False)
+                batch_estimates["baseline"].append(
+                    baseline_logits.detach().cpu().numpy()
+                )
 
                 if model.model_type == "delphi":
-                    integrated_risks = integrate_risk(
+                    int_risk = integrate_risk(
                         log_lambda=gen_logits,
                         age=pred_age,
                         start=start_age,
                         end=end_age,
                     )
-                    integrated_risks = integrated_risks.reshape(n_person, n_sample, -1)
-                    batch_risks = 1 - torch.exp(-integrated_risks)
-                    batch_risks = torch.nanmean(batch_risks, dim=-2, keepdim=False)
-                    risks["forecast"].append(batch_risks.detach().cpu().numpy())
+                    int_lambda = integrate_incidence_rate(
+                        log_lambda=gen_logits,
+                        age=pred_age,
+                        start=start_age,
+                        end=end_age,
+                    )
+                    int_risk = int_risk.reshape(n_person, n_sample, -1)
+                    int_lambda = int_lambda.reshape(n_person, n_sample, -1)
+                    dis_prob = 1 - torch.exp(-int_risk)
+                    dis_prob = torch.nanmean(dis_prob, dim=-2, keepdim=False)
+                    int_lambda = torch.nanmean(int_lambda, dim=-2, keepdim=False)
+                    batch_estimates["forecast"].append(dis_prob.detach().cpu().numpy())
+                    batch_estimates["forecast_lambda"].append(
+                        int_lambda.detach().cpu().numpy()
+                    )
 
                 gen_idx = gen_idx.reshape((n_person, n_sample, -1))
                 occur = torch.zeros(
@@ -183,79 +176,76 @@ def sample_future(task_args: ForecastArgs, ckpt: str) -> None:
                     src=torch.ones_like(gen_idx),
                 )
                 frac_occur = torch.mean(occur.float(), dim=-2, keepdim=False)
-                risks["sampling"].append(frac_occur.detach().cpu().numpy())
+                batch_estimates["sampling"].append(frac_occur.detach().cpu().numpy())
 
-            if model.model_type == "motor":
+            end_age = target_age.clamp(min=0)
+            end_age = end_age[:, [-1]].broadcast_to(
+                end_age.shape[0], model.config.vocab_size
+            )
+            end_age = end_age.scatter_(index=target_idx, src=target_age, dim=1)
 
-                # log_lambda, _, output_dict = model(prompt_idx, prompt_age)
+            person_time = (end_age - target_begin_age.clamp(min=0)).nansum(dim=1)
+            batch_person_time.append(person_time)
 
-                raise NotImplementedError
-
-            tokens_in_range = target_idx.clone()
-            tokens_in_range[target_age <= start_age] = 0
-            tokens_in_range[target_age > end_age] = 0
-            occur_during = torch.zeros_like(baseline_prob).long()
-            occur_during = occur_during.scatter_(index=tokens_in_range, value=1, dim=1)
-            occur_during = occur_during.float()
+            tokens_during = target_idx.clone()
+            tokens_during[target_age <= start_age] = 0
+            tokens_during[target_age > end_age] = 0
+            occur = torch.zeros(
+                size=(target_idx.shape[0], model.config.vocab_size)
+            ).long()
+            occur = occur.scatter_(index=tokens_during, value=1, dim=1)
+            occur = occur.float()
 
             tokens_bef = target_idx.clone()
             tokens_bef[target_age > start_age] = 0
-            occur_bef = torch.zeros_like(baseline_prob).long()
+            occur_bef = torch.zeros_like(occur).long()
             occur_bef = occur_bef.scatter_(index=tokens_bef, value=1, dim=1)
-            occur_during[occur_bef.bool()] = torch.nan
-
-            tokens_aft = target_idx.clone()
-            tokens_aft[target_age <= end_age] = 0
-            occur_aft = torch.zeros_like(baseline_prob).long()
-            occur_aft = occur_aft.scatter_(index=tokens_aft, value=1, dim=1)
-            occur_during[occur_aft.bool()] = torch.nan
+            occur[occur_bef.bool()] = torch.nan
 
             last_age = target_age.max(dim=1).values
             not_enough_data = last_age < end_age
-            occur_during[not_enough_data] = torch.nan
+            occur[not_enough_data] = torch.nan
 
-            labels.append(occur_during.detach().cpu().numpy())
+            batch_occur.append(occur.detach().cpu().numpy())
 
-    labels = np.vstack(labels)
-    for risk_type in risks.keys():
-        risks[risk_type] = np.vstack(risks[risk_type])
+    occur = np.vstack(batch_occur)
+    person_time = np.vstack(batch_person_time)
+    estimates = dict()
+    for key in batch_estimates.keys():
+        estimates[key] = np.vstack(batch_estimates[key])
 
-    bins = [0, 1e-4, 1e-3, 1e-2, 1e-1, 1.0]
     for gender in ["male", "female"]:
         is_gender[gender] = torch.cat(is_gender[gender], dim=0).detach().cpu().numpy()
     is_gender["either"] = np.ones_like(is_gender["male"]).astype(bool)  # type: ignore
     logbook = defaultdict(dict)
-    logbook["rate_bins"] = [float(f"{rate:.3e}") for rate in bins]  # type: ignore
     reverse_tokenizer = {v: k for k, v in tokenizer.items()}
-    for i in range(2, labels.shape[1]):
+    for i in range(2, occur.shape[1]):
         for gender in ["male", "female", "either"]:
-            disease_labels = labels[:, i]
-            include = (~np.isnan(disease_labels)) & is_gender[gender]
-            is_ctl = (disease_labels == 0) & is_gender[gender]
-            is_dis = (disease_labels == 1) & is_gender[gender]
+            include = (~np.isnan(occur[:, i])) & is_gender[gender]
+            is_ctl = (occur[i, :] == 0) & is_gender[gender]
+            is_dis = (occur[i, :] == 1) & is_gender[gender]
 
             disease = reverse_tokenizer[i]
             logbook[disease][gender] = {
                 "n_ctl": int(is_ctl.sum()),
                 "n_dis": int(is_dis.sum()),
+                "person_time": int(person_time[is_gender[gender]].sum()),
             }
-            for risk_type in risks.keys():
+            for key in batch_estimates.keys():
                 mean_rate = (
-                    np.nanmean(risks[risk_type][include, i])
+                    np.nanmean(estimates[key][include, i])
                     if include.sum() > 0
                     else np.nan
                 )
-                logbook[disease][gender][risk_type] = {
+                logbook[disease][gender][key] = {
                     "auc": mann_whitney_auc(
-                        x1=risks[risk_type][is_ctl, i], x2=risks[risk_type][is_dis, i]
+                        x1=estimates[key][is_ctl, i], x2=estimates[key][is_dis, i]
                     ),
                     "mean": float(f"{mean_rate:.3e}"),
-                    **calibrate(
-                        risks[risk_type][include, i],
-                        disease_labels[include],
-                        bins=bins,
-                    ),
                 }
+                logbook[disease][gender][key]["mean_all"] = float(
+                    f"{np.nanmean(estimates[key][:, i])}.3e"
+                )
 
     logbook = cleanse_nan(logbook)
     with open(Path(ckpt) / f"{task_args.log_name}.json", "w") as f:
