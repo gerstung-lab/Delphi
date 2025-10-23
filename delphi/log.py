@@ -2,7 +2,6 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from pprint import pprint
-from typing import Optional
 
 import torch
 import wandb
@@ -18,7 +17,7 @@ class TrainLogConfig:
     wandb_project: str = "delphi"
     run_name: str = datetime.now().strftime("%Y-%m-%d-%H%M%S")
     always_ckpt_after_eval: bool = False
-    ckpt_interval: Optional[int] = 1000
+    ckpt_interval: None | int = None
     log_interval: int = 250
 
 
@@ -92,6 +91,7 @@ class TrainLogger:
                 "model": model.state_dict(),
                 "model_type": model.model_type,
                 "optimizer": self.optimizer.state_dict(),
+                "scheduler": self.scheduler.state_dict(),
                 "model_args": self.exp_cfg["model"],
                 "iter_num": step,
                 "best_val_loss": self.best_val_loss,
