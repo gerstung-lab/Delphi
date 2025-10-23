@@ -417,23 +417,30 @@ class MultimodalUKBDataset:
         l = self.seq_len[pid]
         x = self.tokens[i : i + l].astype(np.uint32)
         t = self.time_steps[i : i + l].astype(np.float32)
+        x_lst, t_lst = [x], [t]
         for expansion_pack in self.expansion_packs:
             exp_x, exp_t = expansion_pack[pid]
-            x = np.concatenate((x, exp_x))
-            t = np.concatenate((t, exp_t))
+            x_lst.append(exp_x)
+            t_lst.append(exp_t)
+        x = np.concatenate(x_lst)
+        t = np.concatenate(t_lst)
         x, t = self.append_no_event(x, t)
         m = np.ones_like(x, dtype=np.int32)
 
         biomarker = dict()
+        x_lst, t_lst, m_lst = [x], [t], [m]
         for modality, ds in self.mod_ds.items():
             bio_x, mod_t = ds[pid]
             if bio_x is None:
                 continue
             biomarker[modality] = bio_x
             mod_m = np.full_like(mod_t, fill_value=modality.value)
-            x = np.concatenate((x, np.zeros_like(mod_m)))
-            t = np.concatenate((t, mod_t))
-            m = np.concatenate((m, mod_m))
+            x_lst.append(np.zeros_like(mod_m))
+            t_lst.append(mod_t)
+            m_lst.append(mod_m)
+        x = np.concatenate(x_lst)
+        t = np.concatenate(t_lst)
+        m = np.concatenate(m_lst)
 
         x, t = self.perturb_time(x, t)
         t, x, m = sort_by_time(t, x, m)
