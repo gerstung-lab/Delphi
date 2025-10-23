@@ -5,16 +5,25 @@ from omegaconf import OmegaConf
 from delphi import distributed
 from delphi.data.ukb import MultimodalUKBDataset
 from delphi.experiment import BaseTrainer, TrainBaseConfig
+from delphi.log import TrainLogConfig
 from delphi.model.multimodal import DelphiM4, DelphiM4Config
 
 
 @dataclass
 class TrainConfig(TrainBaseConfig):
+    ckpt_dir: str = "delphi-m4"
+    batch_size: int = 128
     train_subject_list: str = "participants/train_fold.bin"
     val_subject_list: str = "participants/val_fold.bin"
-    model: DelphiM4Config = field(default_factory=DelphiM4Config)
+    model: DelphiM4Config = field(default_factory=lambda: DelphiM4Config(
+        block_size=256
+    ))
     biomarkers: None | dict[str, int] = None
     expansion_packs: None | list[str] = None
+    log: TrainLogConfig = field(default_factory=lambda: TrainLogConfig(
+        wandb_project="delphi-m4"
+    ))
+
 
 
 def train(cfg: TrainConfig):
@@ -62,11 +71,15 @@ def train(cfg: TrainConfig):
 
 def main():
 
-    cli_args = OmegaConf.from_cli()
-    file_cfg = OmegaConf.load(cli_args.config)
-    del cli_args.config
-
     default_cfg = OmegaConf.structured(TrainConfig())
+    cli_args = OmegaConf.from_cli()
+    
+    if hasattr(cli_args, "config"):
+        file_cfg = OmegaConf.load(cli_args.config)
+        del cli_args.config
+    else:
+        file_cfg = default_cfg
+
     cfg = OmegaConf.merge(default_cfg, file_cfg, cli_args)
     cfg = OmegaConf.to_object(cfg)
 
