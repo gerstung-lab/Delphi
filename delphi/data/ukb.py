@@ -179,10 +179,16 @@ class Biomarker:
             self.data = np.memmap(data_path, dtype=np.float32, mode="r")
         else:
             self.data = np.fromfile(data_path, dtype=np.float32)
-        p2i = pd.read_csv(
-            os.path.join(path, "p2i.csv"),
-        )
-        self.p2i = p2i.groupby("pid")
+
+        p2i = pd.read_csv(os.path.join(path, "p2i.csv")).sort_values(by=["pid", "time"])
+        self.start_pos = p2i["start_pos"].to_numpy()
+        self.seq_len = p2i["seq_len"].to_numpy()
+        self.time_steps = p2i["time"].to_numpy()
+        self.pids, ct = np.unique(p2i["pid"].to_numpy(), return_counts=True)
+        cumul_ct =  np.insert(np.cumsum(ct), 0, 0, axis=0)
+        self.pid2idx = dict(zip(self.pids, cumul_ct))
+        self.pid2cnt = dict(zip(self.pids, ct))
+
         self.first_time_only = first_time_only
 
     def __repr__(self):
@@ -191,8 +197,8 @@ class Biomarker:
     @property
     def participants(self):
 
-        have_data = self.p2i.obj["seq_len"] > 0
-        participants_with_data = self.p2i.obj.loc[have_data, "pid"].unique()
+        have_data = np.array([self.pid2cnt[pid] > 0 for pid in self.pids])
+        participants_with_data = self.pids[have_data]
 
         return participants_with_data
 
@@ -200,14 +206,14 @@ class Biomarker:
         self, pid: int
     ) -> tuple[None | list[np.ndarray], None | np.ndarray]:
 
-        pid_grp = self.p2i.get_group(pid)
-        pid_time = pid_grp["time"].to_numpy()  # type: ignore
+        pid_i = self.pid2idx[pid]
+        pid_l = self.pid2cnt[pid]
+        pid_slice = slice(pid_i, pid_i + pid_l)
+        pid_time = self.time_steps[pid_slice]
         if (pid_time == -1e4).all():
             return None, None
-        s = np.argsort(pid_time)
-        pid_time = pid_time[s]
-        pid_seq_len = pid_grp["seq_len"].to_numpy()[s]  # type: ignore
-        pid_start_pos = pid_grp["start_pos"].to_numpy()[s]  # type: ignore
+        pid_seq_len = self.seq_len[pid_slice]
+        pid_start_pos = self.start_pos[pid_slice]
         pid_data = list()
         for i, l in zip(pid_start_pos, pid_seq_len):
             if l > 0:
