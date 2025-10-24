@@ -67,6 +67,7 @@ class TrainBaseConfig:
     eval_iters: int = 200
     eval_only: bool = False  # if True, script exits right after the first eval
     init_from: str = "scratch"
+    auto_resume: bool = True
 
     seed: int = 42
     gradient_accumulation_steps: int = 1  # used to simulate larger batch sizes
@@ -121,49 +122,46 @@ class BaseTrainer:
         self.val_ds = val_ds
         self.model = model
         self.model.to(self.device)
-        self.model = self.backend.transform_model(self.model)
-
         self.optimizer, self.scheduler = configure_optimizers(
-            model=model, cfg=cfg.optim, device_type=self.device_type
+            model=self.model, cfg=cfg.optim, device_type=self.device_type
         )
         self.scaler = torch.GradScaler(
             device=self.device_type, enabled=(cfg.dtype == "float16")
         )
+        run_dir = os.path.normpath(
+            os.path.join(DELPHI_CKPT_DIR, cfg.ckpt_dir, cfg.log.run_name)
+        )
+        ckpt_path = os.path.join(run_dir, "ckpt.pt")
+        if os.path.exists(ckpt_path) and cfg.auto_resume:
+            ckpt_dict = torch.load(
+                ckpt_path, map_location=torch.device("cpu")
+            )
+            self.model.load_state_dict(ckpt_dict["model"])
+            self.optimizer.load_state_dict(ckpt_dict["optimizer"])
+            self.scheduler.load_state_dict(ckpt_dict["scheduler"])
+            self.iter_num = ckpt_dict["iter_num"]
+            if self.backend.is_master_process():
+                print(f"found and loaded existing checkpoint; starting from iter {self.iter_num}")
+        else:
+            self.iter_num = 0
+        self.model = self.backend.transform_model(self.model)
 
         if dist.is_initialized():
-            world_size = dist.get_world_size()
-            rank = dist.get_rank()
-            print(f"\tinitialized data loader for worker {rank}/{world_size}")
+            self.world_size = dist.get_world_size()
+            self.rank = dist.get_rank()
+            print(f"\tinitialized data loader for worker {self.rank}/{self.world_size}")
         else:
-            world_size = 1
-            rank = 0
+            self.world_size = 1
+            self.rank = 0
         self.train_iter = train_iter(
             seed=cfg.seed,
             total_size=len(train_ds),
             batch_size=cfg.batch_size,
-            world_size=world_size,
-            rank=rank,
+            world_size=self.world_size,
+            rank=self.rank,
+            step=self.iter_num
         )
-        self.estimate_iters = {
-            "train": train_iter(
-                seed=cfg.seed,
-                total_size=len(train_ds),
-                batch_size=cfg.batch_size,
-                world_size=world_size,
-                rank=rank,
-            ),
-            "val": train_iter(
-                seed=cfg.seed,
-                total_size=len(val_ds),
-                batch_size=cfg.batch_size,
-                world_size=world_size,
-                rank=rank,
-            ),
-        }
 
-        run_dir = os.path.normpath(
-            os.path.join(DELPHI_CKPT_DIR, cfg.ckpt_dir, cfg.log.run_name)
-        )
         self.logger = TrainLogger(
             cfg=cfg.log,
             exp_cfg=asdict(cfg),
@@ -174,8 +172,6 @@ class BaseTrainer:
             scheduler=self.scheduler,
             backend=self.backend,
         )
-
-        self.iter_num = 0
 
     def mini_step(
         self, batch_data: Iterable, *args, **kwargs
@@ -192,14 +188,19 @@ class BaseTrainer:
         self.model.eval()
         eval_loss = {}
         for split in ["train", "val"]:
+            eval_ds = self.train_ds if split == "train" else self.val_ds
+            estimate_iter = train_iter(
+                seed=self.cfg.seed,
+                total_size=len(eval_ds),
+                batch_size=self.cfg.batch_size,
+                world_size=self.world_size,
+                rank=self.rank,
+            )
             split_loss = defaultdict(float)
             for _ in range(self.cfg.eval_iters):
 
-                batch_idx = next(self.estimate_iters[split])
-                if split == "train":
-                    batch_data = self.train_ds.get_batch(batch_idx)
-                else:
-                    batch_data = self.val_ds.get_batch(batch_idx)
+                batch_idx = next(estimate_iter)
+                batch_data = eval_ds.get_batch(batch_idx)
                 loss = self.mini_step(batch_data=batch_data)
 
                 for key in loss.keys():
@@ -225,6 +226,8 @@ class BaseTrainer:
             if self.iter_num % self.cfg.eval_interval == 0 and self.iter_num > 0:
                 _, val_loss = self.estimate_loss()
                 self.logger.eval_step(step=self.iter_num, loss=val_loss)
+
+            self.logger.ckpt_step(step=self.iter_num)
 
             if self.iter_num == 0 and self.cfg.eval_only:
                 break
@@ -260,10 +263,7 @@ class BaseTrainer:
             self.optimizer.zero_grad(set_to_none=True)
             self.scheduler.step()
 
-            self.logger.ckpt_step(step=self.iter_num)
-
             self.iter_num += 1
-
             # termination conditions
             if self.iter_num > self.cfg.optim.max_iters:
                 break
