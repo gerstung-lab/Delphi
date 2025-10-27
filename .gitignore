@@ -22,4 +22,5 @@ notebook
 dcgm
 slurm
 scratch
+submit
 pyrightconfig.json
