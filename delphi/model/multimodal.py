@@ -1,6 +1,6 @@
 import math
 from dataclasses import dataclass, field
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 import torch
 import torch.nn as nn
@@ -15,6 +15,8 @@ from delphi.model.transformer import (
     ties_adjusted_delta_t,
 )
 from delphi.multimodal import Modality, module_name
+
+tensor_dict = dict[str, torch.Tensor]
 
 
 class BiomarkerEmbedConfig(TypedDict, total=False):
@@ -181,15 +183,42 @@ class DelphiM4(torch.nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
+    def loss(self, logits, targets, age, targets_age, attn_mask, targets_mask):
+
+        loss_ce = F.cross_entropy(
+            # (b, l, n_vocab) -> (b, n_vocab, l)
+            logits.permute(0, 2, 1),
+            targets,
+            reduction="none",
+        )
+        loss_ce = torch.mean(loss_ce[targets_mask])
+        dt = ties_adjusted_delta_t(
+            t0=age,
+            t1=targets_age,
+            attn_mask=attn_mask,
+            mask_ties=self.config.mask_ties,
+            eps=self.config.t_min,
+        )
+        loss_dt = exponential_nll(
+            delta_t=dt,
+            log_lambda=torch.logsumexp(logits, -1),
+            t_min=self.config.t_min,
+        )
+        loss_dt = torch.mean(loss_dt[targets_mask])
+        return {
+            "loss_ce": loss_ce * self.config.ce_beta,
+            "loss_dt": loss_dt * self.config.dt_beta,
+        }
+
     def forward(
         self,
         idx: torch.Tensor,
         age: torch.Tensor,
         modality: torch.Tensor,
-        biomarker: Optional[dict[str, torch.Tensor]] = None,
-        targets: Optional[torch.Tensor] = None,
-        targets_age: Optional[torch.Tensor] = None,
-    ) -> tuple[torch.Tensor, Optional[dict[str, torch.Tensor]], torch.Tensor]:
+        biomarker: None | tensor_dict = None,
+        targets: None | torch.Tensor = None,
+        targets_age: None | torch.Tensor = None,
+    ) -> tuple[tensor_dict, None | tensor_dict, torch.Tensor]:
 
         x = self.transformer.embed(x0=idx, t0=age, M=modality, biomarker_x=biomarker)
         x = self.transformer.drop(x)
@@ -211,34 +240,15 @@ class DelphiM4(torch.nn.Module):
             is_valid_target = targets != 0
             for k in self.config.ignore_tokens:
                 is_valid_target *= targets != k
-
-            loss_ce = F.cross_entropy(
-                # (b, l, n_vocab) -> (b, n_vocab, l)
-                logits.permute(0, 2, 1),
-                targets,
-                reduction="none",
-            )
-            loss_ce = torch.mean(loss_ce[is_valid_target])
-
-            dt = ties_adjusted_delta_t(
-                t0=age,
-                t1=targets_age,
+            loss = self.loss(
+                logits=logits,
+                targets=targets,
+                age=age,
+                targets_age=targets_age,
                 attn_mask=attn_mask,
-                mask_ties=self.config.mask_ties,
-                eps=self.config.t_min,
+                targets_mask=is_valid_target,
             )
-            loss_dt = exponential_nll(
-                delta_t=dt,
-                log_lambda=torch.logsumexp(logits, -1),
-                t_min=self.config.t_min,
-            )
-            loss_dt = torch.mean(loss_dt[is_valid_target])
-
-            loss = {
-                "loss_ce": loss_ce * self.config.ce_beta,
-                "loss_dt": loss_dt * self.config.dt_beta,
-            }
         else:
             loss = None
 
-        return logits, loss, att
+        return {"logits": logits, "attn_mask": attn_mask}, loss, att
