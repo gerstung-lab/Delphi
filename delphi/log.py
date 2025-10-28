@@ -16,7 +16,6 @@ class TrainLogConfig:
     wandb_log: bool = True
     wandb_project: str = "delphi"
     run_name: str = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-    always_ckpt_after_eval: bool = False
     ckpt_interval: None | int = None
     log_interval: int = 250
 
@@ -114,8 +113,9 @@ class TrainLogger:
                 wandb.log(log_dict)
 
             print(f"iter {step}: val loss {lossf:.4f}")
-            if self.cfg.always_ckpt_after_eval or lossf < self.best_val_loss:
-                self.save_ckpt(step, ckpt_fname="ckpt.pt")
+            self.save_ckpt(step, ckpt_fname="ckpt.pt")
+            if lossf < self.best_val_loss:
+                self.save_ckpt(step, ckpt_fname="ckpt_best.pt")
             self.best_val_loss = min(lossf, self.best_val_loss)
 
     def log_grad(self):
