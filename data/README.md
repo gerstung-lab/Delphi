@@ -12,7 +12,7 @@ An easy way of doing this is to prepare a Numpy array with the following columns
 
 `patient_id` should be a unique identifier for each patient. It is used exclusively for identifying which records belong to the same patient and it is not used in the training. The entries should be consecutive entries, meaning that first in the array come all the rows related to the first patient, then all the rows related to the second patient and so on.
 `patient_age` is the age of the patient in days at the time of recording the disease.
-`token_id` is some unique identifier for the data record, a `uint32` number, starting from `1` (`0` is reserved for `no event` tokens). In Delphi-2M, it could be a disease event, a lifestyle token or sex token. All the tokens are processed by the model in a unified way (however, there are some tokens that are not used for calculating the gradients - see below for more details).
+`token_id` is some unique identifier for the data record, a `uint32` number, starting from `1` (`0` is reserved for adding `no event` and `padding` tokens later). In Delphi-2M, it could be a disease event, a lifestyle token or sex token. All the tokens are processed by the model in a unified way (however, there are some tokens that are not used for calculating the gradients - see below for more details).
 
 Then split this numpy array into train/val in a desired ratio and save into `data/%your_name%` folder.
 
