@@ -41,7 +41,31 @@ def collate_batch(
     return collated_batch
 
 
-lifestyle = [
+def collate_batches(
+    batch_data: list[np.ndarray], fill_value: int | float = 0, pad_left: bool = True
+) -> np.ndarray:
+
+    max_len = max([bd.shape[1] for bd in batch_data])
+    n_lst = np.array([bd.shape[0] for bd in batch_data])
+    collated_batch = np.full(
+        shape=(n_lst.sum(), max_len),
+        fill_value=fill_value,
+        dtype=batch_data[0].dtype,
+    )
+
+    s = 0
+    for i, bd in enumerate(batch_data):
+        l = bd.shape[0]
+        if pad_left:
+            collated_batch[s : s + l, -bd.shape[1] :] = bd
+        else:
+            collated_batch[s : s + l, : bd.shape[1]] = bd
+        s += l
+
+    return collated_batch
+
+
+LIFESTYLE = [
     "bmi_low",
     "bmi_mid",
     "bmi_high",
@@ -52,6 +76,28 @@ lifestyle = [
     "alcohol_mid",
     "alcohol_high",
 ]
+
+
+def cut_batch_for_prompt(idx, age, prompt_age, append_no_event):
+
+    idx = idx.clone()
+    age = age.clone()
+
+    idx[age > prompt_age] = 0
+    age[age > prompt_age] = -10000.0
+
+    if prompt_age > 0 and append_no_event:
+        idx = torch.nn.functional.pad(idx, (0, 1), "constant", 1)
+        age = torch.nn.functional.pad(age, (0, 1), "constant", prompt_age)
+
+    age_sort = age.argsort(1)
+    idx = idx.gather(1, age_sort)
+    age = age.gather(1, age_sort)
+
+    trim_margin = torch.min(torch.sum(idx == 0, dim=1)).item()
+    idx, age = idx[:, trim_margin:], age[:, trim_margin:]
+
+    return idx, age
 
 
 class UKBDataset:
@@ -98,7 +144,7 @@ class UKBDataset:
 
         if exclude:
             if exclude_list is None:
-                exclude_list = lifestyle
+                exclude_list = LIFESTYLE
             tokens_to_exclude = np.array(
                 [self.tokenizer[event] for event in exclude_list]
             )
@@ -110,7 +156,7 @@ class UKBDataset:
 
         if perturb:
             if perturb_list is None:
-                perturb_list = lifestyle
+                perturb_list = LIFESTYLE
             tokens_to_perturb = np.array(
                 [self.tokenizer[event] for event in perturb_list]
             )
@@ -149,6 +195,28 @@ class UKBDataset:
 
         return x_pid, t_pid
 
+    def subset_participants_for_prompt(
+        self, prompt_age: float, must_have_lifestyle: bool = False
+    ):
+        lifestyle_tokens = np.array(self.tokenizer[i] for i in LIFESTYLE)
+        keep_lst = list()
+        for i in np.arange(self.participants.size):
+            x_pid, t_pid = self[i]
+            have_before = t_pid.min() <= prompt_age
+            have_after = t_pid.max() >= prompt_age
+            if must_have_lifestyle:
+                have_lifestyle = np.isin(
+                    x_pid[t_pid <= prompt_age], lifestyle_tokens
+                ).any()
+                if not have_lifestyle:
+                    continue
+            if have_before and have_after:
+                keep_lst.append(i)
+        print(
+            f"prompt age {prompt_age}: {len(keep_lst)}/{self.participants.size} participants remaining"
+        )
+        self.participants = self.participants[keep_lst]
+
     def get_batch(self, batch_idx: Iterable, cut: bool = True):
 
         X = []
@@ -185,7 +253,7 @@ class Biomarker:
         self.seq_len = p2i["seq_len"].to_numpy()
         self.time_steps = p2i["time"].to_numpy()
         self.pids, ct = np.unique(p2i["pid"].to_numpy(), return_counts=True)
-        cumul_ct =  np.insert(np.cumsum(ct), 0, 0, axis=0)
+        cumul_ct = np.insert(np.cumsum(ct), 0, 0, axis=0)
         self.pid2idx = dict(zip(self.pids, cumul_ct))
         self.pid2cnt = dict(zip(self.pids, ct))
 
@@ -298,13 +366,18 @@ class MultimodalUKBDataset:
         subject_list: str = "participants/train_fold.bin",
         no_event_interval: None | float = 5 * 365.25,
         no_event_mode: str = "legacy-random",
-        perturb: bool = True,
+        perturb: bool = False,
         perturb_list: None | list = None,
         block_size: None | int = None,
-        crop_mode: Literal["left", "right", "random"] = "right",
+        crop_mode: Literal["left", "right", "random"] = "left",
         seed: int = 42,
         memmap: bool = False,
     ):
+        """
+        note: the following defaults differ from UKBDataset
+            - crop_mode
+            - perturb
+        """
 
         (
             self.tokenizer,
@@ -376,7 +449,7 @@ class MultimodalUKBDataset:
 
         if perturb:
             if perturb_list is None:
-                perturb_list = lifestyle
+                perturb_list = LIFESTYLE
             tokens_to_perturb = np.array(
                 [self.tokenizer[event] for event in perturb_list]
             )

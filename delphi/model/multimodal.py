@@ -135,15 +135,15 @@ class DelphiM4Config:
     n_head: int = 12
     n_embd: int = 120
     dropout: float = 0.1
-    token_dropout: float = 0.1
+    token_dropout: float = 0.0
     t_min: float = 0.1
-    bias: bool = False
-    mask_ties: bool = False
+    bias: bool = True
+    mask_ties: bool = True
     ignore_tokens: list = field(
         default_factory=lambda: [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     )
     biomarkers: dict[str, BiomarkerEmbedConfig] = field(default_factory=dict)
-    modality_emb: bool = False
+    modality_emb: bool = True
     ce_beta: float = 1.0
     dt_beta: float = 1.0
 

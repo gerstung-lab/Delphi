@@ -45,38 +45,28 @@ def sample_zero_inflated_exponentials(
 
 
 def integrate_risk(
-    log_lambda: torch.Tensor, age: torch.Tensor, start: float, end: float
+    hazard_rates: torch.Tensor,
+    timesteps: torch.Tensor,
+    last_time_by_event: torch.Tensor,
+    start: float,
+    end: float,
 ):
-    r"""
-    Aggregate values x over time intervals t within a specified time window [start, end].
-    As per the theory of non-homogeneous exponential distribution, the probability
-    an event occurs in the time window [start, end] is given by:
-    P(event in [start, end]) = 1 - exp(- \int_{start}^{end} \lambda(t) dt)
-    where \lambda(t) is the disease rate at time t.
-    This this function calculates the integral of the disease rate over the time window
-    under that piecewise constant disease rate assumption, using the tokens that
-    fall in the time window.
+    _timestep = timesteps.unsqueeze(-1)
+    _timestep = torch.clamp(_timestep, min=start)
+    _timestep = torch.clamp(_timestep, max=last_time_by_event.unsqueeze(1))
+    _timestep = torch.clamp(_timestep, max=end)
+    delta_t = torch.diff(_timestep, dim=1)
+    delta_t[delta_t == 0] = torch.nan
+    not_enough_exposure = torch.nansum(delta_t, dim=1) < (end - start)
 
-    Args:
-        x: Disease rate to integrate, lambda_0, ...., lambda_n, [batch, block_size, disease]
-        t: Time points, days since birth, t_0, ...., t_n, t_(n+1) [batch, block_size]
-            (the last time point is needed to calculate the duration of the last event)
-        start: Start of time window
-        end: End of time window
+    cumul_hazard = delta_t * hazard_rates
+    all_nan = torch.isnan(cumul_hazard).all(dim=1)
+    cumul_hazard = torch.nansum(cumul_hazard, dim=1)
+    # manually set sum of NaNs to Nan because torch.nansum over all NaNs returns 0
+    cumul_hazard[all_nan] = torch.nan
 
-    Returns:
-        Aggregated risk values, normalized by time exposure
-    """
-    pad = torch.clamp(age[:, [-1]], min=end)
-    age = torch.cat([age, pad], dim=1)
+    cumul_hazard[not_enough_exposure] = torch.nan
 
-    t_clamped = age.clamp(start, end)
-    dt = t_clamped.diff(1, dim=1)
-    dt_norm = dt / (dt.sum(1, keepdim=True) + 1e-6) * (end - start)
-
-    risk = log_lambda.exp() * dt_norm.unsqueeze(-1)
-    risk = risk.sum(-2)
-
-    risk[dt.sum(dim=1) == 0] = torch.nan
+    risk = 1 - torch.exp(-cumul_hazard)
 
     return risk

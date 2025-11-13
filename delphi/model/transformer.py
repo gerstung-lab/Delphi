@@ -457,4 +457,11 @@ class Delphi2M(nn.Module):
                 ]
             ).transpose(0, 1)
 
+        sort_by_age = torch.argsort(age, dim=1)
+        logits = torch.take_along_dim(
+            input=logits, indices=sort_by_age.unsqueeze(-1), dim=1
+        )
+        age = torch.take_along_dim(input=age, indices=sort_by_age, dim=1)
+        idx = torch.take_along_dim(input=idx, indices=sort_by_age, dim=1)
+
         return idx, age, logits
