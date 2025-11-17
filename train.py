@@ -76,14 +76,8 @@ config = {k: globals()[k] for k in config_keys}  # will be useful for logging
 os.makedirs(out_dir, exist_ok=True)
 torch.manual_seed(seed)
 
-# Use the new API for controlling TF32 precision, as the old
-# allow_tf32 settings will be deprecated after PyTorch 2.9 (see warning).
-torch.backends.cuda.matmul.fp32_precision = 'tf32' # enable TF32 for matrix multiplication
-torch.backends.cudnn.conv.fp32_precision = 'tf32'  # enable TF32 for cudnn convolutions
-
-# Original lines were
-# torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
-# torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
+torch.backends.cuda.matmul.fp32_precision = 'tf32'
+torch.backends.cudnn.conv.fp32_precision = 'tf32'
 
 device_type = 'cuda' if 'cuda' in device else 'cpu'  # for later use in torch.autocast
 # note: float16 data type will automatically use a GradScaler
@@ -151,7 +145,6 @@ model.to(device)
 
 # initialize a GradScaler. If enabled=False scaler is a no-op
 scaler = torch.amp.GradScaler('cuda', enabled=(dtype == 'float16')) 
-# Original: scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
 
 # optimizer
 optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)
