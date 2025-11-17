@@ -75,10 +75,8 @@ config = {k: globals()[k] for k in config_keys}  # will be useful for logging
 
 os.makedirs(out_dir, exist_ok=True)
 torch.manual_seed(seed)
-
 torch.backends.cuda.matmul.fp32_precision = 'tf32'
 torch.backends.cudnn.conv.fp32_precision = 'tf32'
-
 device_type = 'cuda' if 'cuda' in device else 'cpu'  # for later use in torch.autocast
 # note: float16 data type will automatically use a GradScaler
 ptdtype = {'float32': torch.float32, 'float64': torch.float64,
