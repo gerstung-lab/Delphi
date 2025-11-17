@@ -75,8 +75,8 @@ config = {k: globals()[k] for k in config_keys}  # will be useful for logging
 
 os.makedirs(out_dir, exist_ok=True)
 torch.manual_seed(seed)
-torch.backends.cuda.matmul.allow_tf32 = True  # allow tf32 on matmul
-torch.backends.cudnn.allow_tf32 = True  # allow tf32 on cudnn
+torch.backends.cuda.matmul.fp32_precision = 'tf32'
+torch.backends.cudnn.conv.fp32_precision = 'tf32'
 device_type = 'cuda' if 'cuda' in device else 'cpu'  # for later use in torch.autocast
 # note: float16 data type will automatically use a GradScaler
 ptdtype = {'float32': torch.float32, 'float64': torch.float64,
@@ -142,7 +142,7 @@ elif init_from == 'resume':
 model.to(device)
 
 # initialize a GradScaler. If enabled=False scaler is a no-op
-scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
+scaler = torch.amp.GradScaler('cuda', enabled=(dtype == 'float16')) 
 
 # optimizer
 optimizer = model.configure_optimizers(weight_decay, learning_rate, (beta1, beta2), device_type)
