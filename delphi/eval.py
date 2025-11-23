@@ -4,7 +4,6 @@ import numpy as np
 import torch
 from scipy.stats import rankdata
 
-from delphi.exponential import integrate_risk
 from delphi.multimodal import Modality
 
 
@@ -29,8 +28,6 @@ def kaplan_meier_incidence(
 ):
     """
     assumes the same survival times across all diseases and all participants
-
-    ! this can be vectorized but is actually faster AS IS when # participants is large
 
     inputs:
         – surv_prob [# participants, # tokens, # time_intervals]
@@ -113,9 +110,62 @@ class KaplanMeierEstimator:
         return np.array(incidence)
 
 
-class IntervalRiskCollector:
+def integrate_risk(
+    logits: torch.Tensor,
+    tokens: torch.Tensor,
+    timesteps: torch.Tensor,
+    time_intervals: torch.Tensor,
+):
+    """
+    not vectorized due to memory concerns when time_intervals are dense
 
-    def __init__(self, time_intervals: np.ndarray, n_repeats: int = 1):
+    input(s):
+        - hazard_rates: [# participants, # timesteps, # tokens]
+        - timesteps: [# participants, # timesteps]
+        - time_intervals: [# intervals]
+        - last_time_by_event: [# participants, # tokens]
+    output(s):
+        - risk: [# participants, # tokens, # intervals]
+    """
+    _, _, vocab_size = logits.shape
+
+    logits[logits == -torch.inf] = torch.nan
+    hazard_rates = logits[:, :-1].exp()
+
+    last_time_by_event = (
+        timesteps.max(dim=1, keepdim=True)[0].expand(-1, vocab_size).clone()
+    )
+    last_time_by_event = last_time_by_event.scatter_(index=tokens, src=timesteps, dim=1)
+
+    starts = time_intervals[:-1]
+    ends = time_intervals[1:]
+    risks = list()
+    for start, end in zip(starts, ends):
+        _timestep = timesteps.unsqueeze(-1)
+        _timestep = torch.clamp(_timestep, min=start)
+        _timestep = torch.clamp(_timestep, max=last_time_by_event.unsqueeze(1))
+        _timestep = torch.clamp(_timestep, max=end)
+        # _timestep: [# participants, # timesteps, # tokens]
+        delta_t = torch.diff(_timestep, dim=1)
+        not_enough_exposure = torch.nansum(delta_t, dim=1) < (end - start)
+
+        cumul_hazard = delta_t * hazard_rates
+        all_nan = torch.isnan(cumul_hazard).all(dim=1)
+        cumul_hazard = torch.nansum(cumul_hazard, dim=1)
+        # cumul_hazard: [# participants, # tokens]
+        # manually set sum of NaNs to Nan because torch.nansum over all NaNs returns 0
+        cumul_hazard[all_nan] = torch.nan
+        cumul_hazard[not_enough_exposure] = torch.nan
+
+        risk = 1 - torch.exp(-cumul_hazard)
+        risks.append(risk)
+
+    return torch.stack(risks, dim=-1)
+
+
+class IntervalRiskCollator:
+
+    def __init__(self, time_intervals: list[float], n_repeats: int = 1):
         self.risk_per_interval = list()
         self.time_intervals = time_intervals
         self.n_intervals = len(time_intervals) - 1
@@ -125,37 +175,20 @@ class IntervalRiskCollector:
 
         _, _, vocab_size = logits.shape
 
-        logits[logits == -torch.inf] = torch.nan
-        hazard_rates = logits[:, :-1].exp()
-
-        last_time_by_event = (
-            timestep.max(dim=1, keepdim=True)[0].expand(-1, vocab_size).clone()
+        risk_per_interval = integrate_risk(
+            logits=logits,
+            tokens=tokens,
+            timesteps=timestep,
+            time_intervals=torch.tensor(self.time_intervals).to(tokens.device),
         )
-        last_time_by_event = last_time_by_event.scatter_(
-            index=tokens, src=timestep, dim=1
-        )
+        risk_per_interval = torch.reshape(
+            risk_per_interval,
+            (-1, self.n_repeats, vocab_size, len(self.time_intervals) - 1),
+        )  # participants, # repeats, # vocab_size, # time_intervals
+        risk_per_interval = torch.nanmean(risk_per_interval, dim=1)
+        # participants, # vocab_size, # time_intervals
 
-        risk_per_timestep = list()
-        for i in range(1, len(self.time_intervals)):
-            risk = integrate_risk(
-                hazard_rates,
-                timestep,
-                last_time_by_event,
-                start=self.time_intervals[i - 1],
-                end=self.time_intervals[i],
-            )
-            risk_per_timestep.append(risk)
-        risk_per_timestep = torch.stack(risk_per_timestep, dim=1)
-        # participants * # repeats, # age_groups, # vocab_size
-        risk_per_timestep = torch.reshape(
-            risk_per_timestep, (-1, self.n_repeats, self.n_intervals, vocab_size)
-        )  # participants, # repeats, # age_groups, # vocab_size
-        risk_per_timestep = torch.nanmean(risk_per_timestep, dim=1)
-        # participants, # age_groups, # vocab_size
-        risk_per_timestep = risk_per_timestep.transpose(-1, -2)
-        # participants, # vocab_size, # age_groups
-
-        self.risk_per_interval.append(risk_per_timestep.detach().cpu())
+        self.risk_per_interval.append(risk_per_interval.detach().cpu())
 
     def finalize(self):
         out = torch.cat(self.risk_per_interval, dim=0)
@@ -163,7 +196,68 @@ class IntervalRiskCollector:
         return out
 
 
-class SamplingProbCollector:
+class IntervalKaplanMeierCollator:
+
+    def __init__(
+        self,
+        time_horizon: list[float],
+        start_age: float,
+        time_intervals: None | list[float] = None,
+        n_repeats: int = 1,
+    ):
+        self.time_intervals = time_intervals
+        self.time_horizon = time_horizon
+        self.start_age = start_age
+        self.n_repeats = n_repeats
+        self.prob_by_horizon = defaultdict(list)
+
+    def step(self, tokens: torch.Tensor, timestep: torch.Tensor, logits: torch.Tensor):
+
+        if self.time_intervals is None:
+            time_intervals = (
+                torch.unique(torch.clamp(timestep, min=0), sorted=True)
+                .detach()
+                .cpu()
+                .numpy()
+            )
+        else:
+            time_intervals = self.time_intervals
+
+        risk_per_interval = integrate_risk(
+            logits=logits,
+            tokens=tokens,
+            timesteps=timestep,
+            time_intervals=torch.tensor(self.time_intervals).to(tokens.device),
+        )
+        risk_per_interval = torch.reshape(
+            risk_per_interval,
+            (-1, self.n_repeats, logits.shape[-1], len(time_intervals) - 1),
+        )  # participants, # repeats, # vocab_size, # time_intervals
+        risk_per_interval = torch.nanmean(risk_per_interval, dim=1)
+        # participants, # vocab_size, # time_intervals
+
+        surv_prob = torch.cumprod(1 - risk_per_interval, dim=-1)
+        surv_time = np.array(time_intervals)[1:]
+        for horizon in self.time_horizon:
+            self.prob_by_horizon[horizon].append(
+                kaplan_meier_incidence(
+                    surv_prob=surv_prob.detach().cpu().numpy(),
+                    surv_time=surv_time,
+                    start=self.start_age,
+                    end=self.start_age + horizon,
+                )
+            )
+
+    def finalize(self):
+        prob_by_horizon = dict()
+        for horizon in self.prob_by_horizon.keys():
+            prob_by_horizon[horizon] = np.concatenate(
+                self.prob_by_horizon[horizon], axis=0
+            )
+        return prob_by_horizon
+
+
+class SamplingProbCollator:
 
     def __init__(
         self, vocab_size: int, time_horizon: list, start_age: float, n_repeats: int = 1
@@ -210,7 +304,7 @@ class SamplingProbCollector:
         return prob_by_horizon
 
 
-class EventTimeCollector:
+class EventTimeCollator:
 
     def __init__(self, vocab_size: int):
         self.exit_time = list()

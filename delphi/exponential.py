@@ -44,29 +44,52 @@ def sample_zero_inflated_exponentials(
     return next_token, time_til_next
 
 
-def integrate_risk(
-    hazard_rates: torch.Tensor,
-    timesteps: torch.Tensor,
-    last_time_by_event: torch.Tensor,
-    start: float,
-    end: float,
-):
-    _timestep = timesteps.unsqueeze(-1)
-    _timestep = torch.clamp(_timestep, min=start)
-    _timestep = torch.clamp(_timestep, max=last_time_by_event.unsqueeze(1))
-    _timestep = torch.clamp(_timestep, max=end)
-    delta_t = torch.diff(_timestep, dim=1)
-    delta_t[delta_t == 0] = torch.nan
-    not_enough_exposure = torch.nansum(delta_t, dim=1) < (end - start)
-
-    cumul_hazard = delta_t * hazard_rates
-    all_nan = torch.isnan(cumul_hazard).all(dim=1)
-    cumul_hazard = torch.nansum(cumul_hazard, dim=1)
-    # manually set sum of NaNs to Nan because torch.nansum over all NaNs returns 0
-    cumul_hazard[all_nan] = torch.nan
-
-    cumul_hazard[not_enough_exposure] = torch.nan
-
-    risk = 1 - torch.exp(-cumul_hazard)
-
-    return risk
+# def integrate_risk(
+#     logits: torch.Tensor,
+#     tokens: torch.Tensor,
+#     timesteps: torch.Tensor,
+#     time_intervals: torch.Tensor,
+# ):
+#     '''
+#     input(s):
+#         - hazard_rates: [# participants, # timesteps, # tokens]
+#         - timesteps: [# participants, # timesteps]
+#         - time_intervals: [# intervals]
+#         - last_time_by_event: [# participants, # tokens]
+#     output(s):
+#         - risk: [# participants, # tokens, # intervals]
+#     '''
+#     _, _, vocab_size = logits.shape
+#
+#     logits[logits == -torch.inf] = torch.nan
+#     hazard_rates = logits[:, :-1].exp()
+#
+#     last_time_by_event = (
+#         timesteps.max(dim=1, keepdim=True)[0].expand(-1, vocab_size).clone()
+#     )
+#     last_time_by_event = last_time_by_event.scatter_(
+#         index=tokens, src=timesteps, dim=1
+#     )
+#
+#     starts = time_intervals[:-1]
+#     ends = time_intervals[1:]
+#     _timestep = timesteps.unsqueeze(-1).unsqueeze(-1)
+#     _timestep = torch.clamp(_timestep, min=starts.view(1, 1, 1, -1))
+#     _timestep = torch.clamp(_timestep, max=last_time_by_event.unsqueeze(1).unsqueeze(-1))
+#     _timestep = torch.clamp(_timestep, max=ends.view(1, 1, 1, -1))
+#     # _timestep: [# participants, # timesteps, # tokens, # intervals]
+#     delta_t = torch.diff(_timestep, dim=1)
+#     not_enough_exposure = torch.nansum(delta_t, dim=1) < (ends - starts).view(1, 1, -1)
+#
+#     cumul_hazard = delta_t * hazard_rates.unsqueeze(-1)
+#     all_nan = torch.isnan(cumul_hazard).all(dim=1)
+#     cumul_hazard = torch.nansum(cumul_hazard, dim=1)
+#     # cumul_hazard: [# participants, # tokens, # intervals]
+#     # manually set sum of NaNs to Nan because torch.nansum over all NaNs returns 0
+#     cumul_hazard[all_nan] = torch.nan
+#
+#     cumul_hazard[not_enough_exposure] = torch.nan
+#
+#     risk = 1 - torch.exp(-cumul_hazard)
+#
+#     return risk
