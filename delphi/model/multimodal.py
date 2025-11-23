@@ -183,7 +183,16 @@ class DelphiM4(torch.nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def loss(self, logits, targets, age, targets_age, attn_mask, targets_mask):
+    def loss(
+        self,
+        logits: torch.Tensor,
+        targets: torch.Tensor,
+        age: torch.Tensor,
+        targets_age: torch.Tensor,
+        attn_mask: torch.Tensor,
+        targets_mask: torch.Tensor,
+        reduce: bool = True,
+    ):
 
         loss_ce = F.cross_entropy(
             # (b, l, n_vocab) -> (b, n_vocab, l)
@@ -191,8 +200,7 @@ class DelphiM4(torch.nn.Module):
             targets,
             reduction="none",
         )
-        loss_ce = torch.mean(loss_ce[targets_mask])
-        dt = ties_adjusted_delta_t(
+        dt, idx = ties_adjusted_delta_t(
             t0=age,
             t1=targets_age,
             attn_mask=attn_mask,
@@ -204,7 +212,11 @@ class DelphiM4(torch.nn.Module):
             log_lambda=torch.logsumexp(logits, -1),
             t_min=self.config.t_min,
         )
-        loss_dt = torch.mean(loss_dt[targets_mask])
+
+        if reduce:
+            loss_ce = torch.mean(loss_ce[targets_mask])
+            loss_dt = torch.mean(loss_dt[targets_mask])
+
         return {
             "loss_ce": loss_ce * self.config.ce_beta,
             "loss_dt": loss_dt * self.config.dt_beta,
