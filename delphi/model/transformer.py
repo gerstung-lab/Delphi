@@ -45,16 +45,14 @@ def ties_adjusted_delta_t(
     mask_ties: bool,
     attn_mask: torch.Tensor | None = None,
     eps: float = 1.0,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, None | torch.Tensor]:
 
     delta_t = t1 - t0
     delta_t = torch.clamp(delta_t, min=eps)
 
     if mask_ties:
         assert attn_mask is not None
-        delta_t = torch.gather(
-            delta_t,
-            -1,
+        idx = (
             (
                 attn_mask
                 * torch.arange(
@@ -62,10 +60,13 @@ def ties_adjusted_delta_t(
                 ).view(1, 1, 1, -1)
             )
             .max(-1)
-            .indices.squeeze((1, 2)),
+            .indices.squeeze((1, 2))
         )
+        delta_t = torch.gather(delta_t, -1, idx)
+    else:
+        idx = None
 
-    return delta_t
+    return delta_t, idx
 
 
 class AgeEncoding(nn.Module):
