@@ -12,7 +12,6 @@ import yaml
 from delphi.data.transform import (
     append_no_event,
     crop_contiguous,
-    crop_contiguous_multimodal,
     exclude_tokens,
     identity_transform,
     perturb_time,
@@ -33,10 +32,11 @@ def collate_batch(
         dtype=batch_data[0].dtype,
     )
     for i, bd in enumerate(batch_data):
-        if pad_left:
-            collated_batch[i, -bd.size :] = bd
-        else:
-            collated_batch[i, : bd.size] = bd
+        if bd.size > 0:
+            if pad_left:
+                collated_batch[i, -bd.size :] = bd
+            else:
+                collated_batch[i, : bd.size] = bd
 
     return collated_batch
 
@@ -200,7 +200,7 @@ class UKBDataset:
     ):
         lifestyle_tokens = np.array(self.tokenizer[i] for i in LIFESTYLE)
         keep_lst = list()
-        for i in np.arange(self.participants.size):
+        for i in range(self.participants.size):
             x_pid, t_pid = self[i]
             have_before = t_pid.min() <= prompt_age
             have_after = t_pid.max() >= prompt_age
@@ -352,6 +352,21 @@ def pad_trailing_biomarkers(
     return X, T, M
 
 
+def remove_biomarkers_after_time(biomarker, biomarker_t, m, final_time):
+    drop_mask = biomarker_t >= final_time
+    m_to_drop = m[drop_mask]
+    if m_to_drop.size == 0:
+        return biomarker, biomarker_t, m
+    else:
+        uniq_val, uniq_ct = np.unique(m_to_drop, return_counts=True)
+        for m_val, m_ct in zip(uniq_val, uniq_ct):
+            modality = Modality(m_val)
+            del biomarker[modality][-m_ct:]
+        biomarker_t = biomarker_t[~drop_mask]
+        m = m[~drop_mask]
+        return biomarker, biomarker_t, m
+
+
 class MultimodalUKBDataset:
 
     def __init__(
@@ -430,7 +445,7 @@ class MultimodalUKBDataset:
             old_n = self.participants.size
             for modality in must_have_biomarkers:
                 modality = Modality[modality.upper()]
-                data_participants = self.mod_ds[modality].data_participants
+                data_participants = self.mod_ds[modality].participants
                 self.participants = self.participants[
                     np.isin(self.participants, data_participants)
                 ]
@@ -461,7 +476,7 @@ class MultimodalUKBDataset:
 
         if block_size is not None:
             self.crop_block_size = functools.partial(
-                crop_contiguous_multimodal,
+                crop_contiguous,
                 block_size=block_size,
                 rng=self.rng,
                 mode=crop_mode,
@@ -498,55 +513,66 @@ class MultimodalUKBDataset:
         x = np.concatenate(x_lst)
         t = np.concatenate(t_lst)
         x, t = self.append_no_event(x, t)
-        m = np.ones_like(x, dtype=np.int32)
+        x, t = self.perturb_time(x, t)
+        t, x = sort_by_time(t, x)
+        x, t = self.crop_block_size(x, t)
 
-        biomarker = dict()
-        x_lst, t_lst, m_lst = [x], [t], [m]
+        bio_x_dict = dict()
+        bio_t_lst = list()
+        bio_m_lst = list()
         for modality, ds in self.mod_ds.items():
             bio_x, mod_t = ds[pid]
             if bio_x is None:
                 continue
-            biomarker[modality] = bio_x
+            bio_x_dict[modality] = bio_x
             mod_m = np.full_like(mod_t, fill_value=modality.value)
-            x_lst.append(np.zeros_like(mod_m))
-            t_lst.append(mod_t)
-            m_lst.append(mod_m)
-        x = np.concatenate(x_lst)
-        t = np.concatenate(t_lst)
-        m = np.concatenate(m_lst)
+            bio_t_lst.append(mod_t)
+            bio_m_lst.append(mod_m)
 
-        x, t = self.perturb_time(x, t)
-        t, x, m = sort_by_time(t, x, m)
-        x, biomarker, t, m = self.crop_block_size(x, biomarker, t, m)
-        return x, biomarker, t, m
+        if len(bio_x_dict) == 0:
+            assert len(bio_t_lst) == 0
+            assert len(bio_m_lst) == 0
+            bio_t = np.array([])
+            bio_m = np.array([])
+        else:
+            bio_t = np.concatenate(bio_t_lst)
+            bio_m = np.concatenate(bio_m_lst)
+
+            bio_t, bio_m = sort_by_time(bio_t, bio_m)
+            bio_x_dict, bio_t, bio_m = remove_biomarkers_after_time(
+                bio_x_dict, bio_t, bio_m, t.max()
+            )
+
+        return x, t, bio_x_dict, bio_t, bio_m
 
     def get_batch(self, batch_idx: Iterable, cut: bool = True):
 
-        X, T, M = list(), list(), list()
-        biomarker_X = defaultdict(list)
+        X, T, bio_M = list(), list(), list()
+        bio_X = defaultdict(list)
+        bio_T = list()
         for idx in batch_idx:
-            x, biomarker, t, m = self[idx]
+            x, t, bio_x, bio_t, m = self[idx]
             X.append(x)
             T.append(t)
-            M.append(m)
-            for modality, bio_x in biomarker.items():
-                biomarker_X[modality].extend(bio_x)
+
+            bio_T.append(bio_t)
+            for modality in bio_x.keys():
+                bio_X[modality].extend(bio_x[modality])
+            bio_M.append(m)
 
         X = collate_batch(X)
         T = collate_batch(T, fill_value=-1e4)
-        M = collate_batch(M)
+        bio_M = collate_batch(bio_M)
         X = torch.tensor(X, dtype=torch.long)
         T = torch.tensor(T, dtype=torch.float32)
-        M = torch.tensor(M, dtype=torch.long)
+        bio_M = torch.tensor(bio_M, dtype=torch.long)
 
-        for modality, bio_x_lst in biomarker_X.items():
-            biomarker_X[modality] = torch.from_numpy(np.stack(bio_x_lst))  # type: ignore
+        bio_T = collate_batch(bio_T, fill_value=-1e4)
+        bio_T = torch.tensor(bio_T, dtype=torch.float32)
+        for modality, bio_x_lst in bio_X.items():
+            bio_X[modality] = torch.from_numpy(np.stack(bio_x_lst))  # type: ignore
 
-        if cut:
-            X, T, M = pad_trailing_biomarkers(X, T, M)
-            return X[:, :-1], T[:, :-1], M[:, :-1], biomarker_X, X[:, 1:], T[:, 1:]
-        else:
-            return X, T, M, biomarker_X
+        return X[:, :-1], T[:, :-1], bio_M, bio_X, bio_T, X[:, 1:], T[:, 1:]
 
 
 def load_core_data_package(data_dir: str, subject_list: str, memmap: bool = False):
