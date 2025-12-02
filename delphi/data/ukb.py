@@ -9,7 +9,7 @@ import pandas as pd
 import torch
 import yaml
 
-from delphi.data.transform import (
+from delphi.data.utils import (
     append_no_event,
     crop_contiguous,
     exclude_tokens,
