@@ -407,27 +407,43 @@ class AgeStratRatesCollator:
     def __init__(self, age_groups: torch.Tensor):
         self.age_groups = age_groups
         self.ctl_rates = list()
+        self.ctl_times = list()
 
-    def step(self, timesteps, logits):
+    def step(
+        self,
+        timesteps: torch.Tensor,
+        logits: torch.Tensor,
+    ):
+
+        batch_size = logits.shape[0]
+        n_age_bins = len(self.age_groups) - 1
         bin_assignments = torch.searchsorted(self.age_groups, timesteps, right=True)
         bin_assignments -= 1
 
         ctl_rates = list()
-        for bin_idx in range(len(self.age_groups) - 1):
+        ctl_times = list()
+        for bin_idx in range(n_age_bins):
             bin_mask = sample_boolean_mask(bin_assignments == bin_idx)
             ctl_rate = torch.full(
-                (logits.shape[0], logits.shape[-1]),
+                (batch_size, logits.shape[-1]),
                 dtype=logits.dtype,
                 fill_value=torch.nan,
             ).to(logits.device)
+            ctl_time = torch.full(
+                (batch_size,), dtype=timesteps.dtype, fill_value=torch.nan
+            ).to(logits.device)
             ctl_rate[bin_mask.any(dim=-1)] = logits[bin_mask, :]
+            ctl_time[bin_mask.any(dim=-1)] = timesteps[bin_mask]
             ctl_rates.append(ctl_rate)
+            ctl_times.append(ctl_time)
         ctl_rates = torch.stack(ctl_rates, dim=1)
+        ctl_times = torch.stack(ctl_times, dim=1)
 
         self.ctl_rates.append(ctl_rates.detach().cpu())
+        self.ctl_times.append(ctl_times.detach().cpu())
 
     def finalize(self):
-        return torch.concat(self.ctl_rates)
+        return torch.concat(self.ctl_rates), torch.concat(self.ctl_times)
 
 
 class DiseaseRatesCollator:
@@ -489,6 +505,7 @@ class ModalityCollator:
         ).to(timesteps.device)
         mod_timesteps = mod_timesteps.scatter_(dim=1, src=timesteps, index=mod_tokens)
         self.mod_timesteps.append(mod_timesteps.detach().cpu())
+        return mod_timesteps
 
     def finalize(self):
         return torch.cat(self.mod_timesteps, dim=0)

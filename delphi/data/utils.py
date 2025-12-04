@@ -2,9 +2,56 @@ import itertools
 from typing import Literal
 
 import numpy as np
+import torch
+
+from delphi.multimodal import Modality
 
 
-def identity_transform(*args):
+def collate_batch(
+    batch_data: list[np.ndarray], fill_value: int | float = 0, pad_left: bool = True
+) -> np.ndarray:
+
+    max_len = max([bd.size for bd in batch_data])
+    collated_batch = np.full(
+        shape=(len(batch_data), max_len),
+        fill_value=fill_value,
+        dtype=batch_data[0].dtype,
+    )
+    for i, bd in enumerate(batch_data):
+        if bd.size > 0:
+            if pad_left:
+                collated_batch[i, -bd.size :] = bd
+            else:
+                collated_batch[i, : bd.size] = bd
+
+    return collated_batch
+
+
+def collate_batches(
+    batch_data: list[np.ndarray], fill_value: int | float = 0, pad_left: bool = True
+) -> np.ndarray:
+
+    max_len = max([bd.shape[1] for bd in batch_data])
+    n_lst = np.array([bd.shape[0] for bd in batch_data])
+    collated_batch = np.full(
+        shape=(n_lst.sum(), max_len),
+        fill_value=fill_value,
+        dtype=batch_data[0].dtype,
+    )
+
+    s = 0
+    for i, bd in enumerate(batch_data):
+        l = bd.shape[0]
+        if pad_left:
+            collated_batch[s : s + l, -bd.shape[1] :] = bd
+        else:
+            collated_batch[s : s + l, : bd.shape[1]] = bd
+        s += l
+
+    return collated_batch
+
+
+def identity_transform(*args, **kwargs):
     return args
 
 
@@ -61,6 +108,20 @@ def append_no_event(
 
     x = np.concatenate((x, no_event_x))
     t = np.concatenate((t, no_event_t))
+
+    return x, t
+
+
+def move_to_last(x: np.ndarray, t: np.ndarray, token: int):
+
+    n = (x == token).sum()
+    assert n < 2
+    if n > 0:
+        idx = np.zeros_like(x)
+        idx[x == token] = 1
+        move_last = np.argsort(x, stable=True)
+        x = x[move_last]
+        t = t[move_last]
 
     return x, t
 
@@ -132,8 +193,8 @@ def crop_contiguous_multimodal(
         return x[keep], biomarker_keep, t[keep], m[keep]
 
 
-def sort_by_time(t: np.ndarray, *args: np.ndarray):
-    s = np.argsort(t)
+def sort_by_time(t: np.ndarray, *args: np.ndarray, stable: bool = False):
+    s = np.argsort(t, stable=stable)
     t = t[s]
     return t, *[arg[s] for arg in args]
 
@@ -156,3 +217,46 @@ def exclude_tokens(x: np.ndarray, t: np.ndarray, blacklist: np.ndarray):
     x = x[~to_exclude]
     t = t[~to_exclude]
     return x, t
+
+
+def update_tokenizer(base_tokenizer: dict, add_tokenizer: dict) -> tuple[dict, int]:
+
+    assert min(base_tokenizer.values()) == 0, "base tokenizer must start with 0"
+    assert min(add_tokenizer.values()) == 1, "additional tokenizer must start with 1"
+    offset = len(base_tokenizer) - 1
+    for key, value in add_tokenizer.items():
+        if key not in base_tokenizer:
+            base_tokenizer[key] = value + offset
+        else:
+            raise ValueError(f"{key} already exists in base tokenizer")
+    return base_tokenizer, offset
+
+
+def pad_trailing_biomarkers(
+    X: torch.Tensor,
+    T: torch.Tensor,
+    M: torch.Tensor,
+):
+
+    trailing_M = M[:, -1:]
+    if trailing_M.max() > 1:
+        M = torch.cat([M, trailing_M * 0], dim=1)
+        X = torch.cat([X, torch.zeros_like(trailing_M, dtype=X.dtype)], dim=1)
+        T = torch.cat([T, T[:, -1:]], dim=1)
+
+    return X, T, M
+
+
+def remove_biomarkers_after_time(biomarker, biomarker_t, m, final_time):
+    drop_mask = biomarker_t >= final_time
+    m_to_drop = m[drop_mask]
+    if m_to_drop.size == 0:
+        return biomarker, biomarker_t, m
+    else:
+        uniq_val, uniq_ct = np.unique(m_to_drop, return_counts=True)
+        for m_val, m_ct in zip(uniq_val, uniq_ct):
+            modality = Modality(m_val)
+            del biomarker[modality][-m_ct:]
+        biomarker_t = biomarker_t[~drop_mask]
+        m = m[~drop_mask]
+        return biomarker, biomarker_t, m

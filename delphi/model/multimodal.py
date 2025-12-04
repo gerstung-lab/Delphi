@@ -1,11 +1,14 @@
 import math
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Required, TypedDict
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from delphi.data.ukb import collate_batch
 from delphi.exponential import exponential_nll
 from delphi.model.transformer import (
     MLP,
@@ -119,7 +122,13 @@ class DelphiEmbedding(nn.Module):
                 )
                 biomarker_emb[modality] += mod_emb.unsqueeze(0)
 
-        return emb, biomarker_emb
+        raw = {
+            "idx": idx_emb,
+            "age": age_emb,
+            "mod_age": mod_age_emb,
+            "biomarker": biomarker_emb,
+        }
+        return emb, biomarker_emb, raw
 
 
 class CrossAttention(nn.Module):
@@ -372,6 +381,7 @@ class DelphiM4Config:
     )
     biomarkers: dict[str, BiomarkerEmbedConfig] = field(default_factory=dict)
     modality_emb: bool = True
+    biomarker_only: bool = False
     ce_beta: float = 1.0
     dt_beta: float = 1.0
     fuse: str = "early"  # early, cross, concat, concat-raw
@@ -393,9 +403,12 @@ class DelphiM4(torch.nn.Module):
             )
         )
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.transformer.embed.token_embedding.weight = self.lm_head.weight
+        if config.weight_tying:
+            self.transformer.embed.token_embedding.weight = self.lm_head.weight
 
         self.fuse_early = self.config.fuse == "early"
+        if (not self.fuse_early) and config.biomarker_only:
+            raise ValueError
         if self.config.fuse in {"concat", "concat-raw"}:
             raise NotImplementedError
         elif self.config.fuse == "cross":
@@ -425,8 +438,6 @@ class DelphiM4(torch.nn.Module):
         targets: torch.Tensor,
         age: torch.Tensor,
         targets_age: torch.Tensor,
-        targets_mask: torch.Tensor,
-        reduce: bool = True,
     ):
 
         loss_ce = F.cross_entropy(
@@ -449,29 +460,26 @@ class DelphiM4(torch.nn.Module):
             t_min=self.config.t_min,
         )
 
-        if reduce:
-            loss_ce = torch.mean(loss_ce[targets_mask])
-            loss_dt = torch.mean(loss_dt[targets_mask])
-
-        return {
-            "loss_ce": loss_ce * self.config.ce_beta,
-            "loss_dt": loss_dt * self.config.dt_beta,
-        }
+        return loss_ce, loss_dt
 
     def forward(
         self,
         idx: torch.Tensor,
         age: torch.Tensor,
-        mod_idx: torch.Tensor,
         biomarker: dict[Modality, torch.Tensor],
         mod_age: torch.Tensor,
+        mod_idx: torch.Tensor,
         targets: None | torch.Tensor = None,
         targets_age: None | torch.Tensor = None,
     ) -> tuple[tensor_dict, None | tensor_dict, torch.Tensor]:
 
-        x, mod_emb = self.transformer.embed(
+        x, mod_emb, raw = self.transformer.embed(
             idx=idx, age=age, mod_idx=mod_idx, mod_age=mod_age, biomarker_x=biomarker
         )
+
+        if self.config.biomarker_only:
+            x = raw["age"]
+
         if self.fuse_early:
             x, fused_mod_idx = fuse_embed(
                 emb=x, age=age, mod_idx=mod_idx, mod_age=mod_age, mod_emb=mod_emb
@@ -488,6 +496,14 @@ class DelphiM4(torch.nn.Module):
         attn_mask = causal_attention_mask(
             pad=t0 != -1e4, t0=t0, t1=t1, mask_ties=self.config.mask_ties
         )
+        if self.config.biomarker_only:
+            attn_idx = torch.arange(attn_mask.shape[-1], device=attn_mask.device)
+            attn_idx = attn_idx.view(1, 1, 1, -1) * attn_mask
+            last_idx = attn_idx.max(dim=-1, keepdim=True)[0]
+            attn_mask *= (fused_mod_idx != 1).view(
+                fused_mod_idx.shape[0], 1, 1, fused_mod_idx.shape[-1]
+            )
+            attn_mask.scatter_(dim=-1, index=last_idx.long(), value=1)
 
         x = self.transformer.drop(x)
         att = []

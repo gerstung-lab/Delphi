@@ -6,64 +6,23 @@ from typing import Iterable, Literal
 
 import numpy as np
 import pandas as pd
+import shap
 import torch
 import yaml
 
 from delphi.data.utils import (
     append_no_event,
+    collate_batch,
     crop_contiguous,
     exclude_tokens,
     identity_transform,
     perturb_time,
+    remove_biomarkers_after_time,
     sort_by_time,
+    update_tokenizer,
 )
 from delphi.env import DELPHI_DATA_DIR
 from delphi.multimodal import Modality
-
-
-def collate_batch(
-    batch_data: list[np.ndarray], fill_value: int | float = 0, pad_left: bool = True
-) -> np.ndarray:
-
-    max_len = max([bd.size for bd in batch_data])
-    collated_batch = np.full(
-        shape=(len(batch_data), max_len),
-        fill_value=fill_value,
-        dtype=batch_data[0].dtype,
-    )
-    for i, bd in enumerate(batch_data):
-        if bd.size > 0:
-            if pad_left:
-                collated_batch[i, -bd.size :] = bd
-            else:
-                collated_batch[i, : bd.size] = bd
-
-    return collated_batch
-
-
-def collate_batches(
-    batch_data: list[np.ndarray], fill_value: int | float = 0, pad_left: bool = True
-) -> np.ndarray:
-
-    max_len = max([bd.shape[1] for bd in batch_data])
-    n_lst = np.array([bd.shape[0] for bd in batch_data])
-    collated_batch = np.full(
-        shape=(n_lst.sum(), max_len),
-        fill_value=fill_value,
-        dtype=batch_data[0].dtype,
-    )
-
-    s = 0
-    for i, bd in enumerate(batch_data):
-        l = bd.shape[0]
-        if pad_left:
-            collated_batch[s : s + l, -bd.shape[1] :] = bd
-        else:
-            collated_batch[s : s + l, : bd.shape[1]] = bd
-        s += l
-
-    return collated_batch
-
 
 LIFESTYLE = [
     "bmi_low",
@@ -115,6 +74,7 @@ class UKBDataset:
         exclude_list: None | list = None,
         crop_mode: Literal["left", "right", "random"] = "right",
         seed: int = 42,
+        deterministic: bool = False,
         memmap: bool = False,
     ):
 
@@ -128,13 +88,15 @@ class UKBDataset:
         ) = load_core_data_package(
             data_dir=data_dir, subject_list=subject_list, memmap=memmap
         )
+
+        self.seed = seed
         self.rng = np.random.default_rng(seed)
+        self.deterministic = deterministic
 
         self.no_event_interval = no_event_interval
         if no_event_interval is not None:
             self.append_no_event = functools.partial(
                 append_no_event,
-                rng=self.rng,
                 interval=no_event_interval,
                 token=self.tokenizer["no_event"],
                 mode=no_event_mode,
@@ -161,14 +123,17 @@ class UKBDataset:
                 [self.tokenizer[event] for event in perturb_list]
             )
             self.perturb_time = functools.partial(
-                perturb_time, tokens=tokens_to_perturb, rng=self.rng
+                perturb_time,
+                tokens=tokens_to_perturb,
             )
         else:
             self.perturb_time = identity_transform
 
         if block_size is not None:
             self.crop_block_size = functools.partial(
-                crop_contiguous, block_size=block_size, rng=self.rng, mode=crop_mode
+                crop_contiguous,
+                block_size=block_size,
+                mode=crop_mode,
             )
         else:
             self.crop_block_size = identity_transform
@@ -180,20 +145,28 @@ class UKBDataset:
     def vocab_size(self):
         return len(self.tokenizer)
 
+    @property
+    def detokenizer(self):
+        return {v: k for k, v in self.tokenizer.items()}
+
     def __getitem__(self, idx: int):
 
         pid = self.participants[idx]
+        if self.deterministic:
+            rng = np.random.default_rng(pid + self.seed)
+        else:
+            rng = self.rng
         i = self.start_pos[pid]
         l = self.seq_len[pid]
         x_pid = self.tokens[i : i + l].astype(np.uint32)
         t_pid = self.time_steps[i : i + l].astype(np.float32)
         x_pid, t_pid = self.exclude_tokens(x_pid, t_pid)
-        x_pid, t_pid = self.append_no_event(x_pid, t_pid)
-        x_pid, t_pid = self.perturb_time(x_pid, t_pid)
-        t_pid, x_pid = sort_by_time(t_pid, x_pid)
-        x_pid, t_pid = self.crop_block_size(x_pid, t_pid)
+        x_pid, t_pid = self.append_no_event(x_pid, t_pid, rng=rng)
+        x_pid, t_pid = self.perturb_time(x_pid, t_pid, rng=rng)
+        t_pid, x_pid = sort_by_time(t_pid, x_pid, stable=self.deterministic)
+        x_pid, t_pid = self.crop_block_size(x_pid, t_pid, rng=rng)
 
-        return x_pid, t_pid
+        return x_pid[:-1], t_pid[:-1], x_pid[1:], t_pid[1:]
 
     def subset_participants_for_prompt(
         self, prompt_age: float, must_have_lifestyle: bool = False
@@ -201,7 +174,7 @@ class UKBDataset:
         lifestyle_tokens = np.array(self.tokenizer[i] for i in LIFESTYLE)
         keep_lst = list()
         for i in range(self.participants.size):
-            x_pid, t_pid = self[i]
+            x_pid, t_pid, _, _ = self[i]
             have_before = t_pid.min() <= prompt_age
             have_after = t_pid.max() >= prompt_age
             if must_have_lifestyle:
@@ -217,30 +190,40 @@ class UKBDataset:
         )
         self.participants = self.participants[keep_lst]
 
-    def get_batch(self, batch_idx: Iterable, cut: bool = True):
+    def get_batch(self, batch_idx: Iterable):
 
-        X = []
-        T = []
+        X0, T0, X1, T1 = list(), list(), list(), list()
         for idx in batch_idx:
-            x, t = self[idx]
-            X.append(x)
-            T.append(t)
+            x0, t0, x1, t1 = self[idx]
+            X0.append(x0)
+            X1.append(x1)
+            T0.append(t0)
+            T1.append(t1)
 
-        X = collate_batch(X)
-        T = collate_batch(T, fill_value=-1e4)
+        X0 = collate_batch(X0)
+        T0 = collate_batch(T0, fill_value=-1e4)
+        X1 = collate_batch(X1)
+        T1 = collate_batch(T1, fill_value=-1e4)
 
-        X = torch.tensor(X, dtype=torch.long)
-        T = torch.tensor(T, dtype=torch.float32)
+        X0 = torch.tensor(X0, dtype=torch.long)
+        T0 = torch.tensor(T0, dtype=torch.float32)
+        X1 = torch.tensor(X1, dtype=torch.long)
+        T1 = torch.tensor(T1, dtype=torch.float32)
 
-        if cut:
-            return X[:, :-1], T[:, :-1], X[:, 1:], T[:, 1:]
-        else:
-            return X, T
+        return X0, T0, X1, T1
 
 
 class Biomarker:
 
-    def __init__(self, path: str, memmap: bool = False, first_time_only: bool = True):
+    def __init__(
+        self,
+        path: str,
+        stats_subjects: None | np.ndarray = None,
+        memmap: bool = False,
+        first_time_only: bool = True,
+        z_score: bool = False,
+    ):
+
         self.path = path
         data_path = os.path.join(path, "data.bin")
         if memmap:
@@ -248,27 +231,58 @@ class Biomarker:
         else:
             self.data = np.fromfile(data_path, dtype=np.float32)
 
+        with open(os.path.join(path, "features.yaml"), "r") as f:
+            self.features = yaml.safe_load(f)
+        self.n_features = len(self.features)
+
         p2i = pd.read_csv(os.path.join(path, "p2i.csv")).sort_values(by=["pid", "time"])
         self.start_pos = p2i["start_pos"].to_numpy()
         self.seq_len = p2i["seq_len"].to_numpy()
         self.time_steps = p2i["time"].to_numpy()
-        self.pids, ct = np.unique(p2i["pid"].to_numpy(), return_counts=True)
+        self.pids = p2i["pid"].to_numpy()
+        self.uniq_pids, ct = np.unique(p2i["pid"].to_numpy(), return_counts=True)
         cumul_ct = np.insert(np.cumsum(ct), 0, 0, axis=0)
-        self.pid2idx = dict(zip(self.pids, cumul_ct))
-        self.pid2cnt = dict(zip(self.pids, ct))
+        self.pid2idx = dict(zip(self.uniq_pids, cumul_ct))
+        self.pid2cnt = dict(zip(self.uniq_pids, ct))
 
         self.first_time_only = first_time_only
+        self.z_score = z_score
+        if stats_subjects is None:
+            stats_subjects = self.uniq_pids
+        self.mean, self.std = self.stats(stats_subjects)
 
     def __repr__(self):
-        return f"Biomarker(path={self.path})"
+        return f"Biomarker(path={self.path}, n_features={self.n_features})"
 
     @property
-    def participants(self):
+    def mask(self):
+        if self.z_score:
+            if self.n_features > 1:
+                return np.zeros((self.n_features,))
+            else:
+                return 0
+        else:
+            return self.mean
 
-        have_data = np.array([self.pid2cnt[pid] > 0 for pid in self.pids])
-        participants_with_data = self.pids[have_data]
+    def stats(self, subjects: np.ndarray):
+        data = list()
+        start_pos = self.start_pos[np.isin(self.pids, subjects)]
+        seq_len = self.seq_len[np.isin(self.pids, subjects)]
+        for i, l in zip(start_pos, seq_len):
+            pid_data = self.data[i : i + l]
+            if pid_data.size > 0:
+                data.append(pid_data)
+        data = np.stack(data, axis=0)
+        if data.shape[1] > 1:
+            return np.mean(data, axis=0), np.std(data, axis=0)
+        else:
+            return np.mean(data), np.std(data)
 
-        return participants_with_data
+    def transform(self, x):
+        if self.z_score:
+            return (x - self.mean) / self.std
+        else:
+            return x
 
     def __getitem__(
         self, pid: int
@@ -286,6 +300,7 @@ class Biomarker:
         for i, l in zip(pid_start_pos, pid_seq_len):
             if l > 0:
                 x = self.data[i : i + l]
+                x = self.transform(x)
                 pid_data.append(x)
             if self.first_time_only:
                 pid_time = pid_time[[0]]
@@ -324,49 +339,6 @@ class ExpansionPack:
         return x_pid, t_pid
 
 
-def update_tokenizer(base_tokenizer: dict, add_tokenizer: dict) -> tuple[dict, int]:
-
-    assert min(base_tokenizer.values()) == 0, "base tokenizer must start with 0"
-    assert min(add_tokenizer.values()) == 1, "additional tokenizer must start with 1"
-    offset = len(base_tokenizer) - 1
-    for key, value in add_tokenizer.items():
-        if key not in base_tokenizer:
-            base_tokenizer[key] = value + offset
-        else:
-            raise ValueError(f"{key} already exists in base tokenizer")
-    return base_tokenizer, offset
-
-
-def pad_trailing_biomarkers(
-    X: torch.Tensor,
-    T: torch.Tensor,
-    M: torch.Tensor,
-):
-
-    trailing_M = M[:, -1:]
-    if trailing_M.max() > 1:
-        M = torch.cat([M, trailing_M * 0], dim=1)
-        X = torch.cat([X, torch.zeros_like(trailing_M, dtype=X.dtype)], dim=1)
-        T = torch.cat([T, T[:, -1:]], dim=1)
-
-    return X, T, M
-
-
-def remove_biomarkers_after_time(biomarker, biomarker_t, m, final_time):
-    drop_mask = biomarker_t >= final_time
-    m_to_drop = m[drop_mask]
-    if m_to_drop.size == 0:
-        return biomarker, biomarker_t, m
-    else:
-        uniq_val, uniq_ct = np.unique(m_to_drop, return_counts=True)
-        for m_val, m_ct in zip(uniq_val, uniq_ct):
-            modality = Modality(m_val)
-            del biomarker[modality][-m_ct:]
-        biomarker_t = biomarker_t[~drop_mask]
-        m = m[~drop_mask]
-        return biomarker, biomarker_t, m
-
-
 class MultimodalUKBDataset:
 
     def __init__(
@@ -374,10 +346,13 @@ class MultimodalUKBDataset:
         data_dir: str = "ukb_real_data",
         expansion_pack_dir: str = "expansion_packs",
         expansion_packs: None | list = None,
+        biomarker_datasets: None | dict = None,
         biomarker_dir: str = "biomarkers",
         biomarkers: None | list = None,
+        z_score_biomarkers: bool = False,
         first_time_only: bool = True,
         must_have_biomarkers: None | list = None,
+        stats_subject_list: None | str = None,
         subject_list: str = "participants/train_fold.bin",
         no_event_interval: None | float = 5 * 365.25,
         no_event_mode: str = "legacy-random",
@@ -386,13 +361,20 @@ class MultimodalUKBDataset:
         block_size: None | int = None,
         crop_mode: Literal["left", "right", "random"] = "left",
         seed: int = 42,
+        deterministic: bool = False,
         memmap: bool = False,
     ):
         """
+        args:
+        - biomarker_datasets(optional): a list of pre-initialized Biomarkers
+        - stats_subject_list(optional): path to an array of subjects for compputing Biomarker stats
         note: the following defaults differ from UKBDataset
             - crop_mode
             - perturb
         """
+
+        self._init_args = locals().copy()
+        self._init_args.pop("self")  # Remove 'self' reference
 
         (
             self.tokenizer,
@@ -404,7 +386,10 @@ class MultimodalUKBDataset:
         ) = load_core_data_package(
             data_dir=data_dir, subject_list=subject_list, memmap=memmap
         )
+
+        self.seed = seed
         self.rng = np.random.default_rng(seed)
+        self.deterministic = deterministic
 
         self.expansion_packs = []
         self.expansion_pack_tokenizers = []
@@ -429,16 +414,32 @@ class MultimodalUKBDataset:
                     ExpansionPack(path=pack_path, offset=offset, memmap=memmap)
                 )
 
-        self.biomarker_dir = os.path.join(DELPHI_DATA_DIR, data_dir, biomarker_dir)
-        self.mod_ds = {}
-        if biomarkers is not None:
-            for modality in biomarkers:
-                modality = Modality[modality.upper()]
-                biomarker_path = os.path.join(self.biomarker_dir, modality.name.lower())
-                dataset = Biomarker(
-                    path=biomarker_path, memmap=memmap, first_time_only=first_time_only
+        if biomarker_datasets is not None:
+            assert biomarkers is None
+            self.mod_ds = biomarker_datasets
+        else:
+            biomarker_dir = os.path.join(DELPHI_DATA_DIR, data_dir, biomarker_dir)
+            if stats_subject_list is None:
+                stats_subjects = self.participants
+            else:
+                stats_subjects = np.fromfile(
+                    os.path.join(DELPHI_DATA_DIR, data_dir, stats_subject_list),
+                    dtype=np.uint32,
                 )
-                self.mod_ds[modality] = dataset
+
+            self.mod_ds = {}
+            if biomarkers is not None:
+                for modality in biomarkers:
+                    modality = Modality[modality.upper()]
+                    biomarker_path = os.path.join(biomarker_dir, modality.name.lower())
+                    dataset = Biomarker(
+                        path=biomarker_path,
+                        stats_subjects=stats_subjects,
+                        memmap=memmap,
+                        first_time_only=first_time_only,
+                        z_score=z_score_biomarkers,
+                    )
+                    self.mod_ds[modality] = dataset
 
         if must_have_biomarkers is not None:
             print(f"keeping participants with biomarkers: {must_have_biomarkers}")
@@ -454,7 +455,6 @@ class MultimodalUKBDataset:
         if no_event_interval is not None:
             self.append_no_event = functools.partial(
                 append_no_event,
-                rng=self.rng,
                 interval=no_event_interval,
                 token=self.tokenizer["no_event"],
                 mode=no_event_mode,
@@ -469,7 +469,7 @@ class MultimodalUKBDataset:
                 [self.tokenizer[event] for event in perturb_list]
             )
             self.perturb_time = functools.partial(
-                perturb_time, tokens=tokens_to_perturb, rng=self.rng
+                perturb_time, tokens=tokens_to_perturb
             )
         else:
             self.perturb_time = identity_transform
@@ -478,7 +478,6 @@ class MultimodalUKBDataset:
             self.crop_block_size = functools.partial(
                 crop_contiguous,
                 block_size=block_size,
-                rng=self.rng,
                 mode=crop_mode,
             )
         else:
@@ -492,6 +491,10 @@ class MultimodalUKBDataset:
         return len(self.tokenizer)
 
     @property
+    def detokenizer(self):
+        return {v: k for k, v in self.tokenizer.items()}
+
+    @property
     def expansion_tokens(self):
         tokens = list()
         for exp_pack in self.expansion_packs:
@@ -501,6 +504,10 @@ class MultimodalUKBDataset:
     def __getitem__(self, idx: int):
 
         pid = self.participants[idx]
+        if self.deterministic:
+            rng = np.random.default_rng(pid + self.seed)
+        else:
+            rng = self.rng
         i = self.start_pos[pid]
         l = self.seq_len[pid]
         x = self.tokens[i : i + l].astype(np.uint32)
@@ -512,10 +519,10 @@ class MultimodalUKBDataset:
             t_lst.append(exp_t)
         x = np.concatenate(x_lst)
         t = np.concatenate(t_lst)
-        x, t = self.append_no_event(x, t)
-        x, t = self.perturb_time(x, t)
+        x, t = self.append_no_event(x, t, rng=rng)
+        x, t = self.perturb_time(x, t, rng=rng)
         t, x = sort_by_time(t, x)
-        x, t = self.crop_block_size(x, t)
+        x, t = self.crop_block_size(x, t, rng=rng)
 
         bio_x_dict = dict()
         bio_t_lst = list()
@@ -543,36 +550,44 @@ class MultimodalUKBDataset:
                 bio_x_dict, bio_t, bio_m, t.max()
             )
 
-        return x, t, bio_x_dict, bio_t, bio_m
+        x0, x1 = x[:-1].copy(), x[1:].copy()
+        t0, t1 = t[:-1].copy(), t[1:].copy()
 
-    def get_batch(self, batch_idx: Iterable, cut: bool = True):
+        return x0, t0, bio_x_dict, bio_t, bio_m, x1, t1
 
-        X, T, bio_M = list(), list(), list()
-        bio_X = defaultdict(list)
-        bio_T = list()
+    def get_batch(self, batch_idx: Iterable):
+
+        X0, T0, X1, T1 = list(), list(), list(), list()
+        bio_X_dict, bio_T, bio_M = defaultdict(list), list(), list()
         for idx in batch_idx:
-            x, t, bio_x, bio_t, m = self[idx]
-            X.append(x)
-            T.append(t)
+            x0, t0, bio_x_dict, bio_t, bio_m, x1, t1 = self[idx]
+            X0.append(x0)
+            T0.append(t0)
+            X1.append(x1)
+            T1.append(t1)
 
+            for modality in bio_x_dict.keys():
+                bio_X_dict[modality].extend(bio_x_dict[modality])
             bio_T.append(bio_t)
-            for modality in bio_x.keys():
-                bio_X[modality].extend(bio_x[modality])
-            bio_M.append(m)
+            bio_M.append(bio_m)
 
-        X = collate_batch(X)
-        T = collate_batch(T, fill_value=-1e4)
-        bio_M = collate_batch(bio_M)
-        X = torch.tensor(X, dtype=torch.long)
-        T = torch.tensor(T, dtype=torch.float32)
-        bio_M = torch.tensor(bio_M, dtype=torch.long)
+        X0 = collate_batch(X0)
+        X0 = torch.tensor(X0, dtype=torch.long)
+        T0 = collate_batch(T0, fill_value=-1e4)
+        T0 = torch.tensor(T0, dtype=torch.float32)
+        X1 = collate_batch(X1)
+        X1 = torch.tensor(X1, dtype=torch.long)
+        T1 = collate_batch(T1, fill_value=-1e4)
+        T1 = torch.tensor(T1, dtype=torch.float32)
 
+        for modality, bio_x_lst in bio_X_dict.items():
+            bio_X_dict[modality] = torch.from_numpy(np.stack(bio_x_lst))  # type: ignore
         bio_T = collate_batch(bio_T, fill_value=-1e4)
         bio_T = torch.tensor(bio_T, dtype=torch.float32)
-        for modality, bio_x_lst in bio_X.items():
-            bio_X[modality] = torch.from_numpy(np.stack(bio_x_lst))  # type: ignore
+        bio_M = collate_batch(bio_M)
+        bio_M = torch.tensor(bio_M, dtype=torch.long)
 
-        return X[:, :-1], T[:, :-1], bio_M, bio_X, bio_T, X[:, 1:], T[:, 1:]
+        return X0, T0, bio_X_dict, bio_T, bio_M, X1, T1
 
 
 def load_core_data_package(data_dir: str, subject_list: str, memmap: bool = False):

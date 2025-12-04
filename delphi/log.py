@@ -5,8 +5,6 @@ from pprint import pprint
 
 import torch
 import wandb
-import yaml
-from omegaconf import OmegaConf
 
 from delphi import distributed
 
@@ -15,9 +13,16 @@ from delphi import distributed
 class TrainLogConfig:
     wandb_log: bool = True
     wandb_project: str = "delphi"
-    run_name: str = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    run_name: None | str = None
     ckpt_interval: None | int = None
     log_interval: int = 250
+
+    def __post_init__(self):
+        # using post_init pattern for the following use cases:
+        # python run.py config=config.yaml log.run_name=null
+        # config.yaml defines run_name and is overridden with datetime
+        if self.run_name == None:
+            self.run_name = datetime.now().strftime("%Y-%m-%d-%H%M%S")
 
 
 class TrainLogger:
@@ -25,6 +30,7 @@ class TrainLogger:
         self,
         cfg: TrainLogConfig,
         exp_cfg: dict,
+        data_cfg: dict,
         dump_dir: str,
         model: torch.nn.Module,
         tokenizer: dict,
@@ -34,8 +40,10 @@ class TrainLogger:
     ):
         self.cfg = cfg
         self.exp_cfg = exp_cfg
+        self.data_cfg = data_cfg
         self.wandb = self.cfg.wandb_log
         self.model = model
+        self.tokenizer = tokenizer
         self.optimizer = optimizer
         self.scheduler = scheduler
         self.best_val_loss = float("inf")
@@ -65,16 +73,6 @@ class TrainLogger:
                 wandb.summary["model_params"] = n_params
 
             os.makedirs(dump_dir, exist_ok=True)
-            with open(os.path.join(dump_dir, "config.yaml"), "w") as f:
-                OmegaConf.save(config=exp_cfg, f=f)
-
-            with open(os.path.join(dump_dir, "tokenizer.yaml"), "w") as f:
-                yaml.dump(
-                    tokenizer,
-                    f,
-                    default_flow_style=False,
-                    sort_keys=False,
-                )
 
     def save_ckpt(
         self,
@@ -92,9 +90,11 @@ class TrainLogger:
                 "optimizer": self.optimizer.state_dict(),
                 "scheduler": self.scheduler.state_dict(),
                 "model_args": self.exp_cfg["model"],
+                "data_args": self.data_cfg,
                 "iter_num": step,
                 "best_val_loss": self.best_val_loss,
                 "config": self.exp_cfg,
+                "tokenizer": self.tokenizer,
             }
             ckpt_path = os.path.join(self.dump_dir, ckpt_fname)
             print(f"saving checkpoint to {ckpt_path}")

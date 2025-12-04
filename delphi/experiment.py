@@ -133,15 +133,15 @@ class BaseTrainer:
         )
         ckpt_path = os.path.join(run_dir, "ckpt.pt")
         if os.path.exists(ckpt_path) and cfg.auto_resume:
-            ckpt_dict = torch.load(
-                ckpt_path, map_location=torch.device("cpu")
-            )
+            ckpt_dict = torch.load(ckpt_path, map_location=torch.device("cpu"))
             self.model.load_state_dict(ckpt_dict["model"])
             self.optimizer.load_state_dict(ckpt_dict["optimizer"])
             self.scheduler.load_state_dict(ckpt_dict["scheduler"])
             self.iter_num = ckpt_dict["iter_num"]
             if self.backend.is_master_process():
-                print(f"found and loaded existing checkpoint; starting from iter {self.iter_num}")
+                print(
+                    f"found and loaded existing checkpoint; starting from iter {self.iter_num}"
+                )
         else:
             self.iter_num = 0
         self.model = self.backend.transform_model(self.model)
@@ -159,12 +159,13 @@ class BaseTrainer:
             batch_size=cfg.batch_size,
             world_size=self.world_size,
             rank=self.rank,
-            step=self.iter_num
+            step=self.iter_num,
         )
 
         self.logger = TrainLogger(
             cfg=cfg.log,
             exp_cfg=asdict(cfg),
+            data_cfg=getattr(train_ds, "_init_args", dict()),
             dump_dir=run_dir,
             tokenizer=train_ds.tokenizer,
             model=self.model,  # type: ignore
