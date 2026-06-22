@@ -436,6 +436,10 @@ def main():
     # Optional filtering/chunking parameters:
     parser.add_argument("--filter_min_total", type=int, default=100, help="Minimum total count to filter tokens")
     parser.add_argument("--disease_chunk_size", type=int, default=200, help="Chunk size for processing diseases")
+    parser.add_argument("--offset_years", type=float, default=0.0,
+                        help="Years before diagnosis at which to predict (offset_days = offset_years * 365.25)")
+    parser.add_argument("--block_size", type=int, default=-1,
+                        help="get_batch context length; -1 = use the checkpoint's trained block_size")
     args = parser.parse_args()
 
     input_path = args.input_path
@@ -468,17 +472,23 @@ def main():
     if dataset_subset_size == -1:
         dataset_subset_size = len(val_p2i)
 
-    # Get a subset batch for evaluation.
+    # Get a subset batch for evaluation. block_size defaults to the checkpoint's
+    # trained value (this ckpt = 48); the original hardcoded 80. Configurable via
+    # --block_size so we can test whether the context length affects the AUC.
+    block_size = args.block_size if args.block_size > 0 else checkpoint["model_args"]["block_size"]
+    print(f"using block_size={block_size} "
+          f"(ckpt trained block_size={checkpoint['model_args']['block_size']})")
+    torch.manual_seed(seed)
+    np.random.seed(seed)
     d100k = get_batch(
         range(dataset_subset_size),
         val,
         val_p2i,
         select="left",
-        block_size=80,
+        block_size=block_size,
         device=device,
         padding="random",
         no_event_token_rate=no_event_token_rate,
-        health_token_replacement_prob=health_token_replacement_prob,
     )
 
     # Load labels (external) to be passed in.
@@ -493,6 +503,7 @@ def main():
         diseases_of_interest=None,
         filter_min_total=args.filter_min_total,
         disease_chunk_size=args.disease_chunk_size,
+        offset=args.offset_years * 365.25,
         device=device,
         seed=seed,
         n_bootstrap=args.n_bootstrap,
