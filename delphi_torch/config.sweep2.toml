@@ -1,0 +1,52 @@
+# Sweep 2: Lower LR, longer warmup, cosine with restarts feel
+[data]
+data_dir = "../data"
+dataset = "ukb_simulated_data"
+batch_size = 64           # Smaller batch for more updates
+block_size = 48
+num_workers = 2
+pin_memory = false
+shuffle = true
+data_fraction = 1.0
+padding = "regular"
+select = "left"
+lifestyle_augmentations = true
+no_event_token_rate = 5
+
+[model]
+block_size = 48
+n_layer = 12
+n_head = 12
+d_model = 120
+dropout = 0.15
+bias = false
+vocab_size = 1270
+t_min = 0.1
+mask_ties = true
+ignore_tokens = [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+[train]
+out_dir = "Delphi-Sweep2"
+seed = 42
+max_steps = 3000          # More steps with smaller batch
+eval_interval = 100
+eval_iters = 25
+log_interval = 50
+learning_rate = 0.001
+weight_decay = 0.2
+beta1 = 0.9
+beta2 = 0.99
+grad_clip = 1.0
+warmup_steps = 300        # Longer warmup
+lr_decay_steps = 4000     # Very slow decay
+min_lr = 0.0002
+device = "mps"
+dtype = "float32"
+compile = false
+wandb_log = true
+wandb_project = "delphi"
+wandb_run_name = "sweep2-slowDecay-{timestamp}"
+early_stop = true
+early_stop_patience = 12
+early_stop_min_delta = 0.001
+early_stop_min_steps = 600

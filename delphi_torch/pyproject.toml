@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "delphi-torch"
+version = "0.1.0"
+description = "Delphi PyTorch refactor"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "torch==2.3.0",
+  "numpy<2.0",
+  "pydantic>=2,<3",
+]
+
+[project.optional-dependencies]
+wandb = ["wandb>=0.16"]
+onnx = ["onnx>=1.15", "onnxruntime>=1.17"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

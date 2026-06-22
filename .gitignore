@@ -1,0 +1,13 @@
+.venv
+.history
+.DS_Store
+**/.DS_Store
+wandb
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.onnx
+*.pt
+wandb_runs*
+delphi_torch.egg-info/

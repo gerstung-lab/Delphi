@@ -1,0 +1,48 @@
+[data]
+data_dir = "../data"
+dataset = "ukb_simulated_data"
+batch_size = 128
+block_size = 48
+num_workers = 2
+pin_memory = false
+shuffle = true
+data_fraction = 1.0
+padding = "regular"
+select = "left"
+lifestyle_augmentations = true
+no_event_token_rate = 5
+
+[model]
+block_size = 48
+n_layer = 12
+n_head = 12
+d_model = 120
+dropout = 0.1
+token_dropout = 0.0
+bias = false
+vocab_size = 1270
+t_min = 0.1
+mask_ties = true
+ignore_tokens = [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+[train]
+out_dir = "Delphi-2M"
+seed = 42
+max_steps = 5000
+eval_interval = 200
+eval_iters = 25
+log_interval = 25
+learning_rate = 0.001
+weight_decay = 0.2
+beta1 = 0.9
+beta2 = 0.99
+grad_clip = 1.0
+warmup_steps = 200
+lr_decay_steps = 5000
+min_lr = 0.0001
+device = "mps"
+dtype = "float32"
+compile = false
+wandb_log = true
+wandb_project = "delphi"
+wandb_run_name = "run-{timestamp}"

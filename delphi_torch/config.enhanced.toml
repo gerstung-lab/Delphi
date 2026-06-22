@@ -1,0 +1,55 @@
+# Delphi training configuration
+# Tuned for ~7K patient simulated data with improved LR schedule
+
+[data]
+data_dir = "../data"
+dataset = "ukb_simulated_data"
+batch_size = 128
+block_size = 48
+num_workers = 2
+pin_memory = false
+shuffle = true
+data_fraction = 1.0
+padding = "random"
+select = "left"
+lifestyle_augmentations = true
+no_event_token_rate = 5
+
+[model]
+block_size = 48
+n_layer = 12
+n_head = 12
+d_model = 120
+dropout = 0.15              # Increased from 0.1 to reduce overfitting
+bias = false
+vocab_size = 1270
+t_min = 0.1
+mask_ties = true
+ignore_tokens = [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+
+[train]
+out_dir = "Delphi-Enhanced-v2"
+seed = 42
+max_steps = 2000            # More steps to allow learning
+eval_interval = 100          # Evaluate every ~1 epochs
+eval_iters = 25
+log_interval = 25
+learning_rate = 0.002        # Higher peak LR
+weight_decay = 0.2           # Increased regularization
+beta1 = 0.9
+beta2 = 0.99
+grad_clip = 1.0
+warmup_steps = 100           # Longer warmup
+lr_decay_steps = 2000        # Slower decay (extends beyond max_steps)
+min_lr = 0.0003              # Higher floor LR to maintain learning
+device = "mps"
+dtype = "float32"
+compile = false
+wandb_log = true
+wandb_project = "delphi"
+wandb_run_name = "enhanced-v2-{timestamp}"
+early_stop = true
+early_stop_patience = 8       # More patience with slower LR decay
+early_stop_min_delta = 0.001
+early_stop_min_steps = 500    # Don't early stop before step 500

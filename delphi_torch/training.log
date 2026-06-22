@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/Users/hermesh/projects/Delphi/delphi_torch/src/delphi_torch/run.py", line 20, in <module>
+    main()
+  File "/Users/hermesh/projects/Delphi/delphi_torch/src/delphi_torch/run.py", line 16, in main
+    fit(cfg)
+  File "/Users/hermesh/projects/Delphi/delphi_torch/src/delphi_torch/training/loop.py", line 111, in fit
+    wandb_run = wandb.init(
+                ^^^^^^^^^^
+AttributeError: module 'wandb' has no attribute 'init'
